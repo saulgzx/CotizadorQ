@@ -5137,12 +5137,13 @@ export default function App() {
                       </div>
                       {isAdmin && isAxis && (
                         <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-gray-500">
-                          <span>Partner: {formatCurrency(partnerRebate)}</span>
-                          <span>Rebate Total: <span className="font-semibold text-gray-800">{formatCurrency(rebateTotal)}</span></span>
-                          <span>Descuento porcentual Axis: <span className="font-semibold text-gray-800">{descuentoPorcentualAxis.toFixed(2)}%</span></span>
-                          <span>Costo Final XCL: <span className="font-semibold text-gray-800">{formatCurrency(costoTotalXCL)}</span></span>
-                        </div>
-                      )}
+                            <span>Partner: {formatCurrency(partnerRebate)}</span>
+                            <span>Rebate Total: <span className="font-semibold text-gray-800">{formatCurrency(rebateTotal)}</span></span>
+                            <span>Descuento porcentual Axis: <span className="font-semibold text-gray-800">{descuentoPorcentualAxis.toFixed(2)}%</span></span>
+                            <span>Costo XUS: <span className="font-semibold text-gray-800">{formatCurrency(costoXUS)}</span></span>
+                            <span>Costo Final XCL: <span className="font-semibold text-gray-800">{formatCurrency(costoTotalXCL)}</span></span>
+                          </div>
+                        )}
                       {showAdminPanel && isAdmin && (
                         <div className="mt-2 p-2 bg-gray-50 rounded border text-xs">
                           <div className="grid grid-cols-1 gap-2">
