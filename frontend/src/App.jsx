@@ -564,6 +564,242 @@ export default function App() {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredOsoOrders]);
 
+  const getOsoOrderTotals = (order) => {
+    const totals = { orderQty: 0, shippedQty: 0, allocQty: 0 };
+    (order?.lines || []).forEach(line => {
+      totals.orderQty += Number(line.orderQty) || 0;
+      totals.shippedQty += Number(line.shippedQty) || 0;
+      totals.allocQty += Number(line.allocQty) || 0;
+    });
+    return totals;
+  };
+
+  const getOsoMeta = (bo) => {
+    const meta = boMeta[bo] || {};
+    const draft = boDraft[bo] || {};
+    return { ...meta, ...draft };
+  };
+
+  const getOsoCustomerName = (order) =>
+    (order?.customerName || getOsoMeta(order?.bo)?.customerName || 'Sin cliente').toString().trim() || 'Sin cliente';
+
+  const getOsoAllocPct = (order, totals) => {
+    const meta = getOsoMeta(order?.bo);
+    const raw = order?.allocPct ?? meta?.allocPct;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+    if (totals?.orderQty > 0) {
+      return Math.round((totals.allocQty / totals.orderQty) * 1000) / 10;
+    }
+    return 0;
+  };
+
+  const toMonthKey = (value) => {
+    if (!value) return 'Sin fecha';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return 'Sin fecha';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const getAllocBucket = (pct) => {
+    if (!Number.isFinite(pct)) return 'Sin %';
+    if (pct < 25) return '0-24%';
+    if (pct < 50) return '25-49%';
+    if (pct < 75) return '50-74%';
+    if (pct < 100) return '75-99%';
+    return '>=100%';
+  };
+
+  const computeOsoStats = (orders) => {
+    const stats = {
+      total: orders.length,
+      activa: 0,
+      parcial: 0,
+      completa: 0,
+      totalOrderQty: 0,
+      totalAllocQty: 0,
+      totalShippedQty: 0,
+      avgAllocPct: 0,
+      etaOverdue: 0,
+      etaSoon: 0
+    };
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    let allocPctSum = 0;
+    orders.forEach(order => {
+      const status = getOrderStatus(order).toLowerCase();
+      if (status === 'parcial') stats.parcial += 1;
+      else if (status === 'completa') stats.completa += 1;
+      else stats.activa += 1;
+      const totals = getOsoOrderTotals(order);
+      stats.totalOrderQty += totals.orderQty;
+      stats.totalAllocQty += totals.allocQty;
+      stats.totalShippedQty += totals.shippedQty;
+      allocPctSum += getOsoAllocPct(order, totals);
+      if (order.etaEstimated) {
+        const eta = new Date(order.etaEstimated);
+        if (!Number.isNaN(eta.getTime())) {
+          const etaUtc = Date.UTC(eta.getFullYear(), eta.getMonth(), eta.getDate());
+          const diffDays = Math.round((etaUtc - todayUtc) / 86400000);
+          if (diffDays < 0) stats.etaOverdue += 1;
+          else if (diffDays <= 7) stats.etaSoon += 1;
+        }
+      }
+    });
+    stats.avgAllocPct = orders.length ? Math.round((allocPctSum / orders.length) * 10) / 10 : 0;
+    return stats;
+  };
+
+  const exportOsoReport = () => {
+    const orders = filteredOsoOrders;
+    if (!orders.length) {
+      alert('No hay órdenes para exportar con los filtros actuales.');
+      return;
+    }
+
+    const detailRows = orders.map(order => {
+      const totals = getOsoOrderTotals(order);
+      const meta = getOsoMeta(order.bo);
+      return {
+        BO: order.bo || '',
+        Cliente: getOsoCustomerName(order),
+        '% Alocado': getOsoAllocPct(order, totals),
+        Estado: getOrderStatus(order),
+        'ETA Estimada': order.etaEstimated || '',
+        'Planned Ship Date': order.plannedShipDate || '',
+        'Fecha Facturación': meta.estimatedInvoiceDate || '',
+        Proyecto: meta.projectName || '',
+        'PO Axis': meta.poAxis || '',
+        'Orden Cliente': order.customerPO || meta.customerPO || '',
+        'S&D': getSAndDStatus(order.bo),
+        'Cant. Orden': totals.orderQty,
+        'Cant. Alocada': totals.allocQty,
+        'Cant. Despachada': totals.shippedQty
+      };
+    });
+
+    const customerMap = new Map();
+    const etaMonthMap = new Map();
+    const invoiceMonthMap = new Map();
+    const allocBucketMap = new Map();
+
+    orders.forEach(order => {
+      const totals = getOsoOrderTotals(order);
+      const customer = getOsoCustomerName(order);
+      const allocPct = getOsoAllocPct(order, totals);
+      const etaMonth = toMonthKey(order.etaEstimated);
+      const invoiceMonth = toMonthKey(getOsoMeta(order.bo).estimatedInvoiceDate);
+      const bucket = getAllocBucket(allocPct);
+
+      const update = (map, key) => {
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            orders: 0,
+            totalOrderQty: 0,
+            totalAllocQty: 0,
+            totalShippedQty: 0,
+            allocPctSum: 0
+          });
+        }
+        const item = map.get(key);
+        item.orders += 1;
+        item.totalOrderQty += totals.orderQty;
+        item.totalAllocQty += totals.allocQty;
+        item.totalShippedQty += totals.shippedQty;
+        item.allocPctSum += allocPct;
+      };
+
+      update(customerMap, customer);
+      update(etaMonthMap, etaMonth);
+      update(invoiceMonthMap, invoiceMonth);
+      update(allocBucketMap, bucket);
+    });
+
+    const mapToRows = (map, label) =>
+      Array.from(map.values())
+        .map(item => ({
+          [label]: item.key,
+          'Órdenes': item.orders,
+          'Cant. Orden': item.totalOrderQty,
+          'Cant. Alocada': item.totalAllocQty,
+          'Cant. Despachada': item.totalShippedQty,
+          '% Alocado Prom.': item.orders ? Math.round((item.allocPctSum / item.orders) * 10) / 10 : 0
+        }))
+        .sort((a, b) => (b['Órdenes'] || 0) - (a['Órdenes'] || 0));
+
+    const stats = computeOsoStats(orders);
+    const uniqueCustomers = customerMap.size;
+    const topCustomers = mapToRows(customerMap, 'Cliente')
+      .slice(0, 5)
+      .map(item => `${item.Cliente} (${item['Órdenes']})`)
+      .join(', ');
+
+    const summaryRows = [
+      { Métrica: 'Total órdenes', Valor: stats.total },
+      { Métrica: 'Clientes únicos', Valor: uniqueCustomers },
+      { Métrica: 'Cant. Orden', Valor: stats.totalOrderQty },
+      { Métrica: 'Cant. Alocada', Valor: stats.totalAllocQty },
+      { Métrica: 'Cant. Despachada', Valor: stats.totalShippedQty },
+      { Métrica: '% Alocado Promedio', Valor: `${stats.avgAllocPct}%` },
+      { Métrica: 'Activas', Valor: stats.activa },
+      { Métrica: 'Parciales', Valor: stats.parcial },
+      { Métrica: 'Completas', Valor: stats.completa },
+      { Métrica: 'ETA vencido', Valor: stats.etaOverdue },
+      { Métrica: 'ETA <= 7 días', Valor: stats.etaSoon },
+      { Métrica: 'Top clientes (órdenes)', Valor: topCustomers || 'N/A' },
+      {
+        Métrica: 'Filtros aplicados',
+        Valor: `Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", ETA mes="${osoEtaMonth || '—'}", Fact mes="${osoInvoiceMonth || '—'}"`
+      }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Resumen');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(customerMap, 'Cliente')), 'Por Cliente');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(etaMonthMap, 'Mes ETA')), 'Por Mes ETA');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(invoiceMonthMap, 'Mes Fact')), 'Por Mes Fact');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(allocBucketMap, '% Alocado')), 'Por % Alocado');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), 'Detalle');
+
+    const filename = `reporte-ordenes-${getDateKey(new Date()) || 'export'}.xlsx`;
+    XLSX.writeFile(wb, filename);
+  };
+
+  const copyOsoExecutiveSummary = () => {
+    const orders = filteredOsoOrders;
+    if (!orders.length) {
+      alert('No hay órdenes para resumir con los filtros actuales.');
+      return;
+    }
+    const stats = computeOsoStats(orders);
+    const customerMap = new Map();
+    orders.forEach(order => {
+      const customer = getOsoCustomerName(order);
+      customerMap.set(customer, (customerMap.get(customer) || 0) + 1);
+    });
+    const topCustomers = Array.from(customerMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => `${name} (${count})`)
+      .join(', ');
+
+    const summary = [
+      'Resumen ejecutivo - Órdenes Activas',
+      `Fecha: ${new Date().toLocaleString()}`,
+      `Órdenes: ${stats.total} | Clientes: ${customerMap.size}`,
+      `Cant. Orden: ${stats.totalOrderQty} | Alocada: ${stats.totalAllocQty} | Despachada: ${stats.totalShippedQty}`,
+      `% Alocado promedio: ${stats.avgAllocPct}%`,
+      `Status: Activas ${stats.activa} | Parciales ${stats.parcial} | Completas ${stats.completa}`,
+      `ETA vencido: ${stats.etaOverdue} | ETA <= 7 días: ${stats.etaSoon}`,
+      `Top clientes: ${topCustomers || 'N/A'}`,
+      `Filtros: Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", ETA mes="${osoEtaMonth || '—'}", Fact mes="${osoInvoiceMonth || '—'}"`
+    ].join('\n');
+
+    navigator.clipboard?.writeText?.(summary);
+    alert('Resumen ejecutivo copiado.');
+  };
+
   const togglePinnedBo = (bo) => {
     if (!bo) return;
     setPinnedBos(prev => {
@@ -4310,14 +4546,26 @@ export default function App() {
                     <option value="lista">Vista lista</option>
                     <option value="empresa">Por empresa</option>
                   </select>
-                  <button
-                    onClick={loadOsoOrders}
-                    className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 w-full md:w-auto"
-                  >
-                    Refrescar
-                  </button>
+                    <button
+                      onClick={loadOsoOrders}
+                      className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 w-full md:w-auto"
+                    >
+                      Refrescar
+                    </button>
+                    <button
+                      onClick={exportOsoReport}
+                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 w-full md:w-auto"
+                    >
+                      Exportar reporte
+                    </button>
+                    <button
+                      onClick={copyOsoExecutiveSummary}
+                      className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200 w-full md:w-auto"
+                    >
+                      Copiar resumen
+                    </button>
+                  </div>
                 </div>
-              </div>
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                 <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
                   <div className="text-[11px] text-rose-700">ETA vencido</div>
