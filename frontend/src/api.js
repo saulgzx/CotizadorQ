@@ -1,5 +1,5 @@
-// URL del backend - cambia esto por tu URL de Railway
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// URL del backend - usa proxy en prod; en local configura VITE_API_URL si aplica
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Función helper para hacer peticiones autenticadas
 const fetchWithAuth = async (endpoint, options = {}) => {
