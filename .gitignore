@@ -1,0 +1,9 @@
+# dotenv files
+.env
+.env.*
+
+# node
+node_modules/
+
+# build outputs
+/dist/
