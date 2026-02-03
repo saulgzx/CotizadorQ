@@ -633,6 +633,13 @@ export default function App() {
     return edited !== undefined ? edited : (row[field] ?? '');
   };
 
+  const exportOsoReportPdf = () => {
+    const element = document.getElementById('oso-report-pdf');
+    const dateKey = getDateKey(new Date()) || 'export';
+    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : 'empresa';
+    downloadPdfFromElement(element, `reporte-oso-${modeLabel}-${dateKey}`);
+  };
+
   const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
 
   const exportOsoReport = () => {
@@ -993,25 +1000,27 @@ export default function App() {
       setSaving(true);
       const { html2canvas, jsPDF } = await loadPdfDeps();
       const elementRect = element.getBoundingClientRect();
-      const logoImg = element.querySelector('img[alt="Logo"]');
-      let logoMeta = null;
-      if (logoImg) {
-        const logoRect = logoImg.getBoundingClientRect();
-        logoMeta = {
-          src: logoImg.src,
+      const logoNodes = Array.from(new Set([
+        ...element.querySelectorAll('img[data-pdf-logo="1"]'),
+        ...element.querySelectorAll('img[alt="Logo"]')
+      ]));
+      const logoMetaList = logoNodes.map(img => {
+        const logoRect = img.getBoundingClientRect();
+        img.dataset.prevVisibility = img.style.visibility || '';
+        img.style.visibility = 'hidden';
+        return {
+          src: img.src,
           x: logoRect.left - elementRect.left,
           y: logoRect.top - elementRect.top,
           w: logoRect.width,
           h: logoRect.height
         };
-        logoImg.dataset.prevVisibility = logoImg.style.visibility || '';
-        logoImg.style.visibility = 'hidden';
-      }
+      });
       const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-      if (logoImg) {
-        logoImg.style.visibility = logoImg.dataset.prevVisibility || '';
-        delete logoImg.dataset.prevVisibility;
-      }
+      logoNodes.forEach(img => {
+        img.style.visibility = img.dataset.prevVisibility || '';
+        delete img.dataset.prevVisibility;
+      });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'pt', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -1021,19 +1030,22 @@ export default function App() {
       let heightLeft = imgHeight;
       let position = 0;
       pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      if (logoMeta?.src && elementRect.width) {
-        const logoImage = await new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = logoMeta.src;
-        });
+      if (logoMetaList.length && elementRect.width) {
         const domToPdfScale = pageWidth / elementRect.width;
-        const logoX = logoMeta.x * domToPdfScale;
-        const logoY = logoMeta.y * domToPdfScale;
-        const logoW = logoMeta.w * domToPdfScale;
-        const logoH = logoMeta.h * domToPdfScale;
-        pdf.addImage(logoImage, 'PNG', logoX, logoY, logoW, logoH);
+        for (const logoMeta of logoMetaList) {
+          if (!logoMeta?.src) continue;
+          const logoImage = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = logoMeta.src;
+          });
+          const logoX = logoMeta.x * domToPdfScale;
+          const logoY = logoMeta.y * domToPdfScale;
+          const logoW = logoMeta.w * domToPdfScale;
+          const logoH = logoMeta.h * domToPdfScale;
+          pdf.addImage(logoImage, 'PNG', logoX, logoY, logoW, logoH);
+        }
       }
       heightLeft -= pageHeight;
       while (heightLeft > 0) {
@@ -4780,8 +4792,8 @@ export default function App() {
         )}
 
         {showOsoReportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-2xl shadow-lg w-full max-w-6xl overflow-hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
+            <div className="bg-white rounded-2xl shadow-lg w-[96vw] h-[90vh] overflow-hidden flex flex-col">
               <div className="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-semibold">Informe de órdenes activas</h3>
@@ -4801,6 +4813,12 @@ export default function App() {
                     Próximas entregas
                   </button>
                   <button
+                    onClick={exportOsoReportPdf}
+                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  >
+                    Exportar PDF
+                  </button>
+                  <button
                     onClick={() => setOsoReportEdits({})}
                     className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                   >
@@ -4814,7 +4832,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div className="p-4">
+              <div className="p-4 overflow-auto flex-1">
                 {osoLineReportRows.length === 0 ? (
                   <div className="text-sm text-slate-500">No hay líneas con los filtros actuales.</div>
                 ) : (
@@ -4840,7 +4858,6 @@ export default function App() {
                                     <th className="px-2 py-2 text-left">MPN</th>
                                     <th className="px-2 py-2 text-left">SKU</th>
                                     <th className="px-2 py-2 text-left">Producto</th>
-                                    <th className="px-2 py-2 text-left">Entrega OOR</th>
                                     <th className="px-2 py-2 text-left">ETA Est.</th>
                                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
@@ -4868,20 +4885,6 @@ export default function App() {
                                       <td className="px-2 py-2">{row.mpn || 'N/A'}</td>
                                       <td className="px-2 py-2">{row.sku || 'N/A'}</td>
                                       <td className="px-2 py-2">{row.desc || 'N/A'}</td>
-                                      <td className="px-2 py-2">
-                                        <input
-                                          value={getOsoReportValue(row, 'entregaOor')}
-                                          onChange={(e) => {
-                                            const value = e.target.value;
-                                            updateOsoReportEdit(row.key, {
-                                              entregaOor: value,
-                                              etaEstimado: value ? addDaysToIso(value, 15) : ''
-                                            });
-                                          }}
-                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
-                                          placeholder="YYYY-MM-DD"
-                                        />
-                                      </td>
                                       <td className="px-2 py-2">
                                         <input
                                           value={getOsoReportValue(row, 'etaEstimado')}
@@ -4918,11 +4921,10 @@ export default function App() {
                         const rows = osoLineReportRows
                           .map(row => ({
                             ...row,
-                            entregaOor: getOsoReportValue(row, 'entregaOor'),
                             etaEstimado: getOsoReportValue(row, 'etaEstimado'),
                             cliente: getOsoReportValue(row, 'cliente')
                           }))
-                          .filter(row => row.entregaOor || row.etaEstimado)
+                          .filter(row => row.etaEstimado)
                           .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado));
                         return (
                           <div className="border border-slate-200 rounded-2xl overflow-hidden">
@@ -4938,7 +4940,6 @@ export default function App() {
                                     <th className="px-2 py-2 text-left">MPN</th>
                                     <th className="px-2 py-2 text-left">SKU</th>
                                     <th className="px-2 py-2 text-left">Producto</th>
-                                    <th className="px-2 py-2 text-left">Entrega OOR</th>
                                     <th className="px-2 py-2 text-left">ETA Est.</th>
                                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
@@ -4966,20 +4967,6 @@ export default function App() {
                                       <td className="px-2 py-2">{row.mpn || 'N/A'}</td>
                                       <td className="px-2 py-2">{row.sku || 'N/A'}</td>
                                       <td className="px-2 py-2">{row.desc || 'N/A'}</td>
-                                      <td className="px-2 py-2">
-                                        <input
-                                          value={getOsoReportValue(row, 'entregaOor')}
-                                          onChange={(e) => {
-                                            const value = e.target.value;
-                                            updateOsoReportEdit(row.key, {
-                                              entregaOor: value,
-                                              etaEstimado: value ? addDaysToIso(value, 15) : ''
-                                            });
-                                          }}
-                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
-                                          placeholder="YYYY-MM-DD"
-                                        />
-                                      </td>
                                       <td className="px-2 py-2">
                                         <input
                                           value={getOsoReportValue(row, 'etaEstimado')}
@@ -5013,6 +5000,122 @@ export default function App() {
             </div>
           </div>
         )}
+
+        <div className="fixed left-[-9999px] top-0 w-[900px]">
+          <div id="oso-report-pdf" className="bg-white p-6 text-xs text-slate-800">
+            <div className="flex items-center justify-between border-b pb-3 mb-3">
+              <div className="flex items-center gap-3">
+                <img src="/logo.png" alt="Logo" data-pdf-logo="1" className="h-10 w-auto object-contain" />
+                <img src="/2-removebg-preview.png" alt="Logo Intcomex" data-pdf-logo="1" className="h-10 w-auto object-contain" />
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold">Informe de órdenes activas</div>
+                <div className="text-[11px] text-slate-500">Generado: {new Date().toLocaleDateString()}</div>
+                <div className="text-[11px] text-slate-500">Modo: {osoReportMode === 'proximas' ? 'Próximas entregas' : 'Por empresa'}</div>
+              </div>
+            </div>
+            {osoReportMode === 'empresa' ? (
+              (() => {
+                const groups = new Map();
+                osoLineReportRows.forEach(row => {
+                  const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+                  if (!groups.has(empresa)) groups.set(empresa, []);
+                  groups.get(empresa).push(row);
+                });
+                const ordered = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                return ordered.map(([empresa, rows]) => (
+                  <div key={`pdf-${empresa}`} className="mb-4">
+                    <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
+                    <table className="w-full text-[10px] border border-slate-200">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="px-2 py-1 text-left">BO</th>
+                          <th className="px-2 py-1 text-left">Cliente</th>
+                          <th className="px-2 py-1 text-left">MPN</th>
+                          <th className="px-2 py-1 text-left">SKU</th>
+                          <th className="px-2 py-1 text-left">Producto</th>
+                          <th className="px-2 py-1 text-left">ETA Est.</th>
+                          <th className="px-2 py-1 text-right">Cant. Orden</th>
+                          <th className="px-2 py-1 text-right">Cant. Alocada</th>
+                          <th className="px-2 py-1 text-right">Cant. Despachada</th>
+                          <th className="px-2 py-1 text-left">Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rows.map(row => (
+                          <tr key={`pdf-${row.key}`}>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
+                            <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
+                            <td className="px-2 py-1">{row.sku || 'N/A'}</td>
+                            <td className="px-2 py-1">{row.desc || 'N/A'}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
+                            <td className="px-2 py-1 text-right">{row.orderQty}</td>
+                            <td className="px-2 py-1 text-right">{row.allocQty}</td>
+                            <td className="px-2 py-1 text-right">{row.shippedQty}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'notas')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ));
+              })()
+            ) : (
+              (() => {
+                const toTs = (value) => {
+                  if (!value) return Number.POSITIVE_INFINITY;
+                  const d = new Date(value);
+                  return Number.isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime();
+                };
+                const rows = osoLineReportRows
+                  .map(row => ({
+                    ...row,
+                    etaEstimado: getOsoReportValue(row, 'etaEstimado'),
+                    cliente: getOsoReportValue(row, 'cliente'),
+                    bo: getOsoReportValue(row, 'bo'),
+                    notas: getOsoReportValue(row, 'notas')
+                  }))
+                  .filter(row => row.etaEstimado)
+                  .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado));
+                return (
+                  <table className="w-full text-[10px] border border-slate-200">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-2 py-1 text-left">BO</th>
+                        <th className="px-2 py-1 text-left">Cliente</th>
+                        <th className="px-2 py-1 text-left">MPN</th>
+                        <th className="px-2 py-1 text-left">SKU</th>
+                        <th className="px-2 py-1 text-left">Producto</th>
+                        <th className="px-2 py-1 text-left">ETA Est.</th>
+                        <th className="px-2 py-1 text-right">Cant. Orden</th>
+                        <th className="px-2 py-1 text-right">Cant. Alocada</th>
+                        <th className="px-2 py-1 text-right">Cant. Despachada</th>
+                        <th className="px-2 py-1 text-left">Notas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {rows.map(row => (
+                        <tr key={`pdf-${row.key}`}>
+                          <td className="px-2 py-1">{row.bo}</td>
+                          <td className="px-2 py-1">{row.cliente}</td>
+                          <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
+                          <td className="px-2 py-1">{row.sku || 'N/A'}</td>
+                          <td className="px-2 py-1">{row.desc || 'N/A'}</td>
+                          <td className="px-2 py-1">{row.etaEstimado}</td>
+                          <td className="px-2 py-1 text-right">{row.orderQty}</td>
+                          <td className="px-2 py-1 text-right">{row.allocQty}</td>
+                          <td className="px-2 py-1 text-right">{row.shippedQty}</td>
+                          <td className="px-2 py-1">{row.notas}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()
+            )}
+          </div>
+        </div>
 
         {currentView === 'cotizador' && (
           <>
