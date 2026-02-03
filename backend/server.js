@@ -1321,7 +1321,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
             }
             const entry = oorByPo.get(po);
             const skuKey = normalizeLookupKey(idxSalesPart >= 0 ? row[idxSalesPart] : '');
-            const mpnKey = normalizeLookupKey(idxCustomerPart >= 0 ? row[idxCustomerPart] : '');
+            const mpnKey = normalizeLookupKey(idxSalesPart >= 0 ? row[idxSalesPart] : '');
             const descKey = normalizeLookupKey(idxSalesDesc >= 0 ? row[idxSalesDesc] : '');
             mergePlannedDate(entry.sku, skuKey, plannedShipDate);
             mergePlannedDate(entry.mpn, mpnKey, plannedShipDate);
@@ -1341,8 +1341,8 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
             const mpnKey = normalizeLookupKey(line.mpn);
             const descKey = normalizeLookupKey(line.desc);
             line.tiempoEntrega =
-              (skuKey && entry.sku.get(skuKey)) ||
               (mpnKey && entry.mpn.get(mpnKey)) ||
+              (skuKey && entry.sku.get(skuKey)) ||
               (descKey && entry.desc.get(descKey)) ||
               '';
           });
