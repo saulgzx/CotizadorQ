@@ -255,7 +255,7 @@ export default function App() {
   const [osoOrders, setOsoOrders] = useState([]);
   const [osoLoading, setOsoLoading] = useState(false);
   const [osoError, setOsoError] = useState('');
-  const [expandedBo, setExpandedBo] = useState(() => localStorage.getItem('expandedBo') || null);
+  const [expandedBo, setExpandedBo] = useState(null);
   const [osoFilter, setOsoFilter] = useState(() => localStorage.getItem('osoFilter') || '');
   const [osoStatusFilter, setOsoStatusFilter] = useState(() => localStorage.getItem('osoStatusFilter') || 'all');
   const [missingBos, setMissingBos] = useState([]);
@@ -266,12 +266,14 @@ export default function App() {
   const [osoSort, setOsoSort] = useState(() => localStorage.getItem('osoSort') || 'eta');
   const [osoQuickFilter, setOsoQuickFilter] = useState(() => localStorage.getItem('osoQuickFilter') || 'all');
   const [osoInvoiceMonth, setOsoInvoiceMonth] = useState(() => localStorage.getItem('osoInvoiceMonth') || '');
-  const [osoViewMode, setOsoViewMode] = useState(() => localStorage.getItem('osoViewMode') || 'lista');
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
   const [showOsoFilters, setShowOsoFilters] = useState(false);
   const [osoReportSelect, setOsoReportSelect] = useState('');
+  const [osoActionSelect, setOsoActionSelect] = useState('');
+  const [osoCompanyFilter, setOsoCompanyFilter] = useState('');
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [pinnedBos, setPinnedBos] = useState(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('pinnedBos') || '[]');
@@ -336,14 +338,6 @@ export default function App() {
   }, [osoStatusFilter]);
 
   useEffect(() => {
-    if (expandedBo) {
-      localStorage.setItem('expandedBo', expandedBo);
-    } else {
-      localStorage.removeItem('expandedBo');
-    }
-  }, [expandedBo]);
-
-  useEffect(() => {
     localStorage.setItem('invoicedSort', invoicedSort || 'date');
   }, [invoicedSort]);
 
@@ -366,10 +360,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('osoInvoiceMonth', osoInvoiceMonth || '');
   }, [osoInvoiceMonth]);
-
-  useEffect(() => {
-    localStorage.setItem('osoViewMode', osoViewMode || 'lista');
-  }, [osoViewMode]);
 
   useEffect(() => {
     const safeList = Array.isArray(pinnedBos) ? pinnedBos : [];
@@ -442,13 +432,27 @@ export default function App() {
 
   const safePinnedBos = useMemo(() => (Array.isArray(pinnedBos) ? pinnedBos : []), [pinnedBos]);
 
+  const getOsoMeta = (bo) => {
+    const meta = boMeta[bo] || {};
+    const draft = boDraft[bo] || {};
+    return { ...meta, ...draft };
+  };
+
+  const getOsoCustomerName = (order) =>
+    (order?.customerName || getOsoMeta(order?.bo)?.customerName || 'Sin cliente').toString().trim() || 'Sin cliente';
+
   const filteredOsoOrders = useMemo(() => {
     const query = (osoFilter || '').trim().toLowerCase();
+    const companyFilter = (osoCompanyFilter || '').trim().toLowerCase();
     const list = osoOrders.filter(order => {
       const bo = (order.bo || '').toString().toLowerCase();
       const customer = (order.customerName || '').toString().toLowerCase();
       const matchesText = !query || bo.includes(query) || customer.includes(query);
       if (!matchesText) return false;
+      if (companyFilter) {
+        const name = getOsoCustomerName(order).toLowerCase();
+        if (name !== companyFilter) return false;
+      }
       if (!osoStatusFilter || osoStatusFilter === 'all') return true;
       const status = getOrderStatus(order);
       return status.toLowerCase() === osoStatusFilter;
@@ -487,17 +491,18 @@ export default function App() {
       return [...filteredByQuick].sort((a, b) => toTs(a.etaEstimated) - toTs(b.etaEstimated));
     }
     return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
-  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta]);
+  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta, osoCompanyFilter]);
 
-  const ordersByCompany = useMemo(() => {
+  const osoCompanies = useMemo(() => {
     const map = new Map();
-    filteredOsoOrders.forEach(order => {
-      const key = (order.customerName || 'Sin empresa').trim() || 'Sin empresa';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(order);
+    osoOrders.forEach(order => {
+      const name = getOsoCustomerName(order);
+      map.set(name, (map.get(name) || 0) + 1);
     });
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [filteredOsoOrders]);
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [osoOrders, boMeta, boDraft]);
 
   const getOsoOrderTotals = (order) => {
     const totals = { orderQty: 0, shippedQty: 0, allocQty: 0 };
@@ -508,15 +513,6 @@ export default function App() {
     });
     return totals;
   };
-
-  const getOsoMeta = (bo) => {
-    const meta = boMeta[bo] || {};
-    const draft = boDraft[bo] || {};
-    return { ...meta, ...draft };
-  };
-
-  const getOsoCustomerName = (order) =>
-    (order?.customerName || getOsoMeta(order?.bo)?.customerName || 'Sin cliente').toString().trim() || 'Sin cliente';
 
   const getOsoAllocPct = (order, totals) => {
     const meta = getOsoMeta(order?.bo);
@@ -4524,60 +4520,81 @@ export default function App() {
                     onChange={(e) => setOsoSort(e.target.value)}
                     className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   >
-                    <option value="eta">Ordenar por ETA</option>
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
                     <option value="porcentaje">Ordenar por %</option>
                   </select>
+                  <div className="relative w-full md:w-52">
+                    <button
+                      onClick={() => setShowCompanyDropdown(prev => !prev)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    >
+                      {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
+                    </button>
+                    {showCompanyDropdown && (
+                      <div className="absolute z-20 mt-2 w-full max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        <button
+                          onClick={() => {
+                            setOsoCompanyFilter('');
+                            setShowCompanyDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          Todas las empresas
+                        </button>
+                        {osoCompanies.map(item => (
+                          <button
+                            key={item.name}
+                            onClick={() => {
+                              setOsoCompanyFilter(item.name);
+                              setShowCompanyDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            {item.name} <span className="text-slate-400">({item.count})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <select
-                    value={osoViewMode}
-                    onChange={(e) => setOsoViewMode(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-40 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    value={osoActionSelect}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      if (value === 'refresh') loadOsoOrders();
+                      if (value === 'export') exportOsoReport();
+                      if (value === 'copy') copyOsoExecutiveSummary();
+                      setOsoActionSelect('');
+                    }}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   >
-                    <option value="lista">Vista lista</option>
-                    <option value="empresa">Por empresa</option>
+                    <option value="">Acciones...</option>
+                    <option value="refresh">Refrescar</option>
+                    <option value="export">Exportar reporte</option>
+                    <option value="copy">Copiar resumen</option>
                   </select>
-                    <button
-                      onClick={loadOsoOrders}
-                      className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 w-full md:w-auto"
-                    >
-                      Refrescar
-                    </button>
-                    <button
-                      onClick={exportOsoReport}
-                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 w-full md:w-auto"
-                    >
-                      Exportar reporte
-                    </button>
-                    <button
-                      onClick={copyOsoExecutiveSummary}
-                      className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm hover:bg-slate-200 w-full md:w-auto"
-                    >
-                      Copiar resumen
-                    </button>
-                    <select
-                      value={osoReportSelect}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (!value) return;
-                        setOsoReportMode(value);
-                        setShowOsoReportModal(true);
-                        setOsoReportSelect('');
-                      }}
-                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    >
-                      <option value="">Informes...</option>
-                      <option value="empresa">Informe por empresa</option>
-                      <option value="proximas">Próximas entregas</option>
-                    </select>
+                  <select
+                    value={osoReportSelect}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      setOsoReportMode(value);
+                      setShowOsoReportModal(true);
+                      setOsoReportSelect('');
+                    }}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="">Informes...</option>
+                    <option value="empresa">Informe por empresa</option>
+                    <option value="proximas">Próximas entregas</option>
+                  </select>
                   </div>
                 </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">Total: {osoStats.total}</span>
-                <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">Activas: {osoStats.activa}</span>
-                <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">Parciales: {osoStats.parcial}</span>
-                <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Completas: {osoStats.completa}</span>
-                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600">Facturadas: {invoicedBos.length}</span>
+                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                  Total: {osoStats.total} · Activas: {osoStats.activa} · Parciales: {osoStats.parcial} · Completas: {osoStats.completa} · Facturadas: {invoicedBos.length}
+                </span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 <button
@@ -4632,22 +4649,9 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  {osoViewMode === 'empresa' ? (
-                    ordersByCompany.map(([company, orders]) => (
-                      <div key={company} className="border border-slate-200 rounded-2xl bg-white/70 p-3">
-                        <div className="text-sm font-semibold text-slate-800 mb-2">{company}</div>
-                        <div className="space-y-3">
-                          {orders
-                            .filter(order => !safePinnedBos.includes(order.bo))
-                            .map(order => renderOrderCard(order))}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    filteredOsoOrders
-                      .filter(order => !safePinnedBos.includes(order.bo))
-                      .map(order => renderOrderCard(order))
-                  )}
+                  {filteredOsoOrders
+                    .filter(order => !safePinnedBos.includes(order.bo))
+                    .map(order => renderOrderCard(order))}
                 </div>
               )}
             </div>
