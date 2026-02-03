@@ -268,6 +268,9 @@ export default function App() {
   const [osoEtaMonth, setOsoEtaMonth] = useState(() => localStorage.getItem('osoEtaMonth') || '');
   const [osoInvoiceMonth, setOsoInvoiceMonth] = useState(() => localStorage.getItem('osoInvoiceMonth') || '');
   const [osoViewMode, setOsoViewMode] = useState(() => localStorage.getItem('osoViewMode') || 'lista');
+  const [showOsoReportModal, setShowOsoReportModal] = useState(false);
+  const [osoReportMode, setOsoReportMode] = useState('empresa');
+  const [osoReportEdits, setOsoReportEdits] = useState({});
   const [pinnedBos, setPinnedBos] = useState(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('pinnedBos') || '[]');
@@ -554,6 +557,8 @@ export default function App() {
     return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
   }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoEtaMonth, osoInvoiceMonth, boMeta]);
 
+  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
+
   const ordersByCompany = useMemo(() => {
     const map = new Map();
     filteredOsoOrders.forEach(order => {
@@ -599,6 +604,14 @@ export default function App() {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return 'Sin fecha';
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const addDaysToIso = (isoDate, days) => {
+    if (!isoDate) return '';
+    const d = new Date(isoDate);
+    if (Number.isNaN(d.getTime())) return '';
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
   };
 
   const getAllocBucket = (pct) => {
@@ -648,6 +661,50 @@ export default function App() {
     });
     stats.avgAllocPct = orders.length ? Math.round((allocPctSum / orders.length) * 10) / 10 : 0;
     return stats;
+  };
+
+  const buildOsoLineReportRows = (orders) => {
+    const rows = [];
+    orders.forEach(order => {
+      const bo = order?.bo || '';
+      const cliente = getOsoCustomerName(order);
+      (order.lines || []).forEach((line, idx) => {
+        const entregaOor = line.tiempoEntrega || '';
+        rows.push({
+          key: `${bo}-${idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
+          bo,
+          cliente,
+          empresa: cliente,
+          sku: line.sku || '',
+          mpn: line.mpn || '',
+          desc: line.desc || '',
+          entregaOor,
+          etaEstimado: entregaOor ? addDaysToIso(entregaOor, 15) : '',
+          allocQty: line.allocQty ?? 0,
+          orderQty: line.orderQty ?? 0,
+          shippedQty: line.shippedQty ?? 0,
+          notas: ''
+        });
+      });
+    });
+    return rows;
+  };
+
+  const updateOsoReportEdit = (key, patch) => {
+    if (!key) return;
+    setOsoReportEdits(prev => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        ...patch
+      }
+    }));
+  };
+
+  const getOsoReportValue = (row, field) => {
+    if (!row) return '';
+    const edited = osoReportEdits[row.key]?.[field];
+    return edited !== undefined ? edited : (row[field] ?? '');
   };
 
   const exportOsoReport = () => {
@@ -4566,6 +4623,18 @@ export default function App() {
                     >
                       Copiar resumen
                     </button>
+                    <button
+                      onClick={() => { setOsoReportMode('empresa'); setShowOsoReportModal(true); }}
+                      className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 w-full md:w-auto"
+                    >
+                      Informe por empresa
+                    </button>
+                    <button
+                      onClick={() => { setOsoReportMode('proximas'); setShowOsoReportModal(true); }}
+                      className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 w-full md:w-auto"
+                    >
+                      Próximas entregas
+                    </button>
                   </div>
                 </div>
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
@@ -4785,6 +4854,241 @@ export default function App() {
                     Cerrar
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showOsoReportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-2xl shadow-lg w-full max-w-6xl overflow-hidden">
+              <div className="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">Informe de órdenes activas</h3>
+                  <p className="text-xs text-slate-500">ETA estimado por línea = Entrega OOR + 15 días.</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    onClick={() => setOsoReportMode('empresa')}
+                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'empresa' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  >
+                    Por empresa
+                  </button>
+                  <button
+                    onClick={() => setOsoReportMode('proximas')}
+                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'proximas' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  >
+                    Próximas entregas
+                  </button>
+                  <button
+                    onClick={() => setOsoReportEdits({})}
+                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  >
+                    Limpiar cambios
+                  </button>
+                  <button
+                    onClick={() => setShowOsoReportModal(false)}
+                    className="text-slate-500 hover:text-slate-700"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+              <div className="p-4">
+                {osoLineReportRows.length === 0 ? (
+                  <div className="text-sm text-slate-500">No hay líneas con los filtros actuales.</div>
+                ) : (
+                  <div className="space-y-6">
+                    {osoReportMode === 'empresa' ? (
+                      (() => {
+                        const groups = new Map();
+                        osoLineReportRows.forEach(row => {
+                          const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+                          if (!groups.has(empresa)) groups.set(empresa, []);
+                          groups.get(empresa).push(row);
+                        });
+                        const ordered = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                        return ordered.map(([empresa, rows]) => (
+                          <div key={empresa} className="border border-slate-200 rounded-2xl overflow-hidden">
+                            <div className="px-3 py-2 bg-slate-50 text-sm font-semibold text-slate-700">{empresa}</div>
+                            <div className="overflow-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-slate-50 text-slate-600">
+                                  <tr>
+                                    <th className="px-2 py-2 text-left">BO</th>
+                                    <th className="px-2 py-2 text-left">Cliente</th>
+                                    <th className="px-2 py-2 text-left">MPN</th>
+                                    <th className="px-2 py-2 text-left">SKU</th>
+                                    <th className="px-2 py-2 text-left">Producto</th>
+                                    <th className="px-2 py-2 text-left">Entrega OOR</th>
+                                    <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-right">Cant. Orden</th>
+                                    <th className="px-2 py-2 text-right">Cant. Alocada</th>
+                                    <th className="px-2 py-2 text-right">Cant. Despachada</th>
+                                    <th className="px-2 py-2 text-left">Notas</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {rows.map(row => (
+                                    <tr key={row.key}>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'bo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { bo: e.target.value })}
+                                          className="w-24 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'cliente')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { cliente: e.target.value })}
+                                          className="w-48 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">{row.mpn || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.sku || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.desc || 'N/A'}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'entregaOor')}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            updateOsoReportEdit(row.key, {
+                                              entregaOor: value,
+                                              etaEstimado: value ? addDaysToIso(value, 15) : ''
+                                            });
+                                          }}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                          placeholder="YYYY-MM-DD"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'etaEstimado')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { etaEstimado: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                          placeholder="YYYY-MM-DD"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2 text-right">{row.orderQty}</td>
+                                      <td className="px-2 py-2 text-right">{row.allocQty}</td>
+                                      <td className="px-2 py-2 text-right">{row.shippedQty}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'notas')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { notas: e.target.value })}
+                                          className="w-40 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ));
+                      })()
+                    ) : (
+                      (() => {
+                        const toTs = (value) => {
+                          if (!value) return Number.POSITIVE_INFINITY;
+                          const d = new Date(value);
+                          return Number.isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime();
+                        };
+                        const rows = osoLineReportRows
+                          .map(row => ({
+                            ...row,
+                            entregaOor: getOsoReportValue(row, 'entregaOor'),
+                            etaEstimado: getOsoReportValue(row, 'etaEstimado'),
+                            cliente: getOsoReportValue(row, 'cliente')
+                          }))
+                          .filter(row => row.entregaOor || row.etaEstimado)
+                          .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado));
+                        return (
+                          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                            <div className="px-3 py-2 bg-slate-50 text-sm font-semibold text-slate-700">
+                              Próximas entregas ({rows.length})
+                            </div>
+                            <div className="overflow-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-slate-50 text-slate-600">
+                                  <tr>
+                                    <th className="px-2 py-2 text-left">BO</th>
+                                    <th className="px-2 py-2 text-left">Cliente</th>
+                                    <th className="px-2 py-2 text-left">MPN</th>
+                                    <th className="px-2 py-2 text-left">SKU</th>
+                                    <th className="px-2 py-2 text-left">Producto</th>
+                                    <th className="px-2 py-2 text-left">Entrega OOR</th>
+                                    <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-right">Cant. Orden</th>
+                                    <th className="px-2 py-2 text-right">Cant. Alocada</th>
+                                    <th className="px-2 py-2 text-right">Cant. Despachada</th>
+                                    <th className="px-2 py-2 text-left">Notas</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {rows.map(row => (
+                                    <tr key={row.key}>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'bo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { bo: e.target.value })}
+                                          className="w-24 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'cliente')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { cliente: e.target.value })}
+                                          className="w-48 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">{row.mpn || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.sku || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.desc || 'N/A'}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'entregaOor')}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            updateOsoReportEdit(row.key, {
+                                              entregaOor: value,
+                                              etaEstimado: value ? addDaysToIso(value, 15) : ''
+                                            });
+                                          }}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                          placeholder="YYYY-MM-DD"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'etaEstimado')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { etaEstimado: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                          placeholder="YYYY-MM-DD"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2 text-right">{row.orderQty}</td>
+                                      <td className="px-2 py-2 text-right">{row.allocQty}</td>
+                                      <td className="px-2 py-2 text-right">{row.shippedQty}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'notas')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { notas: e.target.value })}
+                                          className="w-40 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
