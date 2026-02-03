@@ -594,11 +594,13 @@ export default function App() {
     orders.forEach(order => {
       const bo = order?.bo || '';
       const cliente = getOsoCustomerName(order);
+      const customerPo = order?.customerPO || getOsoMeta(order?.bo)?.customerPO || '';
       (order.lines || []).forEach((line, idx) => {
         const entregaOor = line.tiempoEntrega || '';
         rows.push({
           key: `${bo}-${idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
           bo,
+          customerPo,
           cliente,
           empresa: cliente,
           sku: line.sku || '',
@@ -655,6 +657,7 @@ export default function App() {
         items.map(item => ({
           Empresa: empresa,
           BO: getOsoReportValue(item, 'bo'),
+          'PO Cliente': getOsoReportValue(item, 'customerPo'),
           Cliente: getOsoReportValue(item, 'cliente'),
           MPN: item.mpn || 'N/A',
           SKU: item.sku || 'N/A',
@@ -678,12 +681,14 @@ export default function App() {
           etaEstimado: getOsoReportValue(row, 'etaEstimado'),
           cliente: getOsoReportValue(row, 'cliente'),
           bo: getOsoReportValue(row, 'bo'),
+          customerPo: getOsoReportValue(row, 'customerPo'),
           notas: getOsoReportValue(row, 'notas')
         }))
         .filter(row => row.etaEstimado)
         .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado))
         .map(item => ({
           BO: item.bo,
+          'PO Cliente': item.customerPo,
           Cliente: item.cliente,
           MPN: item.mpn || 'N/A',
           SKU: item.sku || 'N/A',
@@ -4924,6 +4929,7 @@ export default function App() {
                                 <thead className="bg-slate-50 text-slate-600">
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
+                                    <th className="px-2 py-2 text-left">PO Cliente</th>
                                     <th className="px-2 py-2 text-left">Cliente</th>
                                     <th className="px-2 py-2 text-left">MPN</th>
                                     <th className="px-2 py-2 text-left">SKU</th>
@@ -4943,6 +4949,13 @@ export default function App() {
                                           value={getOsoReportValue(row, 'bo')}
                                           onChange={(e) => updateOsoReportEdit(row.key, { bo: e.target.value })}
                                           className="w-24 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'customerPo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { customerPo: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
                                         />
                                       </td>
                                       <td className="px-2 py-2">
@@ -5006,6 +5019,7 @@ export default function App() {
                                 <thead className="bg-slate-50 text-slate-600">
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
+                                    <th className="px-2 py-2 text-left">PO Cliente</th>
                                     <th className="px-2 py-2 text-left">Cliente</th>
                                     <th className="px-2 py-2 text-left">MPN</th>
                                     <th className="px-2 py-2 text-left">SKU</th>
@@ -5025,6 +5039,13 @@ export default function App() {
                                           value={getOsoReportValue(row, 'bo')}
                                           onChange={(e) => updateOsoReportEdit(row.key, { bo: e.target.value })}
                                           className="w-24 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'customerPo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { customerPo: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
                                         />
                                       </td>
                                       <td className="px-2 py-2">
@@ -5100,6 +5121,7 @@ export default function App() {
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
+                          <th className="px-2 py-1 text-left">PO Cliente</th>
                           <th className="px-2 py-1 text-left">Cliente</th>
                           <th className="px-2 py-1 text-left">MPN</th>
                           <th className="px-2 py-1 text-left">SKU</th>
@@ -5115,6 +5137,7 @@ export default function App() {
                         {rows.map(row => (
                           <tr key={`pdf-${row.key}`}>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'customerPo')}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
                             <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
                             <td className="px-2 py-1">{row.sku || 'N/A'}</td>
@@ -5144,6 +5167,7 @@ export default function App() {
                     etaEstimado: getOsoReportValue(row, 'etaEstimado'),
                     cliente: getOsoReportValue(row, 'cliente'),
                     bo: getOsoReportValue(row, 'bo'),
+                    customerPo: getOsoReportValue(row, 'customerPo'),
                     notas: getOsoReportValue(row, 'notas')
                   }))
                   .filter(row => row.etaEstimado)
@@ -5153,6 +5177,7 @@ export default function App() {
                     <thead className="bg-slate-50 text-slate-600">
                       <tr>
                         <th className="px-2 py-1 text-left">BO</th>
+                        <th className="px-2 py-1 text-left">PO Cliente</th>
                         <th className="px-2 py-1 text-left">Cliente</th>
                         <th className="px-2 py-1 text-left">MPN</th>
                         <th className="px-2 py-1 text-left">SKU</th>
@@ -5168,6 +5193,7 @@ export default function App() {
                       {rows.map(row => (
                         <tr key={`pdf-${row.key}`}>
                           <td className="px-2 py-1">{row.bo}</td>
+                          <td className="px-2 py-1">{row.customerPo}</td>
                           <td className="px-2 py-1">{row.cliente}</td>
                           <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
                           <td className="px-2 py-1">{row.sku || 'N/A'}</td>
