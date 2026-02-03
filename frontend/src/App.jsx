@@ -640,6 +640,70 @@ export default function App() {
     downloadPdfFromElement(element, `reporte-oso-${modeLabel}-${dateKey}`);
   };
 
+  const exportOsoReportExcel = () => {
+    const dateKey = getDateKey(new Date()) || 'export';
+    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : 'empresa';
+    let rows = [];
+    if (osoReportMode === 'empresa') {
+      const grouped = new Map();
+      osoLineReportRows.forEach(row => {
+        const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+        if (!grouped.has(empresa)) grouped.set(empresa, []);
+        grouped.get(empresa).push(row);
+      });
+      rows = Array.from(grouped.entries()).flatMap(([empresa, items]) =>
+        items.map(item => ({
+          Empresa: empresa,
+          BO: getOsoReportValue(item, 'bo'),
+          Cliente: getOsoReportValue(item, 'cliente'),
+          MPN: item.mpn || 'N/A',
+          SKU: item.sku || 'N/A',
+          Producto: item.desc || 'N/A',
+          'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
+          'Cant. Orden': item.orderQty,
+          'Cant. Alocada': item.allocQty,
+          'Cant. Despachada': item.shippedQty,
+          Notas: getOsoReportValue(item, 'notas')
+        }))
+      );
+    } else {
+      const toTs = (value) => {
+        if (!value) return Number.POSITIVE_INFINITY;
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime();
+      };
+      rows = osoLineReportRows
+        .map(row => ({
+          ...row,
+          etaEstimado: getOsoReportValue(row, 'etaEstimado'),
+          cliente: getOsoReportValue(row, 'cliente'),
+          bo: getOsoReportValue(row, 'bo'),
+          notas: getOsoReportValue(row, 'notas')
+        }))
+        .filter(row => row.etaEstimado)
+        .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado))
+        .map(item => ({
+          BO: item.bo,
+          Cliente: item.cliente,
+          MPN: item.mpn || 'N/A',
+          SKU: item.sku || 'N/A',
+          Producto: item.desc || 'N/A',
+          'ETA Est.': item.etaEstimado,
+          'Cant. Orden': item.orderQty,
+          'Cant. Alocada': item.allocQty,
+          'Cant. Despachada': item.shippedQty,
+          Notas: item.notas
+        }));
+    }
+    if (!rows.length) {
+      alert('No hay datos para exportar.');
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Detalle');
+    XLSX.writeFile(wb, `reporte-oso-${modeLabel}-${dateKey}.xlsx`);
+  };
+
   const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
 
   const exportOsoReport = () => {
@@ -4817,6 +4881,12 @@ export default function App() {
                     className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                   >
                     Exportar PDF
+                  </button>
+                  <button
+                    onClick={exportOsoReportExcel}
+                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  >
+                    Exportar Excel
                   </button>
                   <button
                     onClick={() => setOsoReportEdits({})}
