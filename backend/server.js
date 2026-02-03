@@ -109,6 +109,22 @@ const formatSheetDate = (value) => {
   return parsed.toISOString().slice(0, 10);
 };
 
+const normalizeLookupKey = (value) => String(value || '').trim().toLowerCase();
+
+const mergePlannedDate = (map, key, dateValue) => {
+  if (!key || !dateValue) return;
+  const existing = map.get(key);
+  if (!existing) {
+    map.set(key, dateValue);
+    return;
+  }
+  const existingDate = new Date(existing);
+  const nextDate = new Date(dateValue);
+  if (!Number.isNaN(existingDate.getTime()) && !Number.isNaN(nextDate.getTime())) {
+    if (nextDate < existingDate) map.set(key, dateValue);
+  }
+};
+
 const addDaysToIso = (isoDate, days) => {
   if (!isoDate) return '';
   const date = new Date(isoDate);
@@ -1279,10 +1295,15 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
       const oorRows = oorData.rows || [];
       const idxCustomerPo = findHeaderIndex(oorHeaders, ['Customer PO No']);
       const idxPlannedShip = findHeaderIndex(oorHeaders, ['Planned Ship Date']);
+      const idxSalesPart = findHeaderIndex(oorHeaders, ['Sales Part', 'SKU', 'Sales Part No', 'Part No']);
+      const idxSalesDesc = findHeaderIndex(oorHeaders, ['Sales Part Description', 'Description', 'Product Description']);
+      const idxCustomerPart = findHeaderIndex(oorHeaders, ["Customer's Part No", 'Customer Part No', 'Customer Part']);
+      const idxPromiseDate = findHeaderIndex(oorHeaders, ['Promise Date', 'Promised Ship Date', 'Planned Date', 'Ship Date', 'Requested Ship Date']);
       const fallbackPlannedShipIdx = 22; // Columna W (0-based)
       const plannedByPo = new Map();
+      const oorByPo = new Map();
       if (idxCustomerPo >= 0) {
-        const plannedIdx = idxPlannedShip >= 0 ? idxPlannedShip : fallbackPlannedShipIdx;
+        const plannedIdx = idxPlannedShip >= 0 ? idxPlannedShip : (idxPromiseDate >= 0 ? idxPromiseDate : fallbackPlannedShipIdx);
         for (let i = 1; i < oorRows.length; i += 1) {
           const row = oorRows[i] || [];
           const po = String(row[idxCustomerPo] || '').trim();
@@ -1291,6 +1312,20 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
             if (!plannedByPo.has(po)) {
               plannedByPo.set(po, plannedShipDate);
             }
+            if (!oorByPo.has(po)) {
+              oorByPo.set(po, {
+                sku: new Map(),
+                mpn: new Map(),
+                desc: new Map()
+              });
+            }
+            const entry = oorByPo.get(po);
+            const skuKey = normalizeLookupKey(idxSalesPart >= 0 ? row[idxSalesPart] : '');
+            const mpnKey = normalizeLookupKey(idxCustomerPart >= 0 ? row[idxCustomerPart] : '');
+            const descKey = normalizeLookupKey(idxSalesDesc >= 0 ? row[idxSalesDesc] : '');
+            mergePlannedDate(entry.sku, skuKey, plannedShipDate);
+            mergePlannedDate(entry.mpn, mpnKey, plannedShipDate);
+            mergePlannedDate(entry.desc, descKey, plannedShipDate);
           }
         }
       }
@@ -1299,6 +1334,19 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
         const poAxis = (poByBo[order.bo] || '').trim();
         order.plannedShipDate = poAxis && plannedByPo.has(poAxis) ? plannedByPo.get(poAxis) : '';
         order.etaEstimated = order.plannedShipDate ? addDaysToIso(order.plannedShipDate, 14) : '';
+        if (poAxis && oorByPo.has(poAxis)) {
+          const entry = oorByPo.get(poAxis);
+          (order.lines || []).forEach(line => {
+            const skuKey = normalizeLookupKey(line.sku);
+            const mpnKey = normalizeLookupKey(line.mpn);
+            const descKey = normalizeLookupKey(line.desc);
+            line.tiempoEntrega =
+              (skuKey && entry.sku.get(skuKey)) ||
+              (mpnKey && entry.mpn.get(mpnKey)) ||
+              (descKey && entry.desc.get(descKey)) ||
+              '';
+          });
+        }
       });
     }
     if (orders.length > 0) {

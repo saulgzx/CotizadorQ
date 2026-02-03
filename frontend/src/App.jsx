@@ -2891,6 +2891,7 @@ export default function App() {
                     <th className="px-2 py-2 text-left">MPN</th>
                     <th className="px-2 py-2 text-left">SKU</th>
                     <th className="px-2 py-2 text-left">Producto</th>
+                    <th className="px-2 py-2 text-left">Entrega (OOR)</th>
                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                     <th className="px-2 py-2 text-right">Cant. Despachada</th>
@@ -2902,6 +2903,7 @@ export default function App() {
                       <td className="px-2 py-2">{line.mpn || 'N/A'}</td>
                       <td className="px-2 py-2">{line.sku || 'N/A'}</td>
                       <td className="px-2 py-2">{line.desc || 'N/A'}</td>
+                      <td className="px-2 py-2">{line.tiempoEntrega || 'N/A'}</td>
                       <td className="px-2 py-2 text-right">{line.allocQty ?? 0}</td>
                       <td className="px-2 py-2 text-right">{line.orderQty ?? 0}</td>
                       <td className="px-2 py-2 text-right">{line.shippedQty ?? 0}</td>
@@ -2909,7 +2911,7 @@ export default function App() {
                   ))}
                   {(order.lines || []).length > 0 && (
                     <tr className="bg-slate-100/70 font-semibold text-slate-700">
-                      <td className="px-2 py-2" colSpan={3}>Totales</td>
+                      <td className="px-2 py-2" colSpan={4}>Totales</td>
                       <td className="px-2 py-2 text-right">{totalAllocQty}</td>
                       <td className="px-2 py-2 text-right">{totalOrderQty}</td>
                       <td className="px-2 py-2 text-right">{totalShippedQty}</td>
