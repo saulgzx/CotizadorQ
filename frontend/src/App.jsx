@@ -265,12 +265,13 @@ export default function App() {
   const [showInvoicedSection, setShowInvoicedSection] = useState(() => localStorage.getItem('showInvoicedSection') !== 'false');
   const [osoSort, setOsoSort] = useState(() => localStorage.getItem('osoSort') || 'eta');
   const [osoQuickFilter, setOsoQuickFilter] = useState(() => localStorage.getItem('osoQuickFilter') || 'all');
-  const [osoEtaMonth, setOsoEtaMonth] = useState(() => localStorage.getItem('osoEtaMonth') || '');
   const [osoInvoiceMonth, setOsoInvoiceMonth] = useState(() => localStorage.getItem('osoInvoiceMonth') || '');
   const [osoViewMode, setOsoViewMode] = useState(() => localStorage.getItem('osoViewMode') || 'lista');
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
+  const [showOsoFilters, setShowOsoFilters] = useState(false);
+  const [osoReportSelect, setOsoReportSelect] = useState('');
   const [pinnedBos, setPinnedBos] = useState(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem('pinnedBos') || '[]');
@@ -363,10 +364,6 @@ export default function App() {
   }, [osoQuickFilter]);
 
   useEffect(() => {
-    localStorage.setItem('osoEtaMonth', osoEtaMonth || '');
-  }, [osoEtaMonth]);
-
-  useEffect(() => {
     localStorage.setItem('osoInvoiceMonth', osoInvoiceMonth || '');
   }, [osoInvoiceMonth]);
 
@@ -443,49 +440,7 @@ export default function App() {
     return stats;
   }, [osoOrders]);
 
-  const urgencyStats = useMemo(() => {
-    const stats = { overdue: 0, soon: 0, later: 0 };
-    const today = new Date();
-    const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-    osoOrders.forEach(order => {
-      if (!order.etaEstimated) return;
-      const eta = new Date(order.etaEstimated);
-      if (Number.isNaN(eta.getTime())) return;
-      const etaUtc = Date.UTC(eta.getFullYear(), eta.getMonth(), eta.getDate());
-      const diffDays = Math.round((etaUtc - todayUtc) / 86400000);
-      if (diffDays < 0) stats.overdue += 1;
-      else if (diffDays <= 7) stats.soon += 1;
-      else stats.later += 1;
-    });
-    return stats;
-  }, [osoOrders]);
-
   const safePinnedBos = useMemo(() => (Array.isArray(pinnedBos) ? pinnedBos : []), [pinnedBos]);
-
-  const kpiStats = useMemo(() => {
-    const stats = { overdue: 0, soon: 0, invoiceSoon: 0 };
-    const today = new Date();
-    const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-    osoOrders.forEach(order => {
-      if (order.etaEstimated) {
-        const eta = new Date(order.etaEstimated);
-        if (!Number.isNaN(eta.getTime())) {
-          const diffDays = Math.round((Date.UTC(eta.getFullYear(), eta.getMonth(), eta.getDate()) - todayUtc) / 86400000);
-          if (diffDays < 0) stats.overdue += 1;
-          else if (diffDays <= 7) stats.soon += 1;
-        }
-      }
-      const invoiceDate = boMeta[order.bo]?.estimatedInvoiceDate;
-      if (invoiceDate) {
-        const inv = new Date(invoiceDate);
-        if (!Number.isNaN(inv.getTime())) {
-          const diffDays = Math.round((Date.UTC(inv.getFullYear(), inv.getMonth(), inv.getDate()) - todayUtc) / 86400000);
-          if (diffDays >= 0 && diffDays <= 30) stats.invoiceSoon += 1;
-        }
-      }
-    });
-    return stats;
-  }, [osoOrders, boMeta]);
 
   const filteredOsoOrders = useMemo(() => {
     const query = (osoFilter || '').trim().toLowerCase();
@@ -501,43 +456,20 @@ export default function App() {
     const filteredByQuick = list.filter(order => {
       const projectName = (boMeta[order.bo]?.projectName || '').trim();
       const poAxis = (boMeta[order.bo]?.poAxis || '').trim();
-      const eta = order.etaEstimated || '';
       const invoiceDate = boMeta[order.bo]?.estimatedInvoiceDate || '';
-      const now = new Date();
-      const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
       const toMonthKey = (value) => {
         if (!value) return '';
         const d = new Date(value);
         if (Number.isNaN(d.getTime())) return '';
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       };
-      if (osoEtaMonth && toMonthKey(eta) !== osoEtaMonth) return false;
       if (osoInvoiceMonth && toMonthKey(invoiceDate) !== osoInvoiceMonth) return false;
-      if (!osoQuickFilter || osoQuickFilter === 'all') return true;
-      if (osoQuickFilter === 'eta-overdue') {
-        if (!eta) return false;
-        const d = new Date(eta);
-        if (Number.isNaN(d.getTime())) return false;
-        const diff = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - todayUtc;
-        return diff < 0;
-      }
-      if (osoQuickFilter === 'eta-soon') {
-        if (!eta) return false;
-        const d = new Date(eta);
-        if (Number.isNaN(d.getTime())) return false;
-        const diffDays = Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - todayUtc) / 86400000);
-        return diffDays >= 0 && diffDays <= 30;
-      }
-      if (osoQuickFilter === 'invoice-soon') {
-        if (!invoiceDate) return false;
-        const d = new Date(invoiceDate);
-        if (Number.isNaN(d.getTime())) return false;
-        const diffDays = Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - todayUtc) / 86400000);
-        return diffDays >= 0 && diffDays <= 30;
-      }
-      if (osoQuickFilter === 'sd-pending') return getSAndDStatus(order.bo) !== 'aplicado';
-      if (osoQuickFilter === 'missing-project') return !projectName;
-      if (osoQuickFilter === 'missing-po') return !poAxis;
+      const allowedQuickFilters = new Set(['all', 'sd-pending', 'missing-project', 'missing-po']);
+      const quickFilter = allowedQuickFilters.has(osoQuickFilter) ? osoQuickFilter : 'all';
+      if (!quickFilter || quickFilter === 'all') return true;
+      if (quickFilter === 'sd-pending') return getSAndDStatus(order.bo) !== 'aplicado';
+      if (quickFilter === 'missing-project') return !projectName;
+      if (quickFilter === 'missing-po') return !poAxis;
       return true;
     });
     if (osoSort === 'empresa') {
@@ -555,7 +487,7 @@ export default function App() {
       return [...filteredByQuick].sort((a, b) => toTs(a.etaEstimated) - toTs(b.etaEstimated));
     }
     return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
-  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoEtaMonth, osoInvoiceMonth, boMeta]);
+  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta]);
 
   const ordersByCompany = useMemo(() => {
     const map = new Map();
@@ -807,7 +739,7 @@ export default function App() {
       { Métrica: 'Top clientes (órdenes)', Valor: topCustomers || 'N/A' },
       {
         Métrica: 'Filtros aplicados',
-        Valor: `Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", ETA mes="${osoEtaMonth || '—'}", Fact mes="${osoInvoiceMonth || '—'}"`
+        Valor: `Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", Fact mes="${osoInvoiceMonth || '—'}"`
       }
     ];
 
@@ -850,7 +782,7 @@ export default function App() {
       `Status: Activas ${stats.activa} | Parciales ${stats.parcial} | Completas ${stats.completa}`,
       `ETA vencido: ${stats.etaOverdue} | ETA <= 7 días: ${stats.etaSoon}`,
       `Top clientes: ${topCustomers || 'N/A'}`,
-      `Filtros: Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", ETA mes="${osoEtaMonth || '—'}", Fact mes="${osoInvoiceMonth || '—'}"`
+      `Filtros: Texto="${osoFilter || '—'}", Estado="${osoStatusFilter}", Rápido="${osoQuickFilter}", Fact mes="${osoInvoiceMonth || '—'}"`
     ].join('\n');
 
     navigator.clipboard?.writeText?.(summary);
@@ -4623,81 +4555,65 @@ export default function App() {
                     >
                       Copiar resumen
                     </button>
-                    <button
-                      onClick={() => { setOsoReportMode('empresa'); setShowOsoReportModal(true); }}
-                      className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 w-full md:w-auto"
+                    <select
+                      value={osoReportSelect}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (!value) return;
+                        setOsoReportMode(value);
+                        setShowOsoReportModal(true);
+                        setOsoReportSelect('');
+                      }}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     >
-                      Informe por empresa
-                    </button>
-                    <button
-                      onClick={() => { setOsoReportMode('proximas'); setShowOsoReportModal(true); }}
-                      className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 w-full md:w-auto"
-                    >
-                      Próximas entregas
-                    </button>
+                      <option value="">Informes...</option>
+                      <option value="empresa">Informe por empresa</option>
+                      <option value="proximas">Próximas entregas</option>
+                    </select>
                   </div>
                 </div>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-                  <div className="text-[11px] text-rose-700">ETA vencido</div>
-                  <div className="text-lg font-semibold text-rose-800">{kpiStats.overdue}</div>
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                  <div className="text-[11px] text-amber-700">ETA ≤ 7 días</div>
-                  <div className="text-lg font-semibold text-amber-800">{kpiStats.soon}</div>
-                </div>
-                <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
-                  <div className="text-[11px] text-blue-700">Facturación ≤ 30 días</div>
-                  <div className="text-lg font-semibold text-blue-800">{kpiStats.invoiceSoon}</div>
-                </div>
-              </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">Total: {osoStats.total}</span>
                 <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">Activas: {osoStats.activa}</span>
                 <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">Parciales: {osoStats.parcial}</span>
                 <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Completas: {osoStats.completa}</span>
                 <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600">Facturadas: {invoicedBos.length}</span>
-                <span className="px-2 py-1 rounded-full bg-rose-100 text-rose-700">ETA vencido: {urgencyStats.overdue}</span>
-                <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">ETA &lt;= 7 días: {urgencyStats.soon}</span>
-                <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">ETA &gt; 7 días: {urgencyStats.later}</span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-500">Filtros rápidos:</span>
-                {[
-                  { key: 'all', label: 'Todos' },
-                  { key: 'eta-overdue', label: 'ETA vencido' },
-                  { key: 'eta-soon', label: 'ETA 30 días' },
-                  { key: 'invoice-soon', label: 'Facturación 30 días' },
-                  { key: 'sd-pending', label: 'S&D pendiente' },
-                  { key: 'missing-project', label: 'Proyecto vacío' },
-                  { key: 'missing-po', label: 'PO Axis vacío' }
-                ].map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => setOsoQuickFilter(item.key)}
-                    className={`px-2 py-1 rounded-full border text-xs ${osoQuickFilter === item.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-                <label className="flex items-center gap-2 ml-2">
-                  <span className="text-slate-500">ETA mes</span>
-                  <input
-                    type="month"
-                    value={osoEtaMonth}
-                    onChange={(e) => setOsoEtaMonth(e.target.value)}
-                    className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
-                  />
-                </label>
-                <label className="flex items-center gap-2">
-                  <span className="text-slate-500">Facturación mes</span>
-                  <input
-                    type="month"
-                    value={osoInvoiceMonth}
-                    onChange={(e) => setOsoInvoiceMonth(e.target.value)}
-                    className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
-                  />
-                </label>
+                <button
+                  onClick={() => setShowOsoFilters(prev => !prev)}
+                  className="px-2 py-1 rounded-full border text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                >
+                  {showOsoFilters ? 'Ocultar filtros' : 'Más filtros'}
+                </button>
+                {showOsoFilters && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-500">Filtros rápidos:</span>
+                    {[
+                      { key: 'all', label: 'Todos' },
+                      { key: 'sd-pending', label: 'S&D pendiente' },
+                      { key: 'missing-project', label: 'Proyecto vacío' },
+                      { key: 'missing-po', label: 'PO Axis vacío' }
+                    ].map(item => (
+                      <button
+                        key={item.key}
+                        onClick={() => setOsoQuickFilter(item.key)}
+                        className={`px-2 py-1 rounded-full border text-xs ${osoQuickFilter === item.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                    <label className="flex items-center gap-2 ml-2">
+                      <span className="text-slate-500">Facturación mes</span>
+                      <input
+                        type="month"
+                        value={osoInvoiceMonth}
+                        onChange={(e) => setOsoInvoiceMonth(e.target.value)}
+                        className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
               {osoError && <div className="mt-2 text-sm text-rose-600">{osoError}</div>}
               {osoLoading ? (
