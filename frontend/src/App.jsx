@@ -557,8 +557,6 @@ export default function App() {
     return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
   }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoEtaMonth, osoInvoiceMonth, boMeta]);
 
-  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
-
   const ordersByCompany = useMemo(() => {
     const map = new Map();
     filteredOsoOrders.forEach(order => {
@@ -706,6 +704,8 @@ export default function App() {
     const edited = osoReportEdits[row.key]?.[field];
     return edited !== undefined ? edited : (row[field] ?? '');
   };
+
+  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
 
   const exportOsoReport = () => {
     const orders = filteredOsoOrders;
