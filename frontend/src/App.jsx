@@ -1331,7 +1331,7 @@ export default function App() {
   }, [isLoggedIn, isAdmin, currentView, selectedSessionUserId]);
 
   useEffect(() => {
-    if (!isAdmin && (currentView === 'admin' || currentView === 'usuarios' || currentView === 'ordenes')) {
+    if (!isAdmin && (currentView === 'admin' || currentView === 'usuarios' || currentView === 'ordenes' || currentView === 'compras')) {
       setCurrentView('cotizador');
     }
   }, [isAdmin, currentView]);
@@ -1681,6 +1681,9 @@ export default function App() {
           allocPct: row.alloc_pct ?? row.allocPct,
           customerPO: row.customer_po || row.customerPO || '',
           lastSeenAt: row.last_seen_at || row.lastSeenAt || '',
+          purchaseStatus: row.purchase_status || row.purchaseStatus || '',
+          purchaseDispatch: row.purchase_dispatch || row.purchaseDispatch || '',
+          purchaseShipping: row.purchase_shipping || row.purchaseShipping || '',
           deleted: row.deleted ?? false,
           deletedAt: row.deleted_at || row.deletedAt || '',
           deletedComment: row.deleted_comment || row.deletedComment || '',
@@ -2831,6 +2834,16 @@ export default function App() {
     boMetaAPI.save(bo, { sAndDStatus: status }).catch(() => {});
   };
 
+  const getPurchaseStatus = (bo) => {
+    const status = (boMeta[bo]?.purchaseStatus || '').toString().toLowerCase();
+    return status === 'comprado' ? 'comprado' : 'pendiente';
+  };
+
+  const updatePurchaseMeta = (bo, patch) => {
+    updateBoMetaLocal(bo, patch);
+    boMetaAPI.save(bo, patch).catch(() => {});
+  };
+
   const handleSAndDClick = async (order) => {
     if (!order?.bo) return;
     const current = getSAndDStatus(order.bo);
@@ -2846,7 +2859,7 @@ export default function App() {
     }
   };
 
-  const renderOrderCard = (order, { pinned = false } = {}) => {
+  const renderOrderCard = (order, { pinned = false, mode = 'ordenes' } = {}) => {
     const totalOrderQty = (order.lines || []).reduce((acc, line) => acc + (Number(line.orderQty) || 0), 0);
     const totalShippedQty = (order.lines || []).reduce((acc, line) => acc + (Number(line.shippedQty) || 0), 0);
     const totalAllocQty = (order.lines || []).reduce((acc, line) => acc + (Number(line.allocQty) || 0), 0);
@@ -2854,7 +2867,7 @@ export default function App() {
     const statusClass = status === 'Completa'
       ? 'bg-emerald-100 text-emerald-700'
       : (status === 'Parcial' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700');
-    const sAndDStatus = getSAndDStatus(order.bo);
+    const sAndDStatus = mode === 'ordenes' ? getSAndDStatus(order.bo) : null;
     const sAndDClass = sAndDStatus === 'aplicado'
       ? 'bg-emerald-600 text-white hover:bg-emerald-700'
       : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
@@ -2875,6 +2888,9 @@ export default function App() {
     const projectValue = draft.projectName ?? boMeta[order.bo]?.projectName ?? '';
     const poAxisValue = draft.poAxis ?? boMeta[order.bo]?.poAxis ?? '';
     const invoiceDateValue = draft.estimatedInvoiceDate ?? boMeta[order.bo]?.estimatedInvoiceDate ?? '';
+    const purchaseStatus = getPurchaseStatus(order.bo);
+    const purchaseDispatch = boMeta[order.bo]?.purchaseDispatch || '';
+    const purchaseShipping = boMeta[order.bo]?.purchaseShipping || '';
     const isDirty =
       (draft.projectName !== undefined && draft.projectName !== (boMeta[order.bo]?.projectName ?? '')) ||
       (draft.poAxis !== undefined && draft.poAxis !== (boMeta[order.bo]?.poAxis ?? '')) ||
@@ -2924,19 +2940,23 @@ export default function App() {
               >
                 {pinned ? 'Quitar pin' : 'Fijar'}
               </button>
-              <button
-                onClick={() => saveBoMeta(order.bo)}
-                disabled={!isDirty || boSaving[order.bo]}
-                className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
-              >
-                {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
-              </button>
-              <button
-                onClick={() => handleSAndDClick(order)}
-                className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${sAndDClass}`}
-              >
-                {sAndDStatus === 'aplicado' ? 'S&D Aplicado' : 'S&D Pendiente'}
-              </button>
+              {mode === 'ordenes' && (
+                <button
+                  onClick={() => saveBoMeta(order.bo)}
+                  disabled={!isDirty || boSaving[order.bo]}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
+                >
+                  {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
+                </button>
+              )}
+              {mode === 'ordenes' && (
+                <button
+                  onClick={() => handleSAndDClick(order)}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${sAndDClass}`}
+                >
+                  {sAndDStatus === 'aplicado' ? 'S&D Aplicado' : 'S&D Pendiente'}
+                </button>
+              )}
               <button
                 onClick={() => setExpandedBo(prev => (prev === order.bo ? null : order.bo))}
                 className="text-xs text-blue-600 whitespace-nowrap hover:text-blue-700"
@@ -2944,35 +2964,79 @@ export default function App() {
                 {expandedBo === order.bo ? 'Ocultar' : 'Ver detalle'}
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-              <label className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-500">Proyecto</span>
-                <input
-                  value={projectValue}
-                  onChange={(e) => updateBoDraft(order.bo, { projectName: e.target.value })}
-                  className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-56 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
-                  placeholder="Nombre del proyecto"
-                />
-              </label>
-              <label className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-500">PO Axis</span>
-                <input
-                  value={poAxisValue}
-                  onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
-                  className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
-                  placeholder="PO Axis"
-                />
-              </label>
-              <label className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-500">Fecha fact.</span>
-                <input
-                  type="date"
-                  value={invoiceDateValue}
-                  onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceDate: e.target.value })}
-                  className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
-                />
-              </label>
-            </div>
+            {mode === 'ordenes' ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">Proyecto</span>
+                  <input
+                    value={projectValue}
+                    onChange={(e) => updateBoDraft(order.bo, { projectName: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-56 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    placeholder="Nombre del proyecto"
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">PO Axis</span>
+                  <input
+                    value={poAxisValue}
+                    onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    placeholder="PO Axis"
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">Fecha fact.</span>
+                  <input
+                    type="date"
+                    value={invoiceDateValue}
+                    onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceDate: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">Compra</span>
+                  <select
+                    value={purchaseStatus}
+                    onChange={(e) => updatePurchaseMeta(order.bo, { purchaseStatus: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                  >
+                    <option value="pendiente">Pendiente compra</option>
+                    <option value="comprado">Comprado</option>
+                  </select>
+                </label>
+                {purchaseStatus === 'comprado' && (
+                  <>
+                    <label className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-500">Despacho</span>
+                      <select
+                        value={purchaseDispatch}
+                        onChange={(e) => updatePurchaseMeta(order.bo, { purchaseDispatch: e.target.value })}
+                        className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                      >
+                        <option value="">Seleccionar</option>
+                        <option value="xus">XUS</option>
+                        <option value="embarcador">Embarcador</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-500">Vía</span>
+                      <select
+                        value={purchaseShipping}
+                        onChange={(e) => updatePurchaseMeta(order.bo, { purchaseShipping: e.target.value })}
+                        className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                      >
+                        <option value="">Seleccionar</option>
+                        <option value="aerea">Aérea</option>
+                        <option value="maritima">Marítima</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="px-4 pb-3">
@@ -3447,6 +3511,12 @@ export default function App() {
                   className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
                 >
                   Ordenes Activas
+                </button>
+                <button
+                  onClick={() => setCurrentView('compras')}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                >
+                  Vista Compras
                 </button>
               )}
               {isAdmin && (
@@ -4764,13 +4834,13 @@ export default function App() {
                       <div className="space-y-3">
                         {filteredOsoOrders
                           .filter(order => safePinnedBos.includes(order.bo))
-                          .map(order => renderOrderCard(order, { pinned: true }))}
+                          .map(order => renderOrderCard(order, { pinned: true, mode: 'ordenes' }))}
                       </div>
                     </div>
                   )}
                   {filteredOsoOrders
                     .filter(order => !safePinnedBos.includes(order.bo))
-                    .map(order => renderOrderCard(order))}
+                    .map(order => renderOrderCard(order, { mode: 'ordenes' }))}
                 </div>
               )}
             </div>
@@ -4836,6 +4906,174 @@ export default function App() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {currentView === 'compras' && isAdmin && (
+          <div className="space-y-4">
+            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-[220px]">
+                  <h2 className="text-lg font-semibold text-gray-800">Vista Compras (OSO)</h2>
+                  <p className="text-xs text-slate-500">Filtra por BO o cliente para encontrar rápido.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                  <input
+                    value={osoFilter}
+                    onChange={(e) => setOsoFilter(e.target.value)}
+                    placeholder="Buscar BO o cliente"
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                  <select
+                    value={osoStatusFilter}
+                    onChange={(e) => setOsoStatusFilter(e.target.value)}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-40 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="activa">Activas</option>
+                    <option value="parcial">Parciales</option>
+                    <option value="completa">Completas</option>
+                  </select>
+                  <select
+                    value={osoSort}
+                    onChange={(e) => setOsoSort(e.target.value)}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="bo">Ordenar por BO</option>
+                    <option value="empresa">Ordenar por empresa</option>
+                    <option value="porcentaje">Ordenar por %</option>
+                  </select>
+                  <div className="relative w-full md:w-52">
+                    <button
+                      onClick={() => setShowCompanyDropdown(prev => !prev)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    >
+                      {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
+                    </button>
+                    {showCompanyDropdown && (
+                      <div className="absolute z-20 mt-2 w-full max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                        <button
+                          onClick={() => {
+                            setOsoCompanyFilter('');
+                            setShowCompanyDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          Todas las empresas
+                        </button>
+                        {osoCompanies.map(item => (
+                          <button
+                            key={item.name}
+                            onClick={() => {
+                              setOsoCompanyFilter(item.name);
+                              setShowCompanyDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            {item.name} <span className="text-slate-400">({item.count})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <select
+                    value={osoActionSelect}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      if (value === 'refresh') loadOsoOrders();
+                      if (value === 'export') exportOsoReport();
+                      if (value === 'copy') copyOsoExecutiveSummary();
+                      setOsoActionSelect('');
+                    }}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="">Acciones...</option>
+                    <option value="refresh">Refrescar</option>
+                    <option value="export">Exportar reporte</option>
+                    <option value="copy">Copiar resumen</option>
+                  </select>
+                  <select
+                    value={osoReportSelect}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      setOsoReportMode(value);
+                      setShowOsoReportModal(true);
+                      setOsoReportSelect('');
+                    }}
+                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="">Informes...</option>
+                    <option value="empresa">Informe por empresa</option>
+                    <option value="proximas">Próximas entregas</option>
+                  </select>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                  Total: {osoStats.total} · Activas: {osoStats.activa} · Parciales: {osoStats.parcial} · Completas: {osoStats.completa}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  onClick={() => setShowOsoFilters(prev => !prev)}
+                  className="px-2 py-1 rounded-full border text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                >
+                  {showOsoFilters ? 'Ocultar filtros' : 'Más filtros'}
+                </button>
+                {showOsoFilters && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-500">Filtros rápidos:</span>
+                    {[
+                      { key: 'all', label: 'Todos' },
+                      { key: 'sd-pending', label: 'S&D pendiente' },
+                      { key: 'missing-project', label: 'Proyecto vacío' },
+                      { key: 'missing-po', label: 'PO Axis vacío' }
+                    ].map(item => (
+                      <button
+                        key={item.key}
+                        onClick={() => setOsoQuickFilter(item.key)}
+                        className={`px-2 py-1 rounded-full border text-xs ${osoQuickFilter === item.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                    <label className="flex items-center gap-2 ml-2">
+                      <span className="text-slate-500">Facturación mes</span>
+                      <input
+                        type="month"
+                        value={osoInvoiceMonth}
+                        onChange={(e) => setOsoInvoiceMonth(e.target.value)}
+                        className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+              {osoError && <div className="mt-2 text-sm text-rose-600">{osoError}</div>}
+              {osoLoading ? (
+                <div className="mt-4 text-sm text-gray-500">Cargando ordenes...</div>
+              ) : filteredOsoOrders.length === 0 ? (
+                <div className="mt-4 text-sm text-gray-500">Sin ordenes activas.</div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  {safePinnedBos.length > 0 && (
+                    <div className="border border-amber-200 rounded-2xl bg-amber-50/40 p-3">
+                      <div className="text-xs font-semibold text-amber-700 mb-2">BOs fijados</div>
+                      <div className="space-y-3">
+                        {filteredOsoOrders
+                          .filter(order => safePinnedBos.includes(order.bo))
+                          .map(order => renderOrderCard(order, { pinned: true, mode: 'compras' }))}
+                      </div>
+                    </div>
+                  )}
+                  {filteredOsoOrders
+                    .filter(order => !safePinnedBos.includes(order.bo))
+                    .map(order => renderOrderCard(order, { mode: 'compras' }))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
