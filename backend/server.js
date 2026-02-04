@@ -536,8 +536,22 @@ const initDB = async () => {
         alloc_pct DECIMAL(12,4),
         customer_po TEXT,
         last_seen_at TIMESTAMP,
+        deleted BOOLEAN DEFAULT false,
+        deleted_at TIMESTAMP,
+        deleted_comment TEXT,
+        deleted_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS bo_deleted_logs (
+        id SERIAL PRIMARY KEY,
+        bo VARCHAR(100) NOT NULL,
+        deleted_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        deleted_by_usuario VARCHAR(50),
+        comment TEXT,
+        snapshot JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -564,6 +578,10 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS alloc_pct DECIMAL(12,4);`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS customer_po TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP;`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT false;`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_comment TEXT;`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_qnap DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
@@ -1363,6 +1381,10 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
                  alloc_pct = EXCLUDED.alloc_pct,
                  customer_po = EXCLUDED.customer_po,
                  last_seen_at = EXCLUDED.last_seen_at,
+                 deleted = false,
+                 deleted_at = NULL,
+                 deleted_comment = NULL,
+                 deleted_by = NULL,
                  updated_at = CURRENT_TIMESTAMP`,
             [order.bo, order.customerName || null, order.allocPct ?? null, order.customerPO || null, now]
           );
@@ -1438,6 +1460,64 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
   } catch (error) {
     console.error('Error guardando bo_meta:', error);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// BO Meta - Eliminar (admin) con comentario
+app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const bo = String(req.params.bo || '').trim();
+    if (!bo) return res.status(400).json({ error: 'BO requerido' });
+    const comment = String(req.body?.comment || '').trim();
+    if (!comment) return res.status(400).json({ error: 'Comentario requerido' });
+
+    const userId = req.user?.id || null;
+    let usuario = null;
+    if (userId) {
+      const userResult = await client.query('SELECT usuario FROM usuarios WHERE id = $1', [userId]);
+      usuario = userResult.rows[0]?.usuario || null;
+    }
+
+    await client.query('BEGIN');
+    let meta = null;
+    const existing = await client.query('SELECT * FROM bo_meta WHERE bo = $1', [bo]);
+    if (existing.rows.length === 0) {
+      const insertResult = await client.query(
+        `INSERT INTO bo_meta (bo, deleted, deleted_at, deleted_comment, deleted_by, updated_at)
+         VALUES ($1, true, CURRENT_TIMESTAMP, $2, $3, CURRENT_TIMESTAMP)
+         RETURNING *`,
+        [bo, comment, userId]
+      );
+      meta = insertResult.rows[0];
+    } else {
+      await client.query(
+        `UPDATE bo_meta
+         SET deleted = true,
+             deleted_at = CURRENT_TIMESTAMP,
+             deleted_comment = $2,
+             deleted_by = $3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE bo = $1`,
+        [bo, comment, userId]
+      );
+      const updated = await client.query('SELECT * FROM bo_meta WHERE bo = $1', [bo]);
+      meta = updated.rows[0];
+    }
+
+    await client.query(
+      `INSERT INTO bo_deleted_logs (bo, deleted_by, deleted_by_usuario, comment, snapshot)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [bo, userId, usuario, comment, meta ? JSON.stringify(meta) : null]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, bo, comment });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error eliminando bo_meta:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  } finally {
+    client.release();
   }
 });
 

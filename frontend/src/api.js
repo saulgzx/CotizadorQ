@@ -5,7 +5,7 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 const fetchWithAuth = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
   
-  const sessionId = sessionStorage.getItem('sessionId');
+  const sessionId = localStorage.getItem('sessionId');
   const deviceId = localStorage.getItem('deviceId');
 
   const config = {
@@ -41,7 +41,7 @@ const fetchWithAuth = async (endpoint, options = {}) => {
 // API de Autenticación
 export const authAPI = {
   login: async (usuario, password) => {
-    const sessionId = sessionStorage.getItem('sessionId');
+    const sessionId = localStorage.getItem('sessionId');
     const deviceId = localStorage.getItem('deviceId');
     const response = await fetch(`${API_URL}/api/login`, {
       method: 'POST',
@@ -389,6 +389,17 @@ export const boMetaAPI = {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || 'Error guardando BO meta');
+    }
+    return response.json();
+  },
+  remove: async (bo, comment) => {
+    const response = await fetchWithAuth(`/api/bo-meta/${encodeURIComponent(bo)}/delete`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Error eliminando BO');
     }
     return response.json();
   },

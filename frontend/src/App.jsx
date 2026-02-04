@@ -53,10 +53,10 @@ const getOrCreateDeviceId = () => {
 };
 
 const getOrCreateSessionId = () => {
-  const existing = sessionStorage.getItem(SESSION_ID_KEY);
+  const existing = localStorage.getItem(SESSION_ID_KEY);
   if (existing) return existing;
   const generated = (crypto?.randomUUID?.() || `ses_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  sessionStorage.setItem(SESSION_ID_KEY, generated);
+  localStorage.setItem(SESSION_ID_KEY, generated);
   return generated;
 };
 
@@ -111,7 +111,7 @@ const registerSessionForUser = (user) => {
 const updateSessionHeartbeat = (user) => {
   const userKey = getUserKey(user);
   if (!userKey) return false;
-  const sessionId = sessionStorage.getItem(SESSION_ID_KEY);
+  const sessionId = localStorage.getItem(SESSION_ID_KEY);
   if (!sessionId) return false;
   const allSessions = readSessionsByUser();
   const list = pruneSessions(allSessions[userKey]);
@@ -126,7 +126,7 @@ const updateSessionHeartbeat = (user) => {
 const isSessionActive = (user) => {
   const userKey = getUserKey(user);
   if (!userKey) return true;
-  const sessionId = sessionStorage.getItem(SESSION_ID_KEY);
+  const sessionId = localStorage.getItem(SESSION_ID_KEY);
   if (!sessionId) return false;
   const allSessions = readSessionsByUser();
   const list = pruneSessions(allSessions[userKey]);
@@ -136,7 +136,7 @@ const isSessionActive = (user) => {
 const clearSessionForUser = (user) => {
   const userKey = getUserKey(user);
   if (!userKey) return;
-  const sessionId = sessionStorage.getItem(SESSION_ID_KEY);
+  const sessionId = localStorage.getItem(SESSION_ID_KEY);
   if (!sessionId) return;
   const allSessions = readSessionsByUser();
   const list = (allSessions[userKey] || []).filter(s => s.id !== sessionId);
@@ -260,6 +260,10 @@ export default function App() {
   const [osoStatusFilter, setOsoStatusFilter] = useState(() => localStorage.getItem('osoStatusFilter') || 'all');
   const [missingBos, setMissingBos] = useState([]);
   const [showMissingBosModal, setShowMissingBosModal] = useState(false);
+  const [deleteBoTarget, setDeleteBoTarget] = useState(null);
+  const [deleteBoComment, setDeleteBoComment] = useState('');
+  const [deleteBoError, setDeleteBoError] = useState('');
+  const [deleteBoLoading, setDeleteBoLoading] = useState(false);
   const [invoicedSort, setInvoicedSort] = useState(() => localStorage.getItem('invoicedSort') || 'date');
   const [invoicedFilter, setInvoicedFilter] = useState(() => localStorage.getItem('invoicedFilter') || '');
   const [showInvoicedSection, setShowInvoicedSection] = useState(() => localStorage.getItem('showInvoicedSection') !== 'false');
@@ -383,7 +387,7 @@ export default function App() {
   const invoicedBos = useMemo(() => {
     const existing = new Set(osoOrders.map(order => order.bo));
     return Object.entries(boMeta)
-      .filter(([bo, meta]) => meta?.invoiced && !existing.has(bo))
+      .filter(([bo, meta]) => meta?.invoiced && !meta?.deleted && !existing.has(bo))
       .map(([bo, meta]) => ({ bo, ...meta }))
       .sort((a, b) => new Date(b.invoicedAt || 0).getTime() - new Date(a.invoicedAt || 0).getTime());
   }, [boMeta, osoOrders]);
@@ -1256,19 +1260,11 @@ export default function App() {
       }
     };
 
-    const handlePageHide = () => {
-      clearSessionForUser(user);
-    };
-
     window.addEventListener('storage', handleStorage);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handlePageHide);
 
     return () => {
       clearInterval(heartbeatId);
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handlePageHide);
     };
   }, [isLoggedIn, user]);
 
@@ -1684,7 +1680,11 @@ export default function App() {
           customerName: row.customer_name || row.customerName || '',
           allocPct: row.alloc_pct ?? row.allocPct,
           customerPO: row.customer_po || row.customerPO || '',
-          lastSeenAt: row.last_seen_at || row.lastSeenAt || ''
+          lastSeenAt: row.last_seen_at || row.lastSeenAt || '',
+          deleted: row.deleted ?? false,
+          deletedAt: row.deleted_at || row.deletedAt || '',
+          deletedComment: row.deleted_comment || row.deletedComment || '',
+          deletedBy: row.deleted_by || row.deletedBy || null
         };
         return acc;
       }, {});
@@ -1692,7 +1692,7 @@ export default function App() {
       setBoMeta(metaMap);
       const existingBos = new Set(orders.map(order => order.bo));
       const missingBos = Object.keys(metaMap).filter(bo =>
-        !existingBos.has(bo) && !metaMap[bo]?.invoiced
+        !existingBos.has(bo) && !metaMap[bo]?.invoiced && !metaMap[bo]?.deleted
       );
       setMissingBos(missingBos);
       setShowMissingBosModal(missingBos.length > 0);
@@ -1719,6 +1719,44 @@ export default function App() {
 
   const dismissMissingBo = (bo) => {
     setMissingBos(prev => prev.filter(item => item !== bo));
+  };
+
+  const openDeleteBoModal = (bo) => {
+    if (!bo) return;
+    setDeleteBoTarget(bo);
+    setDeleteBoComment('');
+    setDeleteBoError('');
+  };
+
+  const closeDeleteBoModal = () => {
+    setDeleteBoTarget(null);
+    setDeleteBoComment('');
+    setDeleteBoError('');
+  };
+
+  const confirmDeleteBo = async () => {
+    if (!deleteBoTarget) return;
+    const comment = deleteBoComment.trim();
+    if (!comment) {
+      setDeleteBoError('Comentario requerido.');
+      return;
+    }
+    try {
+      setDeleteBoLoading(true);
+      setDeleteBoError('');
+      await boMetaAPI.remove(deleteBoTarget, comment);
+      updateBoMetaLocal(deleteBoTarget, {
+        deleted: true,
+        deletedAt: new Date().toISOString(),
+        deletedComment: comment
+      });
+      setMissingBos(prev => prev.filter(item => item !== deleteBoTarget));
+      closeDeleteBoModal();
+    } catch (error) {
+      setDeleteBoError(error.message || 'Error eliminando BO');
+    } finally {
+      setDeleteBoLoading(false);
+    }
   };
 
   const loadFunnel = async ({ days = funnelDays, empresa = funnelEmpresa, from = funnelFrom, to = funnelTo } = {}) => {
@@ -4829,6 +4867,12 @@ export default function App() {
                           Marcar facturado
                         </button>
                         <button
+                          onClick={() => openDeleteBoModal(bo)}
+                          className="px-2 py-1 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700"
+                        >
+                          Eliminar
+                        </button>
+                        <button
                           onClick={() => dismissMissingBo(bo)}
                           className="px-2 py-1 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
                         >
@@ -4853,6 +4897,56 @@ export default function App() {
                     className="px-3 py-2 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
                   >
                     Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteBoTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-md overflow-hidden">
+              <div className="px-4 py-3 border-b flex items-center justify-between">
+                <h3 className="font-semibold">Eliminar BO {deleteBoTarget}</h3>
+                <button
+                  onClick={closeDeleteBoModal}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  Cerrar
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-gray-600">
+                  Indica el motivo de eliminación. Este comentario quedará en los registros.
+                </p>
+                <textarea
+                  className="w-full rounded-lg border border-slate-200 p-2 text-sm"
+                  rows={4}
+                  value={deleteBoComment}
+                  onChange={(e) => {
+                    setDeleteBoComment(e.target.value);
+                    if (deleteBoError) setDeleteBoError('');
+                  }}
+                  placeholder="Comentario obligatorio"
+                />
+                {deleteBoError && (
+                  <div className="text-sm text-rose-600">{deleteBoError}</div>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={closeDeleteBoModal}
+                    className="px-3 py-2 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    disabled={deleteBoLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={confirmDeleteBo}
+                    className="px-3 py-2 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+                    disabled={deleteBoLoading}
+                  >
+                    {deleteBoLoading ? 'Eliminando...' : 'Eliminar'}
                   </button>
                 </div>
               </div>
