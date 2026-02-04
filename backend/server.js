@@ -545,6 +545,7 @@ const initDB = async () => {
         purchase_status VARCHAR(20),
         purchase_dispatch VARCHAR(20),
         purchase_shipping VARCHAR(20),
+        purchase_so TEXT,
         deleted BOOLEAN DEFAULT false,
         deleted_at TIMESTAMP,
         deleted_comment TEXT,
@@ -590,6 +591,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS purchase_status VARCHAR(20);`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS purchase_dispatch VARCHAR(20);`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS purchase_shipping VARCHAR(20);`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS purchase_so TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT false;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_comment TEXT;`);
@@ -1458,12 +1460,13 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
       invoicedAt,
       purchaseStatus,
       purchaseDispatch,
-      purchaseShipping
+      purchaseShipping,
+      purchaseSo
     } = req.body || {};
 
     const result = await pool.query(
-      `INSERT INTO bo_meta (bo, project_name, po_axis, estimated_invoice_date, s_and_d_status, invoiced, invoiced_at, purchase_status, purchase_dispatch, purchase_shipping, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+      `INSERT INTO bo_meta (bo, project_name, po_axis, estimated_invoice_date, s_and_d_status, invoiced, invoiced_at, purchase_status, purchase_dispatch, purchase_shipping, purchase_so, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
        ON CONFLICT (bo) DO UPDATE SET
          project_name = COALESCE($2, bo_meta.project_name),
          po_axis = COALESCE($3, bo_meta.po_axis),
@@ -1474,6 +1477,7 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
          purchase_status = COALESCE($8, bo_meta.purchase_status),
          purchase_dispatch = COALESCE($9, bo_meta.purchase_dispatch),
          purchase_shipping = COALESCE($10, bo_meta.purchase_shipping),
+         purchase_so = COALESCE($11, bo_meta.purchase_so),
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [
@@ -1486,7 +1490,8 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
         normalizeEmpty(invoicedAt),
         normalizeEmpty(purchaseStatus),
         normalizeEmpty(purchaseDispatch),
-        normalizeEmpty(purchaseShipping)
+        normalizeEmpty(purchaseShipping),
+        normalizeEmpty(purchaseSo)
       ]
     );
     res.json(result.rows[0]);

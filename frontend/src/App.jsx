@@ -1684,6 +1684,7 @@ export default function App() {
           purchaseStatus: row.purchase_status || row.purchaseStatus || '',
           purchaseDispatch: row.purchase_dispatch || row.purchaseDispatch || '',
           purchaseShipping: row.purchase_shipping || row.purchaseShipping || '',
+          purchaseSo: row.purchase_so || row.purchaseSo || '',
           deleted: row.deleted ?? false,
           deletedAt: row.deleted_at || row.deletedAt || '',
           deletedComment: row.deleted_comment || row.deletedComment || '',
@@ -2844,6 +2845,11 @@ export default function App() {
     boMetaAPI.save(bo, patch).catch(() => {});
   };
 
+  const confirmPurchaseChange = (label, currentValue, nextValue) => {
+    if ((currentValue || '') === (nextValue || '')) return true;
+    return confirm(`¿Confirmar cambio de ${label}?\nActual: ${currentValue || 'N/A'}\nNuevo: ${nextValue || 'N/A'}`);
+  };
+
   const handleSAndDClick = async (order) => {
     if (!order?.bo) return;
     const current = getSAndDStatus(order.bo);
@@ -2891,6 +2897,7 @@ export default function App() {
     const purchaseStatus = getPurchaseStatus(order.bo);
     const purchaseDispatch = boMeta[order.bo]?.purchaseDispatch || '';
     const purchaseShipping = boMeta[order.bo]?.purchaseShipping || '';
+    const purchaseSo = boMeta[order.bo]?.purchaseSo || '';
     const isDirty =
       (draft.projectName !== undefined && draft.projectName !== (boMeta[order.bo]?.projectName ?? '')) ||
       (draft.poAxis !== undefined && draft.poAxis !== (boMeta[order.bo]?.poAxis ?? '')) ||
@@ -3000,12 +3007,35 @@ export default function App() {
                   <span className="text-[10px] text-slate-500">Compra</span>
                   <select
                     value={purchaseStatus}
-                    onChange={(e) => updatePurchaseMeta(order.bo, { purchaseStatus: e.target.value })}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (!confirmPurchaseChange('estado de compra', purchaseStatus, next)) return;
+                      updatePurchaseMeta(order.bo, { purchaseStatus: next });
+                    }}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                   >
                     <option value="pendiente">Pendiente compra</option>
                     <option value="comprado">Comprado</option>
                   </select>
+                </label>
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">SO</span>
+                  <input
+                    value={purchaseSo}
+                    onChange={(e) => updatePurchaseMeta(order.bo, { purchaseSo: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    placeholder="SO"
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">PO</span>
+                  <input
+                    value={poAxisValue}
+                    onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
+                    onBlur={(e) => updatePurchaseMeta(order.bo, { poAxis: e.target.value })}
+                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    placeholder="PO Axis"
+                  />
                 </label>
                 {purchaseStatus === 'comprado' && (
                   <>
@@ -3013,7 +3043,11 @@ export default function App() {
                       <span className="text-[10px] text-slate-500">Despacho</span>
                       <select
                         value={purchaseDispatch}
-                        onChange={(e) => updatePurchaseMeta(order.bo, { purchaseDispatch: e.target.value })}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          if (!confirmPurchaseChange('despacho', purchaseDispatch, next)) return;
+                          updatePurchaseMeta(order.bo, { purchaseDispatch: next });
+                        }}
                         className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                       >
                         <option value="">Seleccionar</option>
@@ -3025,7 +3059,11 @@ export default function App() {
                       <span className="text-[10px] text-slate-500">Vía</span>
                       <select
                         value={purchaseShipping}
-                        onChange={(e) => updatePurchaseMeta(order.bo, { purchaseShipping: e.target.value })}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          if (!confirmPurchaseChange('vía', purchaseShipping, next)) return;
+                          updatePurchaseMeta(order.bo, { purchaseShipping: next });
+                        }}
                         className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                       >
                         <option value="">Seleccionar</option>
