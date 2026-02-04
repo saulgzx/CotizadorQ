@@ -3506,18 +3506,20 @@ export default function App() {
             </div>
             <nav className="flex items-center gap-2 flex-wrap">
               {isAdmin && (
-                <button
-                  onClick={() => setCurrentView('ordenes')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
-                >
-                  Ordenes Activas
-                </button>
-                <button
-                  onClick={() => setCurrentView('compras')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
-                >
-                  Vista Compras
-                </button>
+                <>
+                  <button
+                    onClick={() => setCurrentView('ordenes')}
+                    className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  >
+                    Ordenes Activas
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('compras')}
+                    className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  >
+                    Vista Compras
+                  </button>
+                </>
               )}
               {isAdmin && (
                 <button
