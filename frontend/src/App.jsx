@@ -2950,6 +2950,7 @@ export default function App() {
     );
 
     const isEmbarcador = mode === 'compras' && String(purchaseDispatch || '').toLowerCase() === 'embarcador';
+    const isPendingPurchase = mode === 'compras' && purchaseStatus === 'pendiente';
     const oorAlerts = mode === 'compras'
       ? (order.lines || [])
         .map((line, idx) => ({
@@ -2963,11 +2964,20 @@ export default function App() {
     return (
       <div
         key={order.bo}
-        className={`border rounded-2xl bg-white shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] ${isEmbarcador ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200'}`}
+        className={`border rounded-2xl bg-white shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] ${
+          isPendingPurchase
+            ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/40'
+            : (isEmbarcador ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200')
+        }`}
       >
         <div className="px-4 py-3 border-b border-slate-100">
           <div className="flex flex-col gap-2">
-            {isEmbarcador && (
+            {isPendingPurchase && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                <div className="font-semibold">Pendiente compra</div>
+              </div>
+            )}
+            {isEmbarcador && !isPendingPurchase && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 <div className="font-semibold">Despacho Embarcador</div>
                 {oorAlerts.length > 0 ? (
