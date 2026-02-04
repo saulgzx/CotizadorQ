@@ -28,7 +28,13 @@ const SHEETS_SYNC_HOURS = parseFloat(process.env.GOOGLE_SHEETS_SYNC_HOURS || '12
 const QNAP_CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12 };
 const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
+const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
+const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MIN * 60 * 1000;
+const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
+
+const getSessionTtlMsForRole = (role) =>
+  (String(role || '').toLowerCase() === 'admin' ? ADMIN_SESSION_TTL_MS : SESSION_TTL_MS);
 
 const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
@@ -654,7 +660,7 @@ const upsertSession = async (user, req) => {
   if (!sessionId) return { sessionId: null, revokedSessions: [] };
   const ip = getRequestIp(req);
   const userAgent = req.headers['user-agent'] || '';
-  const ttlDate = new Date(Date.now() - SESSION_TTL_MS);
+  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(user?.role));
   const limit = user?.role === 'admin' ? 2 : 1;
 
   await pool.query('DELETE FROM sesiones WHERE user_id = $1 AND last_seen < $2', [user.id, ttlDate]);
@@ -697,9 +703,9 @@ const upsertSession = async (user, req) => {
   return { sessionId, revokedSessions };
 };
 
-const validateSession = async (userId, sessionId, req) => {
+const validateSession = async (userId, sessionId, req, role) => {
   if (!sessionId) return { ok: false, reason: 'Sesion requerida' };
-  const ttlDate = new Date(Date.now() - SESSION_TTL_MS);
+  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const result = await pool.query(
     'SELECT id, revoked, last_seen, device_id FROM sesiones WHERE user_id = $1 AND session_id = $2',
     [userId, sessionId]
@@ -739,7 +745,7 @@ const authenticateToken = async (req, res, next) => {
     const user = jwt.verify(token, process.env.JWT_SECRET || 'secreto_super_seguro_2024');
     req.user = user;
     const { sessionId } = getSessionHeaders(req);
-    const validation = await validateSession(user.id, sessionId, req);
+    const validation = await validateSession(user.id, sessionId, req, user.role);
     if (!validation.ok) {
       if (validation.reason === 'missing') {
         await upsertSession({ id: user.id, role: user.role }, req);
@@ -807,7 +813,7 @@ app.post('/api/login', async (req, res) => {
         partner_category: user.partner_category
       },
       process.env.JWT_SECRET || 'secreto_super_seguro_2024',
-      { expiresIn: '24h' }
+      { expiresIn: (user.role === 'admin' ? ADMIN_JWT_EXPIRES_IN : '24h') }
     );
 
     res.json({
@@ -848,15 +854,20 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
 // SESIONES - Listar activas (admin)
 app.get('/api/sessions', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const ttlDate = new Date(Date.now() - SESSION_TTL_MS);
     const result = await pool.query(
       `SELECT s.session_id, s.device_id, s.ip_address, s.user_agent, s.started_at, s.last_seen,
               u.id AS user_id, u.usuario, u.nombre, u.empresa, u.role
        FROM sesiones s
        JOIN usuarios u ON u.id = s.user_id
-       WHERE s.revoked = false AND s.last_seen >= $1
+       WHERE s.revoked = false
+         AND s.last_seen >= (
+           CASE
+             WHEN u.role = 'admin' THEN NOW() - ($1 || ' minutes')::interval
+             ELSE NOW() - ($2 || ' minutes')::interval
+           END
+         )
        ORDER BY s.last_seen DESC`,
-      [ttlDate]
+      [ADMIN_SESSION_TTL_MIN, SESSION_TTL_MIN]
     );
     res.json(result.rows);
   } catch (error) {
@@ -869,14 +880,21 @@ app.get('/api/sessions', authenticateToken, requireAdmin, async (req, res) => {
 app.get('/api/usuarios/:id/sessions', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const userId = req.params.id;
-    const ttlDate = new Date(Date.now() - SESSION_TTL_MS);
     const result = await pool.query(
       `SELECT session_id, device_id, ip_address, user_agent, started_at, last_seen, revoked,
-              CASE WHEN revoked = false AND last_seen >= $2 THEN true ELSE false END AS active
-       FROM sesiones
-       WHERE user_id = $1
+              CASE
+                WHEN revoked = false AND last_seen >= (
+                  CASE
+                    WHEN u.role = 'admin' THEN NOW() - ($2 || ' minutes')::interval
+                    ELSE NOW() - ($3 || ' minutes')::interval
+                  END
+                ) THEN true ELSE false
+              END AS active
+       FROM sesiones s
+       JOIN usuarios u ON u.id = s.user_id
+       WHERE s.user_id = $1
        ORDER BY last_seen DESC`,
-      [userId, ttlDate]
+      [userId, ADMIN_SESSION_TTL_MIN, SESSION_TTL_MIN]
     );
     res.json(result.rows);
   } catch (error) {
