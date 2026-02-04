@@ -289,6 +289,7 @@ export default function App() {
   const [boMeta, setBoMeta] = useState({});
   const [boDraft, setBoDraft] = useState({});
   const [boSaving, setBoSaving] = useState({});
+  const [purchaseDraft, setPurchaseDraft] = useState({});
   const [funnelDays, setFunnelDays] = useState(30);
   const [funnelEmpresa, setFunnelEmpresa] = useState('');
   const [funnelFrom, setFunnelFrom] = useState('');
@@ -2835,19 +2836,53 @@ export default function App() {
     boMetaAPI.save(bo, { sAndDStatus: status }).catch(() => {});
   };
 
-  const getPurchaseStatus = (bo) => {
-    const status = (boMeta[bo]?.purchaseStatus || '').toString().toLowerCase();
-    return status === 'comprado' ? 'comprado' : 'pendiente';
+  const updatePurchaseDraft = (bo, patch) => {
+    if (!bo) return;
+    setPurchaseDraft(prev => ({
+      ...prev,
+      [bo]: {
+        ...prev[bo],
+        ...patch
+      }
+    }));
   };
 
-  const updatePurchaseMeta = (bo, patch) => {
-    updateBoMetaLocal(bo, patch);
-    boMetaAPI.save(bo, patch).catch(() => {});
+  const clearPurchaseDraft = (bo) => {
+    setPurchaseDraft(prev => {
+      const next = { ...prev };
+      delete next[bo];
+      return next;
+    });
   };
 
-  const confirmPurchaseChange = (label, currentValue, nextValue) => {
-    if ((currentValue || '') === (nextValue || '')) return true;
-    return confirm(`¿Confirmar cambio de ${label}?\nActual: ${currentValue || 'N/A'}\nNuevo: ${nextValue || 'N/A'}`);
+  const savePurchaseMeta = async (bo) => {
+    if (!bo) return;
+    const draft = purchaseDraft[bo] || {};
+    const normalizeEmpty = (value) => {
+      if (value === undefined || value === null) return null;
+      const trimmed = String(value).trim();
+      return trimmed === '' ? null : trimmed;
+    };
+    const payload = {
+      purchaseStatus: normalizeEmpty(draft.purchaseStatus ?? boMeta[bo]?.purchaseStatus ?? ''),
+      purchaseDispatch: normalizeEmpty(draft.purchaseDispatch ?? boMeta[bo]?.purchaseDispatch ?? ''),
+      purchaseShipping: normalizeEmpty(draft.purchaseShipping ?? boMeta[bo]?.purchaseShipping ?? ''),
+      purchaseSo: normalizeEmpty(draft.purchaseSo ?? boMeta[bo]?.purchaseSo ?? ''),
+      poAxis: normalizeEmpty(draft.poAxis ?? boMeta[bo]?.poAxis ?? '')
+    };
+    try {
+      await boMetaAPI.save(bo, payload);
+      updateBoMetaLocal(bo, {
+        purchaseStatus: payload.purchaseStatus || '',
+        purchaseDispatch: payload.purchaseDispatch || '',
+        purchaseShipping: payload.purchaseShipping || '',
+        purchaseSo: payload.purchaseSo || '',
+        poAxis: payload.poAxis || ''
+      });
+      clearPurchaseDraft(bo);
+    } catch {
+      // ignore save errors
+    }
   };
 
   const handleSAndDClick = async (order) => {
@@ -2894,14 +2929,25 @@ export default function App() {
     const projectValue = draft.projectName ?? boMeta[order.bo]?.projectName ?? '';
     const poAxisValue = draft.poAxis ?? boMeta[order.bo]?.poAxis ?? '';
     const invoiceDateValue = draft.estimatedInvoiceDate ?? boMeta[order.bo]?.estimatedInvoiceDate ?? '';
-    const purchaseStatus = getPurchaseStatus(order.bo);
-    const purchaseDispatch = boMeta[order.bo]?.purchaseDispatch || '';
-    const purchaseShipping = boMeta[order.bo]?.purchaseShipping || '';
-    const purchaseSo = boMeta[order.bo]?.purchaseSo || '';
+    const purchaseDraftRow = purchaseDraft[order.bo] || {};
+    const purchaseStatus = (purchaseDraftRow.purchaseStatus ?? boMeta[order.bo]?.purchaseStatus ?? '').toString().toLowerCase() === 'comprado'
+      ? 'comprado'
+      : 'pendiente';
+    const purchaseDispatch = purchaseDraftRow.purchaseDispatch ?? boMeta[order.bo]?.purchaseDispatch ?? '';
+    const purchaseShipping = purchaseDraftRow.purchaseShipping ?? boMeta[order.bo]?.purchaseShipping ?? '';
+    const purchaseSo = purchaseDraftRow.purchaseSo ?? boMeta[order.bo]?.purchaseSo ?? '';
+    const purchasePoAxis = purchaseDraftRow.poAxis ?? boMeta[order.bo]?.poAxis ?? '';
     const isDirty =
       (draft.projectName !== undefined && draft.projectName !== (boMeta[order.bo]?.projectName ?? '')) ||
       (draft.poAxis !== undefined && draft.poAxis !== (boMeta[order.bo]?.poAxis ?? '')) ||
       (draft.estimatedInvoiceDate !== undefined && draft.estimatedInvoiceDate !== (boMeta[order.bo]?.estimatedInvoiceDate ?? ''));
+    const isPurchaseDirty = mode === 'compras' && (
+      (purchaseDraftRow.purchaseStatus !== undefined && (purchaseDraftRow.purchaseStatus ?? '') !== (boMeta[order.bo]?.purchaseStatus ?? '')) ||
+      (purchaseDraftRow.purchaseDispatch !== undefined && (purchaseDraftRow.purchaseDispatch ?? '') !== (boMeta[order.bo]?.purchaseDispatch ?? '')) ||
+      (purchaseDraftRow.purchaseShipping !== undefined && (purchaseDraftRow.purchaseShipping ?? '') !== (boMeta[order.bo]?.purchaseShipping ?? '')) ||
+      (purchaseDraftRow.purchaseSo !== undefined && (purchaseDraftRow.purchaseSo ?? '') !== (boMeta[order.bo]?.purchaseSo ?? '')) ||
+      (purchaseDraftRow.poAxis !== undefined && (purchaseDraftRow.poAxis ?? '') !== (boMeta[order.bo]?.poAxis ?? ''))
+    );
 
     return (
       <div key={order.bo} className="border border-slate-200 rounded-2xl bg-white shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)]">
@@ -2964,6 +3010,15 @@ export default function App() {
                   {sAndDStatus === 'aplicado' ? 'S&D Aplicado' : 'S&D Pendiente'}
                 </button>
               )}
+              {mode === 'compras' && (
+                <button
+                  onClick={() => savePurchaseMeta(order.bo)}
+                  disabled={!isPurchaseDirty}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isPurchaseDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'}`}
+                >
+                  Guardar cambios
+                </button>
+              )}
               <button
                 onClick={() => setExpandedBo(prev => (prev === order.bo ? null : order.bo))}
                 className="text-xs text-blue-600 whitespace-nowrap hover:text-blue-700"
@@ -3007,11 +3062,7 @@ export default function App() {
                   <span className="text-[10px] text-slate-500">Compra</span>
                   <select
                     value={purchaseStatus}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      if (!confirmPurchaseChange('estado de compra', purchaseStatus, next)) return;
-                      updatePurchaseMeta(order.bo, { purchaseStatus: next });
-                    }}
+                    onChange={(e) => updatePurchaseDraft(order.bo, { purchaseStatus: e.target.value })}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                   >
                     <option value="pendiente">Pendiente compra</option>
@@ -3022,7 +3073,7 @@ export default function App() {
                   <span className="text-[10px] text-slate-500">SO</span>
                   <input
                     value={purchaseSo}
-                    onChange={(e) => updatePurchaseMeta(order.bo, { purchaseSo: e.target.value })}
+                    onChange={(e) => updatePurchaseDraft(order.bo, { purchaseSo: e.target.value })}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                     placeholder="SO"
                   />
@@ -3030,9 +3081,8 @@ export default function App() {
                 <label className="flex items-center gap-1">
                   <span className="text-[10px] text-slate-500">PO</span>
                   <input
-                    value={poAxisValue}
-                    onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
-                    onBlur={(e) => updatePurchaseMeta(order.bo, { poAxis: e.target.value })}
+                    value={purchasePoAxis}
+                    onChange={(e) => updatePurchaseDraft(order.bo, { poAxis: e.target.value })}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                     placeholder="PO Axis"
                   />
@@ -3043,11 +3093,7 @@ export default function App() {
                       <span className="text-[10px] text-slate-500">Despacho</span>
                       <select
                         value={purchaseDispatch}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          if (!confirmPurchaseChange('despacho', purchaseDispatch, next)) return;
-                          updatePurchaseMeta(order.bo, { purchaseDispatch: next });
-                        }}
+                        onChange={(e) => updatePurchaseDraft(order.bo, { purchaseDispatch: e.target.value })}
                         className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                       >
                         <option value="">Seleccionar</option>
@@ -3059,11 +3105,7 @@ export default function App() {
                       <span className="text-[10px] text-slate-500">Vía</span>
                       <select
                         value={purchaseShipping}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          if (!confirmPurchaseChange('vía', purchaseShipping, next)) return;
-                          updatePurchaseMeta(order.bo, { purchaseShipping: next });
-                        }}
+                        onChange={(e) => updatePurchaseDraft(order.bo, { purchaseShipping: e.target.value })}
                         className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                       >
                         <option value="">Seleccionar</option>
