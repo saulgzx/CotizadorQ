@@ -1141,12 +1141,26 @@ export default function App() {
         img.style.visibility = img.dataset.prevVisibility || '';
         delete img.dataset.prevVisibility;
       });
-      const imgData = canvas.toDataURL('image/png');
+      const extraPadding = 24;
+      let renderCanvas = canvas;
+      if (extraPadding > 0) {
+        const padded = document.createElement('canvas');
+        padded.width = canvas.width;
+        padded.height = canvas.height + extraPadding;
+        const ctx = padded.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, padded.width, padded.height);
+          ctx.drawImage(canvas, 0, 0);
+          renderCanvas = padded;
+        }
+      }
+      const imgData = renderCanvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'pt', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const imgHeight = (renderCanvas.height * imgWidth) / renderCanvas.width;
       let heightLeft = imgHeight;
       let position = 0;
       pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
