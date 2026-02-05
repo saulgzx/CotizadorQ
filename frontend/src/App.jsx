@@ -1095,16 +1095,17 @@ export default function App() {
       alert('No se pudo generar el PDF.');
       return;
     }
+    const captureElement = element.querySelector('[data-pdf-root="1"]') || element;
     try {
       setSaving(true);
       if (document?.fonts?.ready) {
         await document.fonts.ready;
       }
       const { html2canvas, jsPDF } = await loadPdfDeps();
-      const elementRect = element.getBoundingClientRect();
-      const elementWidth = Math.max(element.scrollWidth || 0, elementRect.width || 0);
-      const elementHeight = Math.max(element.scrollHeight || 0, elementRect.height || 0);
-      const imageNodes = Array.from(element.querySelectorAll('img'));
+      const elementRect = captureElement.getBoundingClientRect();
+      const elementWidth = Math.max(captureElement.scrollWidth || 0, elementRect.width || 0);
+      const elementHeight = Math.max(captureElement.scrollHeight || 0, elementRect.height || 0);
+      const imageNodes = Array.from(captureElement.querySelectorAll('img'));
       await Promise.all(imageNodes.map(img => {
         if (img.complete) return Promise.resolve();
         return new Promise(resolve => {
@@ -1113,8 +1114,8 @@ export default function App() {
         });
       }));
       const logoNodes = Array.from(new Set([
-        ...element.querySelectorAll('img[data-pdf-logo="1"]'),
-        ...element.querySelectorAll('img[alt="Logo"]')
+        ...captureElement.querySelectorAll('img[data-pdf-logo="1"]'),
+        ...captureElement.querySelectorAll('img[alt="Logo"]')
       ]));
       const logoMetaList = logoNodes.map(img => {
         const logoRect = img.getBoundingClientRect();
@@ -1128,7 +1129,7 @@ export default function App() {
           h: logoRect.height
         };
       });
-      const canvas = await html2canvas(element, {
+      const canvas = await html2canvas(captureElement, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
@@ -3545,7 +3546,7 @@ export default function App() {
     const fecha = new Date().toLocaleDateString('es-CL', { year: 'numeric', month: 'long', day: 'numeric' });
     return (
       <div className="min-h-screen bg-gray-100 p-4 print:bg-white">
-        <div className={`max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden ${printQuote ? '' : 'print-area'}`}>
+        <div data-pdf-root="1" className={`max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden ${printQuote ? '' : 'print-area'}`}>
           <div className="p-8 border-b bg-white">
             <div className="flex items-center justify-between gap-4">
               <div style={{ width: '208px', height: '56px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
@@ -3651,7 +3652,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[radial-gradient(1200px_circle_at_top_left,#e0f2fe,transparent_55%),radial-gradient(900px_circle_at_bottom_right,#fef3c7,transparent_60%)] bg-[#f7f4ef]">
       {printQuote && (
         <div className="print-area bg-white">
-          <div className="max-w-4xl mx-auto bg-white rounded-lg overflow-hidden">
+          <div data-pdf-root="1" className="max-w-4xl mx-auto bg-white rounded-lg overflow-hidden">
             <div className="p-8 border-b bg-white">
               <div className="flex items-center justify-between gap-4">
                 <div style={{ width: '208px', height: '56px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
