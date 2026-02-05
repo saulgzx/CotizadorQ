@@ -200,6 +200,13 @@ const formatStockQuantity = (value) => {
   return String(value).trim();
 };
 
+const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
+
+const buildSearchTokens = (value) =>
+  normalizeSearchText(value)
+    .split(/\s+/)
+    .filter(Boolean);
+
 let pdfDepsPromise = null;
 const loadPdfDeps = () => {
   if (window?.html2canvas && window?.jspdf?.jsPDF) {
@@ -236,6 +243,11 @@ export default function App() {
   const [currentView, setCurrentView] = useState('ordenes');
   const [productos, setProductos] = useState([]);
   const [stockByMpn, setStockByMpn] = useState({});
+  const [stockCatalog, setStockCatalog] = useState([]);
+  const [stockCatalogLoading, setStockCatalogLoading] = useState(false);
+  const [stockCatalogError, setStockCatalogError] = useState('');
+  const [stockCatalogQuery, setStockCatalogQuery] = useState('');
+  const [stockCatalogOrigin, setStockCatalogOrigin] = useState('all');
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1226,6 +1238,22 @@ export default function App() {
     }
   };
 
+  const loadStockCatalog = async () => {
+    try {
+      setStockCatalogLoading(true);
+      setStockCatalogError('');
+      const data = await stockAPI.getCatalog();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setStockCatalog(items);
+    } catch (error) {
+      console.error('Error cargando catálogo de stock:', error);
+      setStockCatalogError(error.message || 'Error cargando stock disponible');
+      setStockCatalog([]);
+    } finally {
+      setStockCatalogLoading(false);
+    }
+  };
+
   const handleLogin = async () => {
     try {
       setLoginError('');
@@ -1326,6 +1354,11 @@ export default function App() {
       cancelled = true;
     };
   }, [currentView]);
+
+  useEffect(() => {
+    if (!isLoggedIn || currentView !== 'stock') return;
+    loadStockCatalog();
+  }, [isLoggedIn, currentView]);
 
   useEffect(() => {
     if (!isLoggedIn || !isAdmin || currentView !== 'usuarios') return;
@@ -3298,6 +3331,22 @@ export default function App() {
     );
   }, [productos, catalogSearch]);
 
+  const filteredStockCatalog = useMemo(() => {
+    const tokens = buildSearchTokens(stockCatalogQuery);
+    const originFilter = stockCatalogOrigin;
+    return stockCatalog.filter(item => {
+      if (originFilter !== 'all' && (item.origin || '').toUpperCase() !== originFilter) return false;
+      if (tokens.length === 0) return true;
+      const haystack = [
+        item.brand,
+        item.name,
+        item.sku,
+        item.mpn
+      ].map(normalizeSearchText).join(' ');
+      return tokens.every(token => haystack.includes(token));
+    });
+  }, [stockCatalog, stockCatalogQuery, stockCatalogOrigin]);
+
   useEffect(() => {
     if (currentView !== 'cotizador' || !catalogSearch.trim()) {
       setCatalogDropdownStyle(null);
@@ -3720,6 +3769,9 @@ export default function App() {
             <button onClick={() => setCurrentView('cotizador')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
               Cotizador {cotizacion.length > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">{cotizacion.length}</span>}
             </button>
+            <button onClick={() => setCurrentView('stock')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+              Stock disponible
+            </button>
             <button onClick={() => setCurrentView('historial')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
               {isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
               {isAdmin && historialCounts.registroPendientes > 0 && (
@@ -3741,6 +3793,104 @@ export default function App() {
         </header>
 
         <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto px-4 py-6`}>
+        {currentView === 'stock' && (
+          <div className="space-y-4">
+            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
+              <div className="p-4 border-b bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="font-semibold text-gray-800">Stock disponible</h3>
+                  <p className="text-xs text-gray-500">Disponible para entrega inmediata según inventario.</p>
+                </div>
+                <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center gap-3">
+                  <input
+                    type="text"
+                    placeholder="Buscar por marca, SKU, MPN o descripción..."
+                    value={stockCatalogQuery}
+                    onChange={e => setStockCatalogQuery(e.target.value)}
+                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <div className="flex items-center gap-2">
+                    {['all', 'AXIS', 'QNAP'].map(origin => (
+                      <button
+                        key={origin}
+                        onClick={() => setStockCatalogOrigin(origin)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                          stockCatalogOrigin === origin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {origin === 'all' ? 'Todos' : origin}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Tip: puedes buscar por varias palabras, por ejemplo "Axis 03181".
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Producto</th>
+                      <th className="px-4 py-3 text-left">Marca</th>
+                      <th className="px-4 py-3 text-left">SKU</th>
+                      <th className="px-4 py-3 text-left">MPN</th>
+                      <th className="px-4 py-3 text-right">Disponible</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {stockCatalogLoading && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Cargando stock...</td>
+                      </tr>
+                    )}
+                    {!stockCatalogLoading && stockCatalogError && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
+                      </tr>
+                    )}
+                    {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Sin resultados.</td>
+                      </tr>
+                    )}
+                    {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.map((item, idx) => (
+                      <tr key={`${item.mpn || item.sku || 'item'}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50/40' : ''}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            {item.imageUrl ? (
+                              <img
+                                src={item.imageUrl}
+                                alt={item.name || 'Producto'}
+                                className="w-14 h-14 object-contain bg-white border rounded"
+                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              />
+                            ) : (
+                              <div className="w-14 h-14 bg-slate-100 border rounded" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="font-medium text-gray-800 truncate">{item.name || 'Sin descripción'}</div>
+                              {item.origin && (
+                                <div className="text-[11px] text-gray-500">{item.origin}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">{item.brand || 'N/A'}</td>
+                        <td className="px-4 py-3">{item.sku || 'N/A'}</td>
+                        <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-700">{formatStockQuantity(item.quantity) || '0'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
         {currentView === 'usuarios' && isAdmin && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">

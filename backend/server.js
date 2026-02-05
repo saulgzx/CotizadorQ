@@ -214,6 +214,30 @@ const getStockColumnIndexes = (headers) => {
   };
 };
 
+const getStockCatalogColumnIndexes = (headers) => {
+  const idxImage = findHeaderIndex(headers, ['Product Image', 'Imagen', 'Image']);
+  const idxBrand = findHeaderIndex(headers, ['Manuf. Brand', 'Brand', 'Marca', 'Manufacturer']);
+  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'Descripción', 'Descripcion', 'Description']);
+  const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
+  const idxMpn = findHeaderIndex(headers, ['MPN', 'Model', 'Modelo']);
+  const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
+  return {
+    image: idxImage >= 0 ? idxImage : 0,
+    brand: idxBrand >= 0 ? idxBrand : 1,
+    name: idxName >= 0 ? idxName : 2,
+    sku: idxSku >= 0 ? idxSku : 3,
+    mpn: idxMpn >= 0 ? idxMpn : 4,
+    qty: idxQty >= 0 ? idxQty : 6
+  };
+};
+
+const deriveStockOrigin = (brandValue) => {
+  const brand = String(brandValue || '').toLowerCase();
+  if (brand.includes('axis')) return 'AXIS';
+  if (brand.includes('qnap')) return 'QNAP';
+  return '';
+};
+
 const toColumnLetter = (index) => {
   let result = '';
   let n = index + 1;
@@ -1540,6 +1564,51 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
     res.json({ items });
   } catch (error) {
     console.error('Error leyendo stock:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// STOCK - Catalogo disponible (imagen, marca, descripcion, SKU, MPN, cantidad)
+app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
+  try {
+    const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+    if (!spreadsheetId) return res.status(400).json({ error: 'GOOGLE_SHEETS_ID no configurado' });
+
+    const sheets = getSheetsClient(true);
+    const { rows, headers } = await getSheetData(sheets, spreadsheetId, SHEETS_TAB_STOCK, 'FORMATTED_VALUE');
+    if (rows.length <= 1) {
+      return res.json({ items: [] });
+    }
+
+    const idx = getStockCatalogColumnIndexes(headers);
+    const items = [];
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i] || [];
+      const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
+      const sku = idx.sku >= 0 ? String(row[idx.sku] || '').trim() : '';
+      const name = idx.name >= 0 ? String(row[idx.name] || '').trim() : '';
+      if (!mpn && !sku && !name) continue;
+      const brand = idx.brand >= 0 ? String(row[idx.brand] || '').trim() : '';
+      const imageUrl = idx.image >= 0 ? String(row[idx.image] || '').trim() : '';
+      const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
+      const parsedQty = parseNumber(rawQty, NaN);
+      const quantity = Number.isNaN(parsedQty) ? String(rawQty || '').trim() : parsedQty;
+      const origin = deriveStockOrigin(brand);
+      items.push({
+        imageUrl,
+        brand,
+        name,
+        sku,
+        mpn,
+        quantity,
+        origin
+      });
+    }
+
+    res.json({ items });
+  } catch (error) {
+    console.error('Error leyendo stock catalogo:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

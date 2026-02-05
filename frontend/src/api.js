@@ -412,4 +412,9 @@ export const stockAPI = {
     if (!response.ok) throw new Error('Error obteniendo stock');
     return response.json();
   },
+  getCatalog: async () => {
+    const response = await fetchWithAuth('/api/stock/catalog');
+    if (!response.ok) throw new Error('Error obteniendo catálogo de stock');
+    return response.json();
+  },
 };
