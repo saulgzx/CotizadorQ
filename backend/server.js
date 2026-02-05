@@ -21,6 +21,7 @@ const pool = new Pool({
 
 const SHEETS_TAB_QNAP = process.env.GOOGLE_SHEETS_TAB_QNAP || 'Hoja 1';
 const SHEETS_TAB_AXIS = process.env.GOOGLE_SHEETS_TAB_AXIS || 'Hoja 2';
+const SHEETS_TAB_STOCK = process.env.GOOGLE_SHEETS_TAB_STOCK || 'Stock';
 const SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 const SHEETS_SCOPE_RW = 'https://www.googleapis.com/auth/spreadsheets';
 const DEFAULT_ORIGIN = 'QNAP';
@@ -203,6 +204,15 @@ const getSheetColumnIndexes = (origen, headers) => {
   return idx;
 };
 
+const getStockColumnIndexes = (headers) => {
+  const idxMpn = findHeaderIndex(headers, ['MPN']);
+  const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
+  return {
+    mpn: idxMpn >= 0 ? idxMpn : 4,
+    qty: idxQty >= 0 ? idxQty : 6
+  };
+};
+
 const toColumnLetter = (index) => {
   let result = '';
   let n = index + 1;
@@ -253,11 +263,11 @@ const getSheetIdByName = async (sheets, spreadsheetId, tabName) => {
   return sheet?.properties?.sheetId;
 };
 
-const getSheetData = async (sheets, spreadsheetId, tabName) => {
+const getSheetData = async (sheets, spreadsheetId, tabName, valueRenderOption = 'UNFORMATTED_VALUE') => {
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: tabName,
-    valueRenderOption: 'UNFORMATTED_VALUE'
+    valueRenderOption
   });
   const rows = data.values || [];
   const headers = rows.length > 0 ? rows[0].map(h => String(h || '').trim()) : [];
@@ -1497,6 +1507,38 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error guardando bo_meta:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// STOCK - Leer hoja Stock (MPN / OH Quantity)
+app.get('/api/stock', authenticateToken, async (req, res) => {
+  try {
+    const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+    if (!spreadsheetId) return res.status(400).json({ error: 'GOOGLE_SHEETS_ID no configurado' });
+
+    const sheets = getSheetsClient(true);
+    const { rows, headers } = await getSheetData(sheets, spreadsheetId, SHEETS_TAB_STOCK, 'FORMATTED_VALUE');
+    if (rows.length <= 1) {
+      return res.json({ items: [] });
+    }
+
+    const idx = getStockColumnIndexes(headers);
+    const items = [];
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i] || [];
+      const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
+      if (!mpn) continue;
+      const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
+      const parsedQty = parseNumber(rawQty, NaN);
+      const quantity = Number.isNaN(parsedQty) ? String(rawQty || '').trim() : parsedQty;
+      items.push({ mpn, quantity });
+    }
+
+    res.json({ items });
+  } catch (error) {
+    console.error('Error leyendo stock:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

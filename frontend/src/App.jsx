@@ -1,11 +1,12 @@
 ﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAPI, boMetaAPI } from './api';
+import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAPI, boMetaAPI, stockAPI } from './api';
 
 const CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12, DEFAULT_GP: 0.15 };
 const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
 const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const STOCK_DELIVERY_SUFFIX = 'unidades disponible en entrega inmediata, salvo venta previa';
 
 const SESSION_STORAGE_KEY = 'activeSessionsByUser';
 const SESSION_ID_KEY = 'sessionId';
@@ -188,6 +189,17 @@ const parseGp = (value, fallback = CONSTANTS.DEFAULT_GP) => {
   return parsed > 1 ? parsed / 100 : parsed;
 };
 
+const normalizeLookupKey = (value) => String(value || '').trim().toLowerCase();
+
+const formatStockQuantity = (value) => {
+  if (value === undefined || value === null || value === '') return '';
+  const parsed = Number(value);
+  if (!Number.isNaN(parsed)) {
+    return Number.isInteger(parsed) ? String(parsed) : String(parsed);
+  }
+  return String(value).trim();
+};
+
 let pdfDepsPromise = null;
 const loadPdfDeps = () => {
   if (window?.html2canvas && window?.jspdf?.jsPDF) {
@@ -223,6 +235,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [currentView, setCurrentView] = useState('ordenes');
   const [productos, setProductos] = useState([]);
+  const [stockByMpn, setStockByMpn] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1160,6 +1173,7 @@ export default function App() {
         empresa: parsedUser?.empresa || prev.empresa || ''
       }));
       loadProductos(parsedUser?.role);
+      loadStock();
     }
     setLoading(false);
   }, []);
@@ -1190,6 +1204,28 @@ export default function App() {
     }
   };
 
+  const loadStock = async () => {
+    try {
+      const data = await stockAPI.getAll();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const map = {};
+      items.forEach(item => {
+        const key = normalizeLookupKey(item?.mpn);
+        if (!key) return;
+        map[key] = item?.quantity ?? '';
+      });
+      setStockByMpn(map);
+      setCotizacion(prev => prev.map(item => {
+        const stockText = getStockEntregaText(item.mpn, map);
+        if (!stockText) return item;
+        return { ...item, tiempo: stockText };
+      }));
+    } catch (error) {
+      console.error('Error cargando stock:', error);
+      setStockByMpn({});
+    }
+  };
+
   const handleLogin = async () => {
     try {
       setLoginError('');
@@ -1208,6 +1244,7 @@ export default function App() {
       }));
       setIsLoggedIn(true);
       loadProductos(data.user?.role);
+      loadStock();
     } catch (error) {
       setLoginError(error.message || 'Error de autenticacin');
     }
@@ -1527,6 +1564,16 @@ export default function App() {
   };
 
   // Cotización
+  const getStockEntregaText = (mpn, lookup = stockByMpn) => {
+    const key = normalizeLookupKey(mpn);
+    if (!key) return '';
+    const qty = lookup[key];
+    if (qty === undefined || qty === null || qty === '') return '';
+    const qtyText = formatStockQuantity(qty);
+    if (!qtyText) return '';
+    return `${qtyText} ${STOCK_DELIVERY_SUFFIX}`;
+  };
+
   const addToCotizacion = (producto) => {
     const exists = cotizacion.find(x => x.id === producto.id);
     if (exists) setCotizacion(c => c.map(x => x.id === producto.id ? { ...x, cant: x.cant + 1 } : x));
@@ -1535,7 +1582,8 @@ export default function App() {
       cant: 1,
       partnerCategory: producto.origen === 'AXIS' ? cotizacionPartnerCategory : undefined,
       rebateProject: producto.origen === 'AXIS' ? 0 : undefined,
-      gpOverride: null
+      gpOverride: null,
+      tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
     }]);
   };
 
@@ -1571,6 +1619,13 @@ export default function App() {
       }
       if (field === 'precio') return { ...x, precio: parseFloat(value) || 0 };
       if (field === 'cant') return { ...x, cant: parseInt(value) || 1 };
+      if (field === 'tiempo') {
+        return { ...x, tiempo: value };
+      }
+      if (field === 'mpn') {
+        const stockText = getStockEntregaText(value);
+        return { ...x, mpn: value, tiempo: stockText || x.tiempo };
+      }
       return { ...x, [field]: value };
     }));
   };
@@ -2041,20 +2096,24 @@ export default function App() {
             const existing = next[existingIndex];
             const isAxis = (existing.origen || 'QNAP') === 'AXIS';
             const nextRebate = isAxis ? (parseFloat(existing.rebateProject) || 0) + rebateProject : (existing.rebateProject || 0);
+            const stockText = getStockEntregaText(match.mpn);
             next[existingIndex] = {
               ...existing,
               cant: (existing.cant || 1) + qty,
-              rebateProject: nextRebate
+              rebateProject: nextRebate,
+              tiempo: stockText || existing.tiempo
             };
           } else {
             const isAxis = (match.origen || 'QNAP') === 'AXIS';
+            const stockText = getStockEntregaText(match.mpn);
             next.push({
               ...match,
               cant: qty,
               gpOverride: null,
               gpOverrideInput: '',
               rebateProject: isAxis ? rebateProject : 0,
-              partnerCategory: isAxis ? cotizacionPartnerCategory : undefined
+              partnerCategory: isAxis ? cotizacionPartnerCategory : undefined,
+              tiempo: stockText || match.tiempo
             });
           }
           added += 1;

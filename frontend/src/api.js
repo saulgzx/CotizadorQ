@@ -404,3 +404,12 @@ export const boMetaAPI = {
     return response.json();
   },
 };
+
+// API de Stock
+export const stockAPI = {
+  getAll: async () => {
+    const response = await fetchWithAuth('/api/stock');
+    if (!response.ok) throw new Error('Error obteniendo stock');
+    return response.json();
+  },
+};
