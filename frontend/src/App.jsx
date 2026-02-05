@@ -268,6 +268,7 @@ export default function App() {
   const [catalogSearch, setCatalogSearch] = useState('');
   const catalogInputRef = useRef(null);
   const [catalogDropdownStyle, setCatalogDropdownStyle] = useState(null);
+  const stockExportRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [adminOrigin, setAdminOrigin] = useState('QNAP');
@@ -2105,6 +2106,29 @@ export default function App() {
     XLSX.writeFile(wb, `${filenameBase}.xlsx`);
   };
 
+  const exportStockExcel = () => {
+    const rows = filteredStockCatalog.map(item => ([
+      item.brand || '',
+      item.name || '',
+      item.sku || '',
+      item.mpn || '',
+      formatStockQuantity(item.quantity) || '',
+      item.origin || '',
+      item.imageUrl || ''
+    ]));
+    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Cantidad', 'Origen', 'Imagen'];
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock');
+    const filenameBase = `stock-${getDateKeyCompact(new Date()) || 'export'}`;
+    XLSX.writeFile(wb, `${filenameBase}.xlsx`);
+  };
+
+  const exportStockPdf = async () => {
+    const filenameBase = `stock-${getDateKeyCompact(new Date()) || 'export'}`;
+    await downloadPdfFromElement(stockExportRef.current, filenameBase);
+  };
+
   useEffect(() => {
     if (!printQuote) return;
     const filenameBase = buildExportFilename(printQuote.created_at || new Date(), printQuote.cliente_telefono, printQuote.cliente_empresa);
@@ -3837,7 +3861,21 @@ export default function App() {
                   <h3 className="font-semibold text-gray-800">Stock disponible</h3>
                   <p className="text-xs text-gray-500">Disponible para entrega inmediata según inventario.</p>
                 </div>
-                <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
+                  <button
+                    onClick={exportStockExcel}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                  >
+                    Exportar Excel
+                  </button>
+                  <button
+                    onClick={exportStockPdf}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-white hover:bg-slate-800"
+                  >
+                    Exportar PDF
+                  </button>
+                </div>
               </div>
               <div className="p-4 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -3866,7 +3904,7 @@ export default function App() {
                   Tip: puedes buscar por varias palabras, por ejemplo "Axis 03181".
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white">
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                     <tr>
