@@ -33,6 +33,7 @@ const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '432
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
 const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MIN * 60 * 1000;
 const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
+const APP_VERSION = process.env.APP_VERSION || '2026-02-05-stock';
 
 const getSessionTtlMsForRole = (role) =>
   (String(role || '').toLowerCase() === 'admin' ? ADMIN_SESSION_TTL_MS : SESSION_TTL_MS);
@@ -795,7 +796,7 @@ const requireAdmin = async (req, res, next) => {
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'OK', message: 'API Cotizador funcionando' });
+  res.json({ status: 'OK', message: 'API Cotizador funcionando', version: APP_VERSION });
 });
 
 // LOGIN
