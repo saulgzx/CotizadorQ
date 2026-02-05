@@ -3904,7 +3904,7 @@ export default function App() {
                   Tip: puedes buscar por varias palabras, por ejemplo "Axis 03181".
                 </div>
               </div>
-              <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white">
+              <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-6 py-6">
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                     <tr>
