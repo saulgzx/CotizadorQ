@@ -1097,8 +1097,21 @@ export default function App() {
     }
     try {
       setSaving(true);
+      if (document?.fonts?.ready) {
+        await document.fonts.ready;
+      }
       const { html2canvas, jsPDF } = await loadPdfDeps();
       const elementRect = element.getBoundingClientRect();
+      const elementWidth = Math.max(element.scrollWidth || 0, elementRect.width || 0);
+      const elementHeight = Math.max(element.scrollHeight || 0, elementRect.height || 0);
+      const imageNodes = Array.from(element.querySelectorAll('img'));
+      await Promise.all(imageNodes.map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+          img.addEventListener('load', resolve, { once: true });
+          img.addEventListener('error', resolve, { once: true });
+        });
+      }));
       const logoNodes = Array.from(new Set([
         ...element.querySelectorAll('img[data-pdf-logo="1"]'),
         ...element.querySelectorAll('img[alt="Logo"]')
@@ -1115,7 +1128,15 @@ export default function App() {
           h: logoRect.height
         };
       });
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        width: elementWidth || undefined,
+        height: elementHeight || undefined,
+        windowWidth: elementWidth || undefined,
+        windowHeight: elementHeight || undefined
+      });
       logoNodes.forEach(img => {
         img.style.visibility = img.dataset.prevVisibility || '';
         delete img.dataset.prevVisibility;
