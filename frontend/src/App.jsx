@@ -316,7 +316,6 @@ export default function App() {
   const [boDraft, setBoDraft] = useState({});
   const [boSaving, setBoSaving] = useState({});
   const [axisDraft, setAxisDraft] = useState({});
-  const [axisSaving, setAxisSaving] = useState({});
   const [purchaseDraft, setPurchaseDraft] = useState({});
   const [funnelDays, setFunnelDays] = useState(30);
   const [funnelEmpresa, setFunnelEmpresa] = useState('');
@@ -469,6 +468,15 @@ export default function App() {
     const meta = boMeta[bo] || {};
     const draft = boDraft[bo] || {};
     return { ...meta, ...draft };
+  };
+
+  const isBoMetaDirty = (bo) => {
+    const draft = boDraft[bo] || {};
+    return (
+      (draft.projectName !== undefined && draft.projectName !== (boMeta[bo]?.projectName ?? '')) ||
+      (draft.poAxis !== undefined && draft.poAxis !== (boMeta[bo]?.poAxis ?? '')) ||
+      (draft.estimatedInvoiceDate !== undefined && draft.estimatedInvoiceDate !== (boMeta[bo]?.estimatedInvoiceDate ?? ''))
+    );
   };
 
   const getOsoCustomerName = (order) =>
@@ -625,9 +633,9 @@ export default function App() {
 
   const saveAxisAmounts = async (order) => {
     const bo = order?.bo;
-    if (!bo) return;
+    if (!bo) return false;
     const draft = axisDraft[bo];
-    if (!draft) return;
+    if (!draft) return false;
     const payloadLines = Object.entries(draft)
       .map(([key, value]) => {
         const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
@@ -639,38 +647,32 @@ export default function App() {
         };
       })
       .filter(Boolean);
-    if (!payloadLines.length) return;
-    setAxisSaving(prev => ({ ...prev, [bo]: true }));
-    try {
-      await boLineMetaAPI.save(bo, { lines: payloadLines });
-      const updates = payloadLines.reduce((acc, item) => {
-        const lineKey = getAxisLineKey(item);
-        acc[lineKey] = item.montoAxis;
-        return acc;
-      }, {});
-      setOsoOrders(prev =>
-        prev.map(orderItem => {
-          if (orderItem.bo !== bo) return orderItem;
-          return {
-            ...orderItem,
-            lines: (orderItem.lines || []).map(line => (
-              updates[getAxisLineKey(line)] !== undefined
-                ? { ...line, montoAxis: updates[getAxisLineKey(line)] }
-                : line
-            ))
-          };
-        })
-      );
-      setAxisDraft(prev => {
-        const next = { ...prev };
-        delete next[bo];
-        return next;
-      });
-    } catch (error) {
-      alert(error.message || 'Error guardando montos Axis');
-    } finally {
-      setAxisSaving(prev => ({ ...prev, [bo]: false }));
-    }
+    if (!payloadLines.length) return false;
+    await boLineMetaAPI.save(bo, { lines: payloadLines });
+    const updates = payloadLines.reduce((acc, item) => {
+      const lineKey = getAxisLineKey(item);
+      acc[lineKey] = item.montoAxis;
+      return acc;
+    }, {});
+    setOsoOrders(prev =>
+      prev.map(orderItem => {
+        if (orderItem.bo !== bo) return orderItem;
+        return {
+          ...orderItem,
+          lines: (orderItem.lines || []).map(line => (
+            updates[getAxisLineKey(line)] !== undefined
+              ? { ...line, montoAxis: updates[getAxisLineKey(line)] }
+              : line
+          ))
+        };
+      })
+    );
+    setAxisDraft(prev => {
+      const next = { ...prev };
+      delete next[bo];
+      return next;
+    });
+    return true;
   };
 
   const toMonthKey = (value) => {
@@ -3030,7 +3032,8 @@ export default function App() {
     }));
   };
 
-  const saveBoMeta = async (bo) => {
+  const saveBoMeta = async (order) => {
+    const bo = order?.bo;
     if (!bo) return;
     const draft = boDraft[bo] || {};
     const normalizeEmpty = (value) => {
@@ -3045,20 +3048,32 @@ export default function App() {
     };
     try {
       setBoSaving(prev => ({ ...prev, [bo]: true }));
-      const saved = await boMetaAPI.save(bo, payload);
-      updateBoMetaLocal(bo, {
-        projectName: saved.project_name || saved.projectName || payload.projectName,
-        poAxis: saved.po_axis || saved.poAxis || payload.poAxis,
-        estimatedInvoiceDate: saved.estimated_invoice_date || saved.estimatedInvoiceDate || payload.estimatedInvoiceDate,
-        sAndDStatus: saved.s_and_d_status || saved.sAndDStatus || boMeta[bo]?.sAndDStatus,
-        invoiced: saved.invoiced ?? boMeta[bo]?.invoiced,
-        invoicedAt: saved.invoiced_at || saved.invoicedAt || boMeta[bo]?.invoicedAt
-      });
-      setBoDraft(prev => {
-        const next = { ...prev };
-        delete next[bo];
-        return next;
-      });
+      let boSaved = false;
+      let axisSaved = false;
+      if (isBoMetaDirty(bo)) {
+        const saved = await boMetaAPI.save(bo, payload);
+        updateBoMetaLocal(bo, {
+          projectName: saved.project_name || saved.projectName || payload.projectName,
+          poAxis: saved.po_axis || saved.poAxis || payload.poAxis,
+          estimatedInvoiceDate: saved.estimated_invoice_date || saved.estimatedInvoiceDate || payload.estimatedInvoiceDate,
+          sAndDStatus: saved.s_and_d_status || saved.sAndDStatus || boMeta[bo]?.sAndDStatus,
+          invoiced: saved.invoiced ?? boMeta[bo]?.invoiced,
+          invoicedAt: saved.invoiced_at || saved.invoicedAt || boMeta[bo]?.invoicedAt
+        });
+        setBoDraft(prev => {
+          const next = { ...prev };
+          delete next[bo];
+          return next;
+        });
+        boSaved = true;
+      }
+      if (isAxisDirty(order)) {
+        await saveAxisAmounts(order);
+        axisSaved = true;
+      }
+      if (!boSaved && !axisSaved) {
+        alert('No hay cambios para guardar.');
+      }
     } catch (error) {
       alert(error.message || 'No se pudo guardar la información del BO');
     } finally {
@@ -3233,10 +3248,7 @@ export default function App() {
     const purchaseShipping = purchaseDraftRow.purchaseShipping ?? boMeta[order.bo]?.purchaseShipping ?? '';
     const purchaseSo = purchaseDraftRow.purchaseSo ?? boMeta[order.bo]?.purchaseSo ?? '';
     const purchasePoAxis = purchaseDraftRow.poAxis ?? boMeta[order.bo]?.poAxis ?? '';
-    const isDirty =
-      (draft.projectName !== undefined && draft.projectName !== (boMeta[order.bo]?.projectName ?? '')) ||
-      (draft.poAxis !== undefined && draft.poAxis !== (boMeta[order.bo]?.poAxis ?? '')) ||
-      (draft.estimatedInvoiceDate !== undefined && draft.estimatedInvoiceDate !== (boMeta[order.bo]?.estimatedInvoiceDate ?? ''));
+    const isDirty = isBoMetaDirty(order.bo);
     const isPurchaseDirty = mode === 'compras' && (
       (purchaseDraftRow.purchaseStatus !== undefined && (purchaseDraftRow.purchaseStatus ?? '') !== (boMeta[order.bo]?.purchaseStatus ?? '')) ||
       (purchaseDraftRow.purchaseDispatch !== undefined && (purchaseDraftRow.purchaseDispatch ?? '') !== (boMeta[order.bo]?.purchaseDispatch ?? '')) ||
@@ -3333,20 +3345,11 @@ export default function App() {
               </button>
               {mode === 'ordenes' && (
                 <button
-                  onClick={() => saveBoMeta(order.bo)}
-                  disabled={!isDirty || boSaving[order.bo]}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
+                  onClick={() => saveBoMeta(order)}
+                  disabled={(!isDirty && !isAxisDirty(order)) || boSaving[order.bo]}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order)) ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
                 >
                   {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
-                </button>
-              )}
-              {mode === 'ordenes' && (
-                <button
-                  onClick={() => saveAxisAmounts(order)}
-                  disabled={!isAxisDirty(order) || axisSaving[order.bo]}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isAxisDirty(order) ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-100 text-slate-400'} ${axisSaving[order.bo] ? 'opacity-60' : ''}`}
-                >
-                  {axisSaving[order.bo] ? 'Guardando...' : 'Guardar Axis'}
                 </button>
               )}
               {mode === 'ordenes' && (
