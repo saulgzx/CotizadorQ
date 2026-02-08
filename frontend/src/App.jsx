@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAPI, boMetaAPI, stockAPI } from './api';
+import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAPI, boMetaAPI, boLineMetaAPI, stockAPI } from './api';
 
 const CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12, DEFAULT_GP: 0.15 };
 const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
@@ -315,6 +315,8 @@ export default function App() {
   const [boMeta, setBoMeta] = useState({});
   const [boDraft, setBoDraft] = useState({});
   const [boSaving, setBoSaving] = useState({});
+  const [axisDraft, setAxisDraft] = useState({});
+  const [axisSaving, setAxisSaving] = useState({});
   const [purchaseDraft, setPurchaseDraft] = useState({});
   const [funnelDays, setFunnelDays] = useState(30);
   const [funnelEmpresa, setFunnelEmpresa] = useState('');
@@ -556,6 +558,121 @@ export default function App() {
     return 0;
   };
 
+  const normalizeAxisAmount = (value) => {
+    if (value === undefined || value === null || value === '') return null;
+    const parsed = parseFloat(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const getAxisLineKey = (line) => {
+    const skuKey = normalizeLookupKey(line?.sku);
+    const mpnKey = normalizeLookupKey(line?.mpn);
+    return `${skuKey}||${mpnKey}`;
+  };
+
+  const getAxisDraftValue = (bo, lineKey) => {
+    const draft = axisDraft[bo];
+    if (!draft) return undefined;
+    return draft[lineKey];
+  };
+
+  const getAxisMontoValue = (bo, line) => {
+    if (!bo || !line) return '';
+    const draftValue = getAxisDraftValue(bo, getAxisLineKey(line));
+    if (draftValue !== undefined) return draftValue;
+    if (line.montoAxis === undefined || line.montoAxis === null || line.montoAxis === '') return '';
+    return String(line.montoAxis);
+  };
+
+  const getAxisMontoNumber = (bo, line) => {
+    const raw = getAxisMontoValue(bo, line);
+    const parsed = parseFloat(raw);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const updateAxisDraft = (bo, lineKey, value) => {
+    if (!bo && bo !== 0) return;
+    setAxisDraft(prev => {
+      const next = { ...prev };
+      const current = { ...(next[bo] || {}) };
+      if (value === undefined) {
+        delete current[lineKey];
+      } else {
+        current[lineKey] = value;
+      }
+      if (Object.keys(current).length === 0) {
+        delete next[bo];
+      } else {
+        next[bo] = current;
+      }
+      return next;
+    });
+  };
+
+  const isAxisDirty = (order) => {
+    const bo = order?.bo;
+    if (!bo) return false;
+    const draft = axisDraft[bo];
+    if (!draft) return false;
+    return Object.entries(draft).some(([key, value]) => {
+      const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
+      if (!line) return true;
+      const draftAmount = normalizeAxisAmount(value);
+      const currentAmount = normalizeAxisAmount(line.montoAxis);
+      return draftAmount !== currentAmount;
+    });
+  };
+
+  const saveAxisAmounts = async (order) => {
+    const bo = order?.bo;
+    if (!bo) return;
+    const draft = axisDraft[bo];
+    if (!draft) return;
+    const payloadLines = Object.entries(draft)
+      .map(([key, value]) => {
+        const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
+        if (!line) return null;
+        return {
+          montoAxis: normalizeAxisAmount(value),
+          sku: line.sku || '',
+          mpn: line.mpn || ''
+        };
+      })
+      .filter(Boolean);
+    if (!payloadLines.length) return;
+    setAxisSaving(prev => ({ ...prev, [bo]: true }));
+    try {
+      await boLineMetaAPI.save(bo, { lines: payloadLines });
+      const updates = payloadLines.reduce((acc, item) => {
+        const lineKey = getAxisLineKey(item);
+        acc[lineKey] = item.montoAxis;
+        return acc;
+      }, {});
+      setOsoOrders(prev =>
+        prev.map(orderItem => {
+          if (orderItem.bo !== bo) return orderItem;
+          return {
+            ...orderItem,
+            lines: (orderItem.lines || []).map(line => (
+              updates[getAxisLineKey(line)] !== undefined
+                ? { ...line, montoAxis: updates[getAxisLineKey(line)] }
+                : line
+            ))
+          };
+        })
+      );
+      setAxisDraft(prev => {
+        const next = { ...prev };
+        delete next[bo];
+        return next;
+      });
+    } catch (error) {
+      alert(error.message || 'Error guardando montos Axis');
+    } finally {
+      setAxisSaving(prev => ({ ...prev, [bo]: false }));
+    }
+  };
+
   const toMonthKey = (value) => {
     if (!value) return 'Sin fecha';
     const d = new Date(value);
@@ -628,8 +745,10 @@ export default function App() {
       const customerPo = order?.customerPO || getOsoMeta(order?.bo)?.customerPO || '';
       (order.lines || []).forEach((line, idx) => {
         const entregaOor = line.tiempoEntrega || '';
+        const montoAxis = getAxisMontoNumber(order?.bo, line);
         rows.push({
-          key: `${bo}-${idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
+          key: `${bo}-${line.lineIndex ?? idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
+          lineIndex: line.lineIndex ?? idx,
           bo,
           customerPo,
           cliente,
@@ -642,6 +761,8 @@ export default function App() {
           allocQty: line.allocQty ?? 0,
           orderQty: line.orderQty ?? 0,
           shippedQty: line.shippedQty ?? 0,
+          montoAxis,
+          montoFacturar: montoAxis * (Number(line.orderQty) || 0),
           notas: ''
         });
       });
@@ -669,13 +790,13 @@ export default function App() {
   const exportOsoReportPdf = () => {
     const element = document.getElementById('oso-report-pdf');
     const dateKey = getDateKey(new Date()) || 'export';
-    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : 'empresa';
+    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : (osoReportMode === 'axis' ? 'axis' : 'empresa');
     downloadPdfFromElement(element, `reporte-oso-${modeLabel}-${dateKey}`);
   };
 
   const exportOsoReportExcel = () => {
     const dateKey = getDateKey(new Date()) || 'export';
-    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : 'empresa';
+    const modeLabel = osoReportMode === 'proximas' ? 'proximas' : (osoReportMode === 'axis' ? 'axis' : 'empresa');
     let rows = [];
     if (osoReportMode === 'empresa') {
       const grouped = new Map();
@@ -697,6 +818,29 @@ export default function App() {
           'Cant. Orden': item.orderQty,
           'Cant. Alocada': item.allocQty,
           'Cant. Despachada': item.shippedQty,
+          Notas: getOsoReportValue(item, 'notas')
+        }))
+      );
+    } else if (osoReportMode === 'axis') {
+      const grouped = new Map();
+      osoLineReportRows.forEach(row => {
+        const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+        if (!grouped.has(empresa)) grouped.set(empresa, []);
+        grouped.get(empresa).push(row);
+      });
+      rows = Array.from(grouped.entries()).flatMap(([empresa, items]) =>
+        items.map(item => ({
+          Empresa: empresa,
+          BO: getOsoReportValue(item, 'bo'),
+          'PO Cliente': getOsoReportValue(item, 'customerPo'),
+          Cliente: getOsoReportValue(item, 'cliente'),
+          MPN: item.mpn || 'N/A',
+          SKU: item.sku || 'N/A',
+          Producto: item.desc || 'N/A',
+          'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
+          'Cant. Orden': item.orderQty,
+          'Monto Axis': item.montoAxis || 0,
+          'Monto a facturar': item.montoFacturar || 0,
           Notas: getOsoReportValue(item, 'notas')
         }))
       );
@@ -740,7 +884,7 @@ export default function App() {
     XLSX.writeFile(wb, `reporte-oso-${modeLabel}-${dateKey}.xlsx`);
   };
 
-  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders]);
+  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders, axisDraft]);
 
   const exportOsoReport = () => {
     const orders = filteredOsoOrders;
@@ -3100,6 +3244,7 @@ export default function App() {
       (purchaseDraftRow.purchaseSo !== undefined && (purchaseDraftRow.purchaseSo ?? '') !== (boMeta[order.bo]?.purchaseSo ?? '')) ||
       (purchaseDraftRow.poAxis !== undefined && (purchaseDraftRow.poAxis ?? '') !== (boMeta[order.bo]?.poAxis ?? ''))
     );
+    const canEditAxis = mode === 'ordenes';
 
     const isEmbarcador = mode === 'compras' && String(purchaseDispatch || '').toLowerCase() === 'embarcador';
     const isPendingPurchase = mode === 'compras' && purchaseStatus === 'pendiente';
@@ -3193,6 +3338,15 @@ export default function App() {
                   className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
                 >
                   {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
+                </button>
+              )}
+              {mode === 'ordenes' && (
+                <button
+                  onClick={() => saveAxisAmounts(order)}
+                  disabled={!isAxisDirty(order) || axisSaving[order.bo]}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isAxisDirty(order) ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-100 text-slate-400'} ${axisSaving[order.bo] ? 'opacity-60' : ''}`}
+                >
+                  {axisSaving[order.bo] ? 'Guardando...' : 'Guardar Axis'}
                 </button>
               )}
               {mode === 'ordenes' && (
@@ -3332,6 +3486,7 @@ export default function App() {
                     <th className="px-2 py-2 text-left">MPN</th>
                     <th className="px-2 py-2 text-left">SKU</th>
                     <th className="px-2 py-2 text-left">Producto</th>
+                    <th className="px-2 py-2 text-right">Monto Axis</th>
                     <th className="px-2 py-2 text-left">Entrega (OOR)</th>
                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
                     <th className="px-2 py-2 text-right">Cant. Orden</th>
@@ -3340,10 +3495,20 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {(order.lines || []).map((line, idx) => (
-                    <tr key={`${order.bo}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50/40' : ''}>
+                    <tr key={`${order.bo}-${line.lineIndex ?? idx}`} className={idx % 2 === 1 ? 'bg-slate-50/40' : ''}>
                       <td className="px-2 py-2">{line.mpn || 'N/A'}</td>
                       <td className="px-2 py-2">{line.sku || 'N/A'}</td>
                       <td className="px-2 py-2">{line.desc || 'N/A'}</td>
+                      <td className="px-2 py-2 text-right">
+                        <input
+                          type="number"
+                          value={getAxisMontoValue(order.bo, line)}
+                          onChange={(e) => updateAxisDraft(order.bo, getAxisLineKey(line), e.target.value)}
+                          disabled={!canEditAxis}
+                          className={`w-24 px-2 py-1 border border-slate-200 rounded text-xs text-right ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
+                          placeholder="0"
+                        />
+                      </td>
                       <td className="px-2 py-2">{line.tiempoEntrega || 'N/A'}</td>
                       <td className="px-2 py-2 text-right">{line.allocQty ?? 0}</td>
                       <td className="px-2 py-2 text-right">{line.orderQty ?? 0}</td>
@@ -3352,7 +3517,7 @@ export default function App() {
                   ))}
                   {(order.lines || []).length > 0 && (
                     <tr className="bg-slate-100/70 font-semibold text-slate-700">
-                      <td className="px-2 py-2" colSpan={4}>Totales</td>
+                      <td className="px-2 py-2" colSpan={5}>Totales</td>
                       <td className="px-2 py-2 text-right">{totalAllocQty}</td>
                       <td className="px-2 py-2 text-right">{totalOrderQty}</td>
                       <td className="px-2 py-2 text-right">{totalShippedQty}</td>
@@ -5183,6 +5348,7 @@ export default function App() {
                     <option value="">Informes...</option>
                     <option value="empresa">Informe por empresa</option>
                     <option value="proximas">Próximas entregas</option>
+                    <option value="axis">Reporte Axis</option>
                   </select>
                   </div>
                 </div>
@@ -5413,6 +5579,7 @@ export default function App() {
                     <option value="">Informes...</option>
                     <option value="empresa">Informe por empresa</option>
                     <option value="proximas">Próximas entregas</option>
+                    <option value="axis">Reporte Axis</option>
                   </select>
                 </div>
               </div>
@@ -5620,6 +5787,12 @@ export default function App() {
                     Próximas entregas
                   </button>
                   <button
+                    onClick={() => setOsoReportMode('axis')}
+                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'axis' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  >
+                    Reporte Axis
+                  </button>
+                  <button
                     onClick={exportOsoReportPdf}
                     className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                   >
@@ -5717,6 +5890,88 @@ export default function App() {
                                       <td className="px-2 py-2 text-right">{row.orderQty}</td>
                                       <td className="px-2 py-2 text-right">{row.allocQty}</td>
                                       <td className="px-2 py-2 text-right">{row.shippedQty}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'notas')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { notas: e.target.value })}
+                                          className="w-40 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ));
+                      })()
+                    ) : osoReportMode === 'axis' ? (
+                      (() => {
+                        const groups = new Map();
+                        osoLineReportRows.forEach(row => {
+                          const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+                          if (!groups.has(empresa)) groups.set(empresa, []);
+                          groups.get(empresa).push(row);
+                        });
+                        const ordered = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                        return ordered.map(([empresa, rows]) => (
+                          <div key={`axis-${empresa}`} className="border border-slate-200 rounded-2xl overflow-hidden">
+                            <div className="px-3 py-2 bg-slate-50 text-sm font-semibold text-slate-700">{empresa}</div>
+                            <div className="overflow-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-slate-50 text-slate-600">
+                                  <tr>
+                                    <th className="px-2 py-2 text-left">BO</th>
+                                    <th className="px-2 py-2 text-left">PO Cliente</th>
+                                    <th className="px-2 py-2 text-left">Cliente</th>
+                                    <th className="px-2 py-2 text-left">MPN</th>
+                                    <th className="px-2 py-2 text-left">SKU</th>
+                                    <th className="px-2 py-2 text-left">Producto</th>
+                                    <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-right">Cant. Orden</th>
+                                    <th className="px-2 py-2 text-right">Monto Axis</th>
+                                    <th className="px-2 py-2 text-right">Monto a facturar</th>
+                                    <th className="px-2 py-2 text-left">Notas</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {rows.map(row => (
+                                    <tr key={`axis-${row.key}`}>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'bo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { bo: e.target.value })}
+                                          className="w-24 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'customerPo')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { customerPo: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'cliente')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { cliente: e.target.value })}
+                                          className="w-48 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">{row.mpn || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.sku || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.desc || 'N/A'}</td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'etaEstimado')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { etaEstimado: e.target.value })}
+                                          className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                          placeholder="YYYY-MM-DD"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2 text-right">{row.orderQty}</td>
+                                      <td className="px-2 py-2 text-right">{row.montoAxis || 0}</td>
+                                      <td className="px-2 py-2 text-right">{row.montoFacturar || 0}</td>
                                       <td className="px-2 py-2">
                                         <input
                                           value={getOsoReportValue(row, 'notas')}
@@ -5840,7 +6095,9 @@ export default function App() {
               <div className="text-right">
                 <div className="text-sm font-semibold">Informe de órdenes activas</div>
                 <div className="text-[11px] text-slate-500">Generado: {new Date().toLocaleDateString()}</div>
-                <div className="text-[11px] text-slate-500">Modo: {osoReportMode === 'proximas' ? 'Próximas entregas' : 'Por empresa'}</div>
+                <div className="text-[11px] text-slate-500">
+                  Modo: {osoReportMode === 'proximas' ? 'Próximas entregas' : (osoReportMode === 'axis' ? 'Reporte Axis' : 'Por empresa')}
+                </div>
               </div>
             </div>
             {osoReportMode === 'empresa' ? (
@@ -5884,6 +6141,55 @@ export default function App() {
                             <td className="px-2 py-1 text-right">{row.orderQty}</td>
                             <td className="px-2 py-1 text-right">{row.allocQty}</td>
                             <td className="px-2 py-1 text-right">{row.shippedQty}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'notas')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ));
+              })()
+            ) : osoReportMode === 'axis' ? (
+              (() => {
+                const groups = new Map();
+                osoLineReportRows.forEach(row => {
+                  const empresa = (getOsoReportValue(row, 'cliente') || 'Sin empresa').toString().trim() || 'Sin empresa';
+                  if (!groups.has(empresa)) groups.set(empresa, []);
+                  groups.get(empresa).push(row);
+                });
+                const ordered = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+                return ordered.map(([empresa, rows]) => (
+                  <div key={`pdf-axis-${empresa}`} className="mb-4">
+                    <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
+                    <table className="w-full text-[10px] border border-slate-200">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="px-2 py-1 text-left">BO</th>
+                          <th className="px-2 py-1 text-left">PO Cliente</th>
+                          <th className="px-2 py-1 text-left">Cliente</th>
+                          <th className="px-2 py-1 text-left">MPN</th>
+                          <th className="px-2 py-1 text-left">SKU</th>
+                          <th className="px-2 py-1 text-left">Producto</th>
+                          <th className="px-2 py-1 text-left">ETA Est.</th>
+                          <th className="px-2 py-1 text-right">Cant. Orden</th>
+                          <th className="px-2 py-1 text-right">Monto Axis</th>
+                          <th className="px-2 py-1 text-right">Monto a facturar</th>
+                          <th className="px-2 py-1 text-left">Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rows.map(row => (
+                          <tr key={`pdf-axis-${row.key}`}>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'customerPo')}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
+                            <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
+                            <td className="px-2 py-1">{row.sku || 'N/A'}</td>
+                            <td className="px-2 py-1">{row.desc || 'N/A'}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
+                            <td className="px-2 py-1 text-right">{row.orderQty}</td>
+                            <td className="px-2 py-1 text-right">{row.montoAxis || 0}</td>
+                            <td className="px-2 py-1 text-right">{row.montoFacturar || 0}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'notas')}</td>
                           </tr>
                         ))}

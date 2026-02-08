@@ -405,6 +405,21 @@ export const boMetaAPI = {
   },
 };
 
+// API de BO Line Meta
+export const boLineMetaAPI = {
+  save: async (bo, payload) => {
+    const response = await fetchWithAuth(`/api/bo-lines/${encodeURIComponent(bo)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Error guardando montos Axis');
+    }
+    return response.json();
+  },
+};
+
 // API de Stock
 export const stockAPI = {
   getAll: async () => {

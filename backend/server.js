@@ -589,6 +589,17 @@ const initDB = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS bo_line_meta (
+        id SERIAL PRIMARY KEY,
+        bo VARCHAR(100) NOT NULL,
+        sku TEXT,
+        mpn TEXT,
+        monto_axis DECIMAL(14,4),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (bo, sku, mpn)
+      );
+
       CREATE TABLE IF NOT EXISTS bo_deleted_logs (
         id SERIAL PRIMARY KEY,
         bo VARCHAR(100) NOT NULL,
@@ -631,6 +642,10 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_comment TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;`);
+    await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS sku TEXT;`);
+    await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS mpn TEXT;`);
+    await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS monto_axis DECIMAL(14,4);`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS bo_line_meta_unique_idx ON bo_line_meta(bo, sku, mpn);`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_qnap DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
@@ -1368,6 +1383,18 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
         if (row.bo) acc[row.bo] = row.po_axis;
         return acc;
       }, {});
+      const lineMetaResult = await pool.query(
+        'SELECT bo, sku, mpn, monto_axis FROM bo_line_meta WHERE bo = ANY($1::text[])',
+        [boList]
+      );
+      const axisByBo = lineMetaResult.rows.reduce((acc, row) => {
+        if (!row?.bo) return acc;
+        if (!acc[row.bo]) acc[row.bo] = {};
+        const skuKey = normalizeLookupKey(row.sku);
+        const mpnKey = normalizeLookupKey(row.mpn);
+        acc[row.bo][`${skuKey}||${mpnKey}`] = row.monto_axis;
+        return acc;
+      }, {});
 
       const oorData = await getSheetData(sheets, spreadsheetId, 'OOR');
       const oorHeaders = oorData.headers || [];
@@ -1424,6 +1451,16 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
               (skuKey && entry.sku.get(skuKey)) ||
               (descKey && entry.desc.get(descKey)) ||
               '';
+          });
+        }
+        if (axisByBo[order.bo]) {
+          (order.lines || []).forEach(line => {
+            const skuKey = normalizeLookupKey(line.sku);
+            const mpnKey = normalizeLookupKey(line.mpn);
+            const stored = axisByBo[order.bo]?.[`${skuKey}||${mpnKey}`];
+            if (stored !== undefined && stored !== null) {
+              line.montoAxis = parseNumber(stored, 0);
+            }
           });
         }
       });
@@ -1532,6 +1569,54 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error guardando bo_meta:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// BO Line Meta - Guardar montos axis por linea (admin)
+app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const bo = String(req.params.bo || '').trim();
+    if (!bo) return res.status(400).json({ error: 'BO requerido' });
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    if (!lines.length) return res.json({ updated: 0 });
+
+    const normalizeAmount = (value) => {
+      if (value === undefined || value === null || value === '') return null;
+      const parsed = parseFloat(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    };
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      let updated = 0;
+      for (const line of lines) {
+        const montoAxis = normalizeAmount(line?.montoAxis);
+        const sku = line?.sku ? String(line.sku).trim() : '';
+        const mpn = line?.mpn ? String(line.mpn).trim() : '';
+        if (!sku && !mpn) continue;
+        await client.query(
+          `INSERT INTO bo_line_meta (bo, sku, mpn, monto_axis, updated_at)
+           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+           ON CONFLICT (bo, sku, mpn) DO UPDATE
+           SET monto_axis = EXCLUDED.monto_axis,
+               updated_at = CURRENT_TIMESTAMP`,
+          [bo, sku, mpn, montoAxis]
+        );
+        updated += 1;
+      }
+      await client.query('COMMIT');
+      res.json({ updated });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error guardando bo_line_meta:', error);
+      res.status(500).json({ error: 'Error guardando montos Axis' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error guardando bo_line_meta:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
