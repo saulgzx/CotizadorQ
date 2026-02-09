@@ -501,7 +501,7 @@ const initDB = async () => {
         rebate_partner_silver DECIMAL(12,2) DEFAULT 0,
         rebate_partner_gold DECIMAL(12,2) DEFAULT 0,
         rebate_partner_multiregional DECIMAL(12,2) DEFAULT 0,
-        tiempo_entrega VARCHAR(50) DEFAULT 'ETA por confirmar',
+        tiempo_entrega VARCHAR(200) DEFAULT 'ETA por confirmar',
         activo BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -537,7 +537,7 @@ const initDB = async () => {
         cantidad INTEGER DEFAULT 1,
         precio_unitario DECIMAL(12,2),
         precio_total DECIMAL(12,2),
-        tiempo_entrega VARCHAR(50)
+        tiempo_entrega VARCHAR(200)
       );
 
       CREATE TABLE IF NOT EXISTS sesiones (
@@ -617,12 +617,15 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE productos ADD COLUMN IF NOT EXISTS rebate_partner_gold DECIMAL(12,2) DEFAULT 0;`);
     await pool.query(`ALTER TABLE productos ADD COLUMN IF NOT EXISTS rebate_partner_multiregional DECIMAL(12,2) DEFAULT 0;`);
     await pool.query(`ALTER TABLE productos ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT true;`);
+    await pool.query(`ALTER TABLE productos ALTER COLUMN tiempo_entrega TYPE VARCHAR(200);`);
     await pool.query(`UPDATE productos SET origen = 'QNAP' WHERE origen IS NULL;`);
     await pool.query(`UPDATE productos SET activo = true WHERE activo IS NULL;`);
 
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'client';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS empresa VARCHAR(150);`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS logo_url TEXT;`);
+
+    await pool.query(`ALTER TABLE cotizacion_items ALTER COLUMN tiempo_entrega TYPE VARCHAR(200);`);
 
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS project_name TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS po_axis TEXT;`);
@@ -1965,6 +1968,11 @@ app.post('/api/cotizaciones', authenticateToken, async (req, res) => {
     const isAdmin = !req.user?.role || req.user.role === 'admin';
     let totalFinal = total;
     let itemsFinal = items;
+
+    // Validar entrada mínima
+    if (!cliente || typeof cliente !== 'object') {
+      return res.status(400).json({ error: 'Cliente requerido' });
+    }
 
     if (!isAdmin) {
       const userResult = await pool.query('SELECT gp, gp_qnap, gp_axis, partner_category FROM usuarios WHERE id = $1', [usuarioId]);
