@@ -837,20 +837,25 @@ export default function App() {
         grouped.get(empresa).push(row);
       });
       rows = Array.from(grouped.entries()).flatMap(([empresa, items]) =>
-        items.map(item => ({
-          Empresa: empresa,
-          BO: getOsoReportValue(item, 'bo'),
-          'PO Cliente': getOsoReportValue(item, 'customerPo'),
-          Cliente: getOsoReportValue(item, 'cliente'),
-          MPN: item.mpn || 'N/A',
-          SKU: item.sku || 'N/A',
-          Producto: item.desc || 'N/A',
-          'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
-          'Cant. Orden': item.orderQty,
-          'Monto Axis': item.montoAxis || 0,
-          'Monto a facturar': item.montoFacturar || 0,
-          Notas: getOsoReportValue(item, 'notas')
-        }))
+        items.map(item => {
+          const meta = getOsoMeta(item.bo) || {};
+          return {
+            Empresa: empresa,
+            BO: getOsoReportValue(item, 'bo'),
+            'PO Axis': getOsoReportValue(item, 'poAxis') || meta.poAxis || '',
+            Proyecto: getOsoReportValue(item, 'projectName') || meta.projectName || '',
+            'PO Cliente': getOsoReportValue(item, 'customerPo'),
+            Cliente: getOsoReportValue(item, 'cliente'),
+            MPN: item.mpn || 'N/A',
+            SKU: item.sku || 'N/A',
+            Producto: item.desc || 'N/A',
+            'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
+            'Cant. Orden': item.orderQty,
+            'Monto Axis': item.montoAxis || 0,
+            'Monto a facturar': item.montoFacturar || 0,
+            Notas: getOsoReportValue(item, 'notas')
+          };
+        })
       );
     } else {
       const toTs = (value) => {
@@ -6208,23 +6213,28 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {rows.map(row => (
-                          <tr key={`pdf-axis-${row.key}`}>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'poAxis')}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'projectName')}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'customerPo')}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
-                            <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
-                            <td className="px-2 py-1">{row.sku || 'N/A'}</td>
-                            <td className="px-2 py-1">{row.desc || 'N/A'}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
-                            <td className="px-2 py-1 text-right">{row.orderQty}</td>
-                            <td className="px-2 py-1 text-right">{row.montoAxis || 0}</td>
-                            <td className="px-2 py-1 text-right">{row.montoFacturar || 0}</td>
-                            <td className="px-2 py-1">{getOsoReportValue(row, 'notas')}</td>
-                          </tr>
-                        ))}
+                        {rows.map(row => {
+                          const meta = getOsoMeta(row.bo) || {};
+                          const poAxisValue = getOsoReportValue(row, 'poAxis') || meta.poAxis || '';
+                          const projectValue = getOsoReportValue(row, 'projectName') || meta.projectName || '';
+                          return (
+                            <tr key={`pdf-axis-${row.key}`}>
+                              <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
+                              <td className="px-2 py-1">{poAxisValue}</td>
+                              <td className="px-2 py-1">{projectValue}</td>
+                              <td className="px-2 py-1">{getOsoReportValue(row, 'customerPo')}</td>
+                              <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
+                              <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
+                              <td className="px-2 py-1">{row.sku || 'N/A'}</td>
+                              <td className="px-2 py-1">{row.desc || 'N/A'}</td>
+                              <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
+                              <td className="px-2 py-1 text-right">{row.orderQty}</td>
+                              <td className="px-2 py-1 text-right">{row.montoAxis || 0}</td>
+                              <td className="px-2 py-1 text-right">{row.montoFacturar || 0}</td>
+                              <td className="px-2 py-1">{getOsoReportValue(row, 'notas')}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
