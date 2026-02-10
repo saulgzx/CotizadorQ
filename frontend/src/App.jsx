@@ -892,7 +892,10 @@ export default function App() {
     XLSX.writeFile(wb, `reporte-oso-${modeLabel}-${dateKey}.xlsx`);
   };
 
-  const osoLineReportRows = useMemo(() => buildOsoLineReportRows(filteredOsoOrders), [filteredOsoOrders, axisDraft]);
+  const osoLineReportRows = useMemo(
+    () => buildOsoLineReportRows(filteredOsoOrders),
+    [filteredOsoOrders, axisDraft, boMeta, boDraft]
+  );
 
   const exportOsoReport = () => {
     const orders = filteredOsoOrders;
