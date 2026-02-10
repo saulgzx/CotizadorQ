@@ -746,6 +746,7 @@ export default function App() {
       const cliente = getOsoCustomerName(order);
       const customerPo = order?.customerPO || getOsoMeta(order?.bo)?.customerPO || '';
       const poAxis = getOsoMeta(order?.bo)?.poAxis || '';
+      const projectName = getOsoMeta(order?.bo)?.projectName || '';
       (order.lines || []).forEach((line, idx) => {
         const entregaOor = line.tiempoEntrega || '';
         const montoAxis = getAxisMontoNumber(order?.bo, line);
@@ -755,6 +756,7 @@ export default function App() {
           bo,
           customerPo,
           poAxis,
+          projectName,
           cliente,
           empresa: cliente,
           sku: line.sku || '',
@@ -814,6 +816,7 @@ export default function App() {
           Empresa: empresa,
           BO: getOsoReportValue(item, 'bo'),
           'PO Axis': getOsoReportValue(item, 'poAxis'),
+          Proyecto: getOsoReportValue(item, 'projectName'),
           'PO Cliente': getOsoReportValue(item, 'customerPo'),
           Cliente: getOsoReportValue(item, 'cliente'),
           MPN: item.mpn || 'N/A',
@@ -5847,6 +5850,7 @@ export default function App() {
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
                                     <th className="px-2 py-2 text-left">PO Axis</th>
+                                    <th className="px-2 py-2 text-left">Proyecto</th>
                                     <th className="px-2 py-2 text-left">PO Cliente</th>
                                     <th className="px-2 py-2 text-left">Cliente</th>
                                     <th className="px-2 py-2 text-left">MPN</th>
@@ -5874,6 +5878,13 @@ export default function App() {
                                           value={getOsoReportValue(row, 'poAxis')}
                                           onChange={(e) => updateOsoReportEdit(row.key, { poAxis: e.target.value })}
                                           className="w-28 px-2 py-1 border border-slate-200 rounded text-xs"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <input
+                                          value={getOsoReportValue(row, 'projectName')}
+                                          onChange={(e) => updateOsoReportEdit(row.key, { projectName: e.target.value })}
+                                          className="w-32 px-2 py-1 border border-slate-200 rounded text-xs"
                                         />
                                       </td>
                                       <td className="px-2 py-2">
@@ -6131,6 +6142,7 @@ export default function App() {
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
                           <th className="px-2 py-1 text-left">PO Axis</th>
+                          <th className="px-2 py-1 text-left">Proyecto</th>
                           <th className="px-2 py-1 text-left">PO Cliente</th>
                           <th className="px-2 py-1 text-left">Cliente</th>
                           <th className="px-2 py-1 text-left">MPN</th>
@@ -6197,6 +6209,7 @@ export default function App() {
                           <tr key={`pdf-axis-${row.key}`}>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'bo')}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'poAxis')}</td>
+                            <td className="px-2 py-1">{getOsoReportValue(row, 'projectName')}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'customerPo')}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'cliente')}</td>
                             <td className="px-2 py-1">{row.mpn || 'N/A'}</td>
