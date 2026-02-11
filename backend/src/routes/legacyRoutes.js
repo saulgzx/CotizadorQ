@@ -452,7 +452,15 @@ const getSheetIdByName = async (sheets, spreadsheetId, tabName) => {
     spreadsheetId,
     fields: 'sheets.properties'
   }));
-  const sheet = (meta.data.sheets || []).find(s => s.properties?.title === tabName);
+  const normalizeTabName = (value) => String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  const wanted = normalizeTabName(tabName);
+  const sheet = (meta.data.sheets || []).find((s) => {
+    const title = s.properties?.title || '';
+    return title === tabName || normalizeTabName(title) === wanted;
+  });
   return sheet?.properties?.sheetId;
 };
 
