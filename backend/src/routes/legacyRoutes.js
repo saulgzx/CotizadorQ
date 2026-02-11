@@ -2125,6 +2125,25 @@ app.post('/api/productos/bulk', authenticateToken, requireAdmin, validateBulkPro
 // PRODUCTOS - Sync desde Google Sheets (manual)
 app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const buildSkippedDetail = async (origenNormalized, fallbackReason) => {
+      if (fallbackReason) return fallbackReason;
+      const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+      const configuredTab = origenNormalized === 'AXIS' ? SHEETS_TAB_AXIS : SHEETS_TAB_QNAP;
+      try {
+        const sheets = getSheetsClient(true);
+        const meta = await withGoogleRetry('sheets.spreadsheets.get', () => sheets.spreadsheets.get({
+          spreadsheetId,
+          fields: 'sheets.properties.title'
+        }));
+        const tabs = (meta.data.sheets || [])
+          .map((s) => s.properties?.title)
+          .filter(Boolean);
+        return `No se pudo sincronizar ${origenNormalized}. Tab configurada="${configuredTab}". Tabs detectadas=[${tabs.join(', ')}]`;
+      } catch (_) {
+        return `No se pudo sincronizar ${origenNormalized}. Tab configurada="${configuredTab}". No fue posible listar tabs en runtime`;
+      }
+    };
+
     const origen = req.query.origen;
     if (origen) {
       const origenNormalized = String(origen).toUpperCase();
@@ -2135,7 +2154,7 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
       if (result?.skipped) {
         return res.status(400).json({
           error: 'Sync no configurado',
-          detail: result.reason || `No se pudo sincronizar ${origenNormalized}. Verifique tab/env/permisos`
+          detail: await buildSkippedDetail(origenNormalized, result.reason)
         });
       }
       invalidateOperationalCaches();
@@ -2147,8 +2166,8 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
       return res.status(400).json({
         error: 'Sync no configurado',
         detail: {
-          qnap: qnap?.reason || null,
-          axis: axis?.reason || null
+          qnap: await buildSkippedDetail('QNAP', qnap?.reason || null),
+          axis: await buildSkippedDetail('AXIS', axis?.reason || null)
         }
       });
     }
