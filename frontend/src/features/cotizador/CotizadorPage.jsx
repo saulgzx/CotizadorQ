@@ -4972,7 +4972,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Gestión de Productos Axis
                 </button>
                 <a
-                  href="https://docs.google.com/spreadsheets/d/1dF7GCG0NZe5MIo_DZHuDMiFWueR4vdieGYpaSALqbQM/edit?gid=436802384#gid=436802384"
+                  href="https://docs.google.com/spreadsheets/d/1cSAaO8GbWFKuboZzhQcyc2CuSD38xtQv8ELjO33G2U0/edit?gid=0#gid=0"
                   target="_blank"
                   rel="noreferrer"
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-white hover:bg-slate-800"
