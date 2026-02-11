@@ -184,9 +184,9 @@ const getSessionTtlMsForRole = (role) =>
 
 const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
-  sku: ['sku', 'codigo', 'code', 'partnumber'],
-  mpn: ['mpn', 'model', 'modelo'],
-  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre'],
+  sku: ['sku', 'codigo', 'code', 'partnumber', 'part number', 'part no', 'item code', 'item', 'pn'],
+  mpn: ['mpn', 'model', 'modelo', 'part number manufacturer', 'manufacturer part number'],
+  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
   precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
   gp: ['gp', 'margen', 'margin', 'gp (%)', 'gp %'],
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
@@ -369,6 +369,29 @@ const getSheetColumnIndexes = (origen, headers) => {
     idx.rebate_partner_gold = 7;
     idx.rebate_partner_multiregional = 8;
     if (idx.tiempo < 0) idx.tiempo = 9;
+  }
+
+  // Fallback a estructura estándar cuando no hay headers detectables.
+  if (idx.sku < 0 && idx.desc < 0) {
+    if (origen === 'AXIS') {
+      idx.marca = idx.marca >= 0 ? idx.marca : 0;
+      idx.sku = 1;
+      idx.mpn = idx.mpn >= 0 ? idx.mpn : 2;
+      idx.desc = 3;
+      idx.precio = idx.precio >= 0 ? idx.precio : 4;
+      idx.gp = idx.gp >= 0 ? idx.gp : -1;
+      idx.tiempo = idx.tiempo >= 0 ? idx.tiempo : 9;
+      idx.activo = idx.activo >= 0 ? idx.activo : 10;
+    } else {
+      idx.marca = idx.marca >= 0 ? idx.marca : 0;
+      idx.sku = 1;
+      idx.mpn = idx.mpn >= 0 ? idx.mpn : 2;
+      idx.desc = 3;
+      idx.precio = idx.precio >= 0 ? idx.precio : 4;
+      idx.gp = idx.gp >= 0 ? idx.gp : 5;
+      idx.tiempo = idx.tiempo >= 0 ? idx.tiempo : 6;
+      idx.activo = idx.activo >= 0 ? idx.activo : 7;
+    }
   }
   return idx;
 };
