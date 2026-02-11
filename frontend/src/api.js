@@ -1,6 +1,12 @@
 // URL del backend - usa proxy en prod; en local configura VITE_API_URL si aplica
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+const clearSessionAndRedirectToLogin = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  window.location.assign('/');
+};
+
 // Función helper para hacer peticiones autenticadas
 const fetchWithAuth = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
@@ -28,11 +34,12 @@ const fetchWithAuth = async (endpoint, options = {}) => {
 
   const response = await fetch(`${API_URL}${endpoint}`, config);
   
-  if (response.status === 401 || response.status === 403) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.reload();
-    throw new Error('Sesión expirada');
+  if (response.status === 401) {
+    clearSessionAndRedirectToLogin();
+    throw new Error('Sesion expirada');
+  }
+  if (response.status === 403) {
+    throw new Error('No tienes permisos para realizar esta accion');
   }
 
   return response;
@@ -433,3 +440,4 @@ export const stockAPI = {
     return response.json();
   },
 };
+
