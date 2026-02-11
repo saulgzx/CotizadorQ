@@ -59,9 +59,9 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-const SHEETS_TAB_QNAP = process.env.GOOGLE_SHEETS_TAB_QNAP || 'Hoja 1';
-const SHEETS_TAB_AXIS = process.env.GOOGLE_SHEETS_TAB_AXIS || 'Hoja 2';
-const SHEETS_TAB_STOCK = process.env.GOOGLE_SHEETS_TAB_STOCK || 'Stock';
+const SHEETS_TAB_QNAP = (process.env.GOOGLE_SHEETS_TAB_QNAP || 'Hoja 1').trim();
+const SHEETS_TAB_AXIS = (process.env.GOOGLE_SHEETS_TAB_AXIS || 'Hoja 2').trim();
+const SHEETS_TAB_STOCK = (process.env.GOOGLE_SHEETS_TAB_STOCK || 'Stock').trim();
 const SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 const SHEETS_SCOPE_RW = 'https://www.googleapis.com/auth/spreadsheets';
 const DEFAULT_ORIGIN = 'QNAP';
@@ -551,7 +551,7 @@ const syncProductosFromSheet = async (options = {}) => {
     return { skipped: true, reason: 'GOOGLE_SHEETS_ID no configurado' };
   }
   const origen = String(options.origen || DEFAULT_ORIGIN).toUpperCase();
-  const tabName = options.tab || (origen === 'AXIS' ? SHEETS_TAB_AXIS : SHEETS_TAB_QNAP);
+  const tabName = String(options.tab || (origen === 'AXIS' ? SHEETS_TAB_AXIS : SHEETS_TAB_QNAP)).trim();
   const sheets = getSheetsClient();
   const tabId = await getSheetIdByName(sheets, sheetId, tabName);
   if (!tabId) {
