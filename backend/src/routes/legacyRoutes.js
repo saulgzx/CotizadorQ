@@ -2151,7 +2151,7 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
         return res.status(400).json({ error: 'Origen invalido. Use QNAP o AXIS' });
       }
       const result = await syncProductosFromSheet({ origen: origenNormalized });
-      if (result?.skipped) {
+      if (result?.skipped === true) {
         return res.status(400).json({
           error: 'Sync no configurado',
           detail: await buildSkippedDetail(origenNormalized, result.reason)
@@ -2162,7 +2162,7 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
     }
     const qnap = await syncProductosFromSheet({ origen: 'QNAP' });
     const axis = await syncProductosFromSheet({ origen: 'AXIS' });
-    if (qnap?.skipped || axis?.skipped) {
+    if (qnap?.skipped === true || axis?.skipped === true) {
       return res.status(400).json({
         error: 'Sync no configurado',
         detail: {
