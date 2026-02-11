@@ -554,7 +554,7 @@ const syncProductosFromSheet = async (options = {}) => {
   const tabName = String(options.tab || (origen === 'AXIS' ? SHEETS_TAB_AXIS : SHEETS_TAB_QNAP)).trim();
   const sheets = getSheetsClient();
   const tabId = await getSheetIdByName(sheets, sheetId, tabName);
-  if (!tabId) {
+  if (tabId === undefined || tabId === null) {
     return { skipped: true, reason: `La pestana "${tabName}" no existe en la hoja` };
   }
   const { rows, headers } = await getSheetData(sheets, sheetId, tabName);
