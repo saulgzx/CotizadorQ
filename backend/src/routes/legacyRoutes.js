@@ -79,8 +79,8 @@ const LOGIN_RATE_LIMIT_WINDOW_MIN = parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW
 const STOCK_CACHE_TTL_SEC = parseInt(process.env.STOCK_CACHE_TTL_SEC || '120', 10);
 const STOCK_CATALOG_CACHE_TTL_SEC = parseInt(process.env.STOCK_CATALOG_CACHE_TTL_SEC || '180', 10);
 const OSO_ORDERS_CACHE_TTL_SEC = parseInt(process.env.OSO_ORDERS_CACHE_TTL_SEC || '120', 10);
-const GOOGLE_API_TIMEOUT_MS = parseInt(process.env.GOOGLE_API_TIMEOUT_MS || '12000', 10);
-const GOOGLE_API_RETRIES = parseInt(process.env.GOOGLE_API_RETRIES || '2', 10);
+const GOOGLE_API_TIMEOUT_MS = parseInt(process.env.GOOGLE_API_TIMEOUT_MS || '30000', 10);
+const GOOGLE_API_RETRIES = parseInt(process.env.GOOGLE_API_RETRIES || '3', 10);
 const GOOGLE_API_RETRY_DELAY_MS = parseInt(process.env.GOOGLE_API_RETRY_DELAY_MS || '300', 10);
 
 const responseCache = new Map();
@@ -89,9 +89,9 @@ const toPositiveInt = (value, fallback) => (Number.isFinite(value) && value > 0 
 const STOCK_CACHE_TTL_MS = toPositiveInt(STOCK_CACHE_TTL_SEC, 120) * 1000;
 const STOCK_CATALOG_CACHE_TTL_MS = toPositiveInt(STOCK_CATALOG_CACHE_TTL_SEC, 180) * 1000;
 const OSO_ORDERS_CACHE_TTL_MS = toPositiveInt(OSO_ORDERS_CACHE_TTL_SEC, 120) * 1000;
-const GOOGLE_RETRY_COUNT = Math.max(0, toPositiveInt(GOOGLE_API_RETRIES, 2));
+const GOOGLE_RETRY_COUNT = Math.max(0, toPositiveInt(GOOGLE_API_RETRIES, 3));
 const GOOGLE_RETRY_DELAY = Math.max(100, toPositiveInt(GOOGLE_API_RETRY_DELAY_MS, 300));
-const GOOGLE_TIMEOUT = Math.max(1000, toPositiveInt(GOOGLE_API_TIMEOUT_MS, 12000));
+const GOOGLE_TIMEOUT = Math.max(1000, toPositiveInt(GOOGLE_API_TIMEOUT_MS, 30000));
 
 const cacheGet = (key) => {
   const entry = responseCache.get(key);
@@ -2127,8 +2127,12 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
   } catch (error) {
     logError(req, { ...compactErrorForLog(error), source: 'productos_sync' }, 'producto_sync_failed');
     const detail = compactErrorForLog(error);
+    const baseMessage = getExternalErrorMessage(error, 'Error sincronizando productos con Google Sheets');
+    const errorMessage = detail.reason || detail.message
+      ? `${baseMessage}: ${detail.reason || detail.message}`
+      : baseMessage;
     res.status(500).json({
-      error: getExternalErrorMessage(error, 'Error sincronizando productos con Google Sheets'),
+      error: errorMessage,
       detail: detail.reason || detail.message || null
     });
   }
