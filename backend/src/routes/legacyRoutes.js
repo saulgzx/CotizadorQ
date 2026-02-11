@@ -260,6 +260,47 @@ const findHeaderIndex = (headers, keys) => {
   return -1;
 };
 
+const normalizeHeaderLoose = (value) =>
+  String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s_.-]+/g, '')
+    .trim();
+
+const detectHeaderRowIndex = (rows, origen) => {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const baseKeys = [
+    ...COLUMN_MAP.marca,
+    ...COLUMN_MAP.sku,
+    ...COLUMN_MAP.mpn,
+    ...COLUMN_MAP.desc,
+    ...COLUMN_MAP.precio,
+    ...COLUMN_MAP.gp,
+    ...COLUMN_MAP.tiempo,
+    'activo',
+    'active',
+    'status'
+  ];
+  const axisExtra = ['partner autorizado', 'partner silver', 'partner gold', 'partner multiregional'];
+  const expected = new Set((origen === 'AXIS' ? [...baseKeys, ...axisExtra] : baseKeys).map(normalizeHeaderLoose));
+
+  let bestIdx = 0;
+  let bestScore = -1;
+  const maxRows = Math.min(rows.length, 15);
+  for (let i = 0; i < maxRows; i += 1) {
+    const row = Array.isArray(rows[i]) ? rows[i] : [];
+    let score = 0;
+    for (const cell of row) {
+      if (expected.has(normalizeHeaderLoose(cell))) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestScore >= 2 ? bestIdx : 0;
+};
+
 const parseGpValue = (value, fallback = 0.15) => {
   const parsed = parseFloat(value);
   if (Number.isNaN(parsed)) return fallback;
@@ -371,22 +412,22 @@ const getSheetColumnIndexes = (origen, headers) => {
     if (idx.tiempo < 0) idx.tiempo = 9;
   }
 
-  // Fallback a estructura estándar cuando no hay headers detectables.
-  if (idx.sku < 0 && idx.desc < 0) {
+  // Fallback a estructura estándar cuando faltan columnas claves.
+  if (idx.sku < 0 || idx.desc < 0) {
     if (origen === 'AXIS') {
       idx.marca = idx.marca >= 0 ? idx.marca : 0;
-      idx.sku = 1;
+      idx.sku = idx.sku >= 0 ? idx.sku : 1;
       idx.mpn = idx.mpn >= 0 ? idx.mpn : 2;
-      idx.desc = 3;
+      idx.desc = idx.desc >= 0 ? idx.desc : 3;
       idx.precio = idx.precio >= 0 ? idx.precio : 4;
       idx.gp = idx.gp >= 0 ? idx.gp : -1;
       idx.tiempo = idx.tiempo >= 0 ? idx.tiempo : 9;
       idx.activo = idx.activo >= 0 ? idx.activo : 10;
     } else {
       idx.marca = idx.marca >= 0 ? idx.marca : 0;
-      idx.sku = 1;
+      idx.sku = idx.sku >= 0 ? idx.sku : 1;
       idx.mpn = idx.mpn >= 0 ? idx.mpn : 2;
-      idx.desc = 3;
+      idx.desc = idx.desc >= 0 ? idx.desc : 3;
       idx.precio = idx.precio >= 0 ? idx.precio : 4;
       idx.gp = idx.gp >= 0 ? idx.gp : 5;
       idx.tiempo = idx.tiempo >= 0 ? idx.tiempo : 6;
@@ -580,11 +621,20 @@ const syncProductosFromSheet = async (options = {}) => {
   if (tabId === undefined || tabId === null) {
     return { skipped: true, reason: `La pestana "${tabName}" no existe en la hoja` };
   }
-  const { rows, headers } = await getSheetData(sheets, sheetId, tabName);
-  if (rows.length <= 1) {
+  const { rows } = await getSheetData(sheets, sheetId, tabName);
+  if (rows.length === 0) {
     await pool.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
     invalidateOperationalCaches();
-    return { inserted: 0, updated: 0, skipped: rows.length, total: rows.length };
+    return { inserted: 0, updated: 0, skipped: 0, total: 0 };
+  }
+  const headerRowIndex = detectHeaderRowIndex(rows, origen);
+  const headers = (rows[headerRowIndex] || []).map((h) => String(h || '').trim());
+  const dataRows = rows.slice(headerRowIndex + 1);
+
+  if (dataRows.length === 0) {
+    await pool.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
+    invalidateOperationalCaches();
+    return { inserted: 0, updated: 0, skipped: 0, total: 0 };
   }
 
   const idx = getSheetColumnIndexes(origen, headers);
@@ -596,8 +646,8 @@ const syncProductosFromSheet = async (options = {}) => {
   try {
     await client.query('BEGIN');
     await client.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i] || [];
+    for (let i = 0; i < dataRows.length; i += 1) {
+      const row = dataRows[i] || [];
       const sku = idx.sku >= 0 ? String(row[idx.sku] || '').trim() : '';
       const descripcion = idx.desc >= 0 ? String(row[idx.desc] || '').trim() : '';
       if (!sku && !descripcion) {
@@ -652,7 +702,7 @@ const syncProductosFromSheet = async (options = {}) => {
   }
 
   invalidateOperationalCaches();
-  return { inserted, updated, skipped, total: rows.length - 1 };
+  return { inserted, updated, skipped, total: dataRows.length };
 };
 
 const startSheetsSyncJob = () => {
