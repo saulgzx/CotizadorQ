@@ -211,6 +211,15 @@ const compactErrorForLog = (error) => ({
   reason: error?.errors?.[0]?.reason || error?.response?.data?.error?.status || null
 });
 
+const getSheetsRuntimeDebug = () => {
+  const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+  const serviceAccountEmail = String(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '').trim();
+  return {
+    spreadsheetId: spreadsheetId || null,
+    serviceAccountEmail: serviceAccountEmail || null
+  };
+};
+
 const getSheetsClient = (readOnly = true) => {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -2133,7 +2142,8 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
       : baseMessage;
     res.status(500).json({
       error: errorMessage,
-      detail: detail.reason || detail.message || null
+      detail: detail.reason || detail.message || null,
+      debug: getSheetsRuntimeDebug()
     });
   }
 });
