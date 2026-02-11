@@ -192,14 +192,24 @@ const COLUMN_MAP = {
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
 };
 
+const sanitizeSpreadsheetRef = (value) => String(value || '').replace(/[\r\n]/g, '').trim();
+
 const extractSheetId = (value) => {
-  if (!value) return null;
+  const rawValue = sanitizeSpreadsheetRef(value);
+  if (!rawValue) return null;
   const marker = '/spreadsheets/d/';
-  if (value.includes(marker)) {
-    return value.split(marker)[1].split('/')[0];
+  if (rawValue.includes(marker)) {
+    return rawValue.split(marker)[1].split('/')[0].replace(/\s+/g, '');
   }
-  return value;
+  return rawValue.replace(/\s+/g, '');
 };
+
+const compactErrorForLog = (error) => ({
+  message: error?.message || 'unknown error',
+  code: error?.code || null,
+  status: error?.response?.status || null,
+  reason: error?.errors?.[0]?.reason || error?.response?.data?.error?.status || null
+});
 
 const getSheetsClient = (readOnly = true) => {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -518,9 +528,13 @@ const syncProductosFromSheet = async (options = {}) => {
   if (!sheetId) {
     return { skipped: true, reason: 'GOOGLE_SHEETS_ID no configurado' };
   }
-  const origen = options.origen || DEFAULT_ORIGIN;
+  const origen = String(options.origen || DEFAULT_ORIGIN).toUpperCase();
   const tabName = options.tab || (origen === 'AXIS' ? SHEETS_TAB_AXIS : SHEETS_TAB_QNAP);
   const sheets = getSheetsClient();
+  const tabId = await getSheetIdByName(sheets, sheetId, tabName);
+  if (!tabId) {
+    return { skipped: true, reason: `La pestana "${tabName}" no existe en la hoja` };
+  }
   const { rows, headers } = await getSheetData(sheets, sheetId, tabName);
   if (rows.length <= 1) {
     await pool.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
@@ -1648,7 +1662,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
     res.set('X-Cache', 'MISS');
     res.json(payload);
   } catch (error) {
-    console.error('Error leyendo OSO:', error);
+    logger.error({ event: 'oso_read_failed', err: compactErrorForLog(error) }, 'Error leyendo OSO');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo ordenes OSO') });
   }
 });
@@ -1812,7 +1826,7 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
     res.set('X-Cache', 'MISS');
     res.json(payload);
   } catch (error) {
-    console.error('Error leyendo stock:', error);
+    logger.error({ event: 'stock_read_failed', err: compactErrorForLog(error) }, 'Error leyendo stock');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo stock') });
   }
 });
@@ -1868,7 +1882,7 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
     res.set('X-Cache', 'MISS');
     res.json(payload);
   } catch (error) {
-    console.error('Error leyendo stock catalogo:', error);
+    logger.error({ event: 'stock_catalog_read_failed', err: compactErrorForLog(error) }, 'Error leyendo stock catalogo');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo stock catalogo') });
   }
 });
@@ -2091,7 +2105,11 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
   try {
     const origen = req.query.origen;
     if (origen) {
-      const result = await syncProductosFromSheet({ origen });
+      const origenNormalized = String(origen).toUpperCase();
+      if (!['QNAP', 'AXIS'].includes(origenNormalized)) {
+        return res.status(400).json({ error: 'Origen invalido. Use QNAP o AXIS' });
+      }
+      const result = await syncProductosFromSheet({ origen: origenNormalized });
       if (result?.skipped) {
         return res.status(400).json({ error: 'Sync no configurado', detail: result.reason });
       }
@@ -2107,8 +2125,12 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
       axis
     });
   } catch (error) {
-    logError(req, error, 'producto_sync_failed');
-    res.status(500).json({ error: 'Error del servidor' });
+    logError(req, { ...compactErrorForLog(error), source: 'productos_sync' }, 'producto_sync_failed');
+    const detail = compactErrorForLog(error);
+    res.status(500).json({
+      error: getExternalErrorMessage(error, 'Error sincronizando productos con Google Sheets'),
+      detail: detail.reason || detail.message || null
+    });
   }
 });
 
