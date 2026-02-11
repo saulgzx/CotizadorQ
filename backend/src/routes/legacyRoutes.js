@@ -2133,13 +2133,25 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
       }
       const result = await syncProductosFromSheet({ origen: origenNormalized });
       if (result?.skipped) {
-        return res.status(400).json({ error: 'Sync no configurado', detail: result.reason });
+        return res.status(400).json({
+          error: 'Sync no configurado',
+          detail: result.reason || `No se pudo sincronizar ${origenNormalized}. Verifique tab/env/permisos`
+        });
       }
       invalidateOperationalCaches();
       return res.json({ message: 'Sync completado', ...result });
     }
     const qnap = await syncProductosFromSheet({ origen: 'QNAP' });
     const axis = await syncProductosFromSheet({ origen: 'AXIS' });
+    if (qnap?.skipped || axis?.skipped) {
+      return res.status(400).json({
+        error: 'Sync no configurado',
+        detail: {
+          qnap: qnap?.reason || null,
+          axis: axis?.reason || null
+        }
+      });
+    }
     invalidateOperationalCaches();
     res.json({
       message: 'Sync completado',
