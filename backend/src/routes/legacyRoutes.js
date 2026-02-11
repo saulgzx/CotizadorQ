@@ -193,15 +193,20 @@ const COLUMN_MAP = {
 };
 
 const sanitizeSpreadsheetRef = (value) => String(value || '').replace(/[\r\n]/g, '').trim();
+const normalizeSpreadsheetId = (value) => {
+  const cleaned = String(value || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const match = cleaned.match(/[A-Za-z0-9_-]{20,}/);
+  return match ? match[0] : cleaned;
+};
 
 const extractSheetId = (value) => {
   const rawValue = sanitizeSpreadsheetRef(value);
   if (!rawValue) return null;
   const marker = '/spreadsheets/d/';
   if (rawValue.includes(marker)) {
-    return rawValue.split(marker)[1].split('/')[0].replace(/\s+/g, '');
+    return normalizeSpreadsheetId(rawValue.split(marker)[1].split('/')[0]);
   }
-  return rawValue.replace(/\s+/g, '');
+  return normalizeSpreadsheetId(rawValue);
 };
 
 const compactErrorForLog = (error) => ({
