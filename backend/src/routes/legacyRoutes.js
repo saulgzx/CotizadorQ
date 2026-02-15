@@ -852,6 +852,7 @@ const initDB = async () => {
         sku TEXT,
         mpn TEXT,
         monto_axis DECIMAL(14,4),
+        monto_intcomex DECIMAL(14,4),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (bo, sku, mpn)
@@ -907,6 +908,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS sku TEXT;`);
     await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS mpn TEXT;`);
     await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS monto_axis DECIMAL(14,4);`);
+    await pool.query(`ALTER TABLE bo_line_meta ADD COLUMN IF NOT EXISTS monto_intcomex DECIMAL(14,4);`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS bo_line_meta_unique_idx ON bo_line_meta(bo, sku, mpn);`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_qnap DECIMAL(5,4) DEFAULT 0.15;`);
@@ -1645,15 +1647,18 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
         return acc;
       }, {});
       const lineMetaResult = await pool.query(
-        'SELECT bo, sku, mpn, monto_axis FROM bo_line_meta WHERE bo = ANY($1::text[])',
+        'SELECT bo, sku, mpn, monto_axis, monto_intcomex FROM bo_line_meta WHERE bo = ANY($1::text[])',
         [boList]
       );
-      const axisByBo = lineMetaResult.rows.reduce((acc, row) => {
+      const lineAmountsByBo = lineMetaResult.rows.reduce((acc, row) => {
         if (!row?.bo) return acc;
         if (!acc[row.bo]) acc[row.bo] = {};
         const skuKey = normalizeLookupKey(row.sku);
         const mpnKey = normalizeLookupKey(row.mpn);
-        acc[row.bo][`${skuKey}||${mpnKey}`] = row.monto_axis;
+        acc[row.bo][`${skuKey}||${mpnKey}`] = {
+          montoAxis: row.monto_axis,
+          montoIntcomex: row.monto_intcomex
+        };
         return acc;
       }, {});
 
@@ -1714,13 +1719,16 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
               '';
           });
         }
-        if (axisByBo[order.bo]) {
+        if (lineAmountsByBo[order.bo]) {
           (order.lines || []).forEach(line => {
             const skuKey = normalizeLookupKey(line.sku);
             const mpnKey = normalizeLookupKey(line.mpn);
-            const stored = axisByBo[order.bo]?.[`${skuKey}||${mpnKey}`];
-            if (stored !== undefined && stored !== null) {
-              line.montoAxis = parseNumber(stored, 0);
+            const stored = lineAmountsByBo[order.bo]?.[`${skuKey}||${mpnKey}`];
+            if (stored?.montoAxis !== undefined && stored?.montoAxis !== null) {
+              line.montoAxis = parseNumber(stored.montoAxis, 0);
+            }
+            if (stored?.montoIntcomex !== undefined && stored?.montoIntcomex !== null) {
+              line.montoIntcomex = parseNumber(stored.montoIntcomex, 0);
             }
           });
         }
@@ -1855,7 +1863,7 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // BO Line Meta - Guardar montos axis por linea (admin)
-app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) => {
+  app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const bo = String(req.params.bo || '').trim();
     if (!bo) return res.status(400).json({ error: 'BO requerido' });
@@ -1874,16 +1882,18 @@ app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) =
       let updated = 0;
       for (const line of lines) {
         const montoAxis = normalizeAmount(line?.montoAxis);
+        const montoIntcomex = normalizeAmount(line?.montoIntcomex);
         const sku = line?.sku ? String(line.sku).trim() : '';
         const mpn = line?.mpn ? String(line.mpn).trim() : '';
         if (!sku && !mpn) continue;
         await client.query(
-          `INSERT INTO bo_line_meta (bo, sku, mpn, monto_axis, updated_at)
-           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+          `INSERT INTO bo_line_meta (bo, sku, mpn, monto_axis, monto_intcomex, updated_at)
+           VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
            ON CONFLICT (bo, sku, mpn) DO UPDATE
            SET monto_axis = EXCLUDED.monto_axis,
+               monto_intcomex = EXCLUDED.monto_intcomex,
                updated_at = CURRENT_TIMESTAMP`,
-          [bo, sku, mpn, montoAxis]
+          [bo, sku, mpn, montoAxis, montoIntcomex]
         );
         updated += 1;
       }

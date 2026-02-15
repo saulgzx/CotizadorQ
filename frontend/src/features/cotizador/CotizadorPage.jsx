@@ -376,6 +376,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [boDraft, setBoDraft] = useState({});
   const [boSaving, setBoSaving] = useState({});
   const [axisDraft, setAxisDraft] = useState({});
+  const [intcomexDraft, setIntcomexDraft] = useState({});
   const [purchaseDraft, setPurchaseDraft] = useState({});
   const [funnelDays, setFunnelDays] = useState(30);
   const [funnelEmpresa, setFunnelEmpresa] = useState('');
@@ -738,9 +739,48 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return Number.isNaN(parsed) ? 0 : parsed;
   };
 
+  const getIntcomexDraftValue = (bo, lineKey) => {
+    const draft = intcomexDraft[bo];
+    if (!draft) return undefined;
+    return draft[lineKey];
+  };
+
+  const getIntcomexMontoValue = (bo, line) => {
+    if (!bo || !line) return '';
+    const draftValue = getIntcomexDraftValue(bo, getAxisLineKey(line));
+    if (draftValue !== undefined) return draftValue;
+    if (line.montoIntcomex === undefined || line.montoIntcomex === null || line.montoIntcomex === '') return '';
+    return String(line.montoIntcomex);
+  };
+
+  const getIntcomexMontoNumber = (bo, line) => {
+    const raw = getIntcomexMontoValue(bo, line);
+    const parsed = parseFloat(raw);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
   const updateAxisDraft = (bo, lineKey, value) => {
     if (!bo && bo !== 0) return;
     setAxisDraft(prev => {
+      const next = { ...prev };
+      const current = { ...(next[bo] || {}) };
+      if (value === undefined) {
+        delete current[lineKey];
+      } else {
+        current[lineKey] = value;
+      }
+      if (Object.keys(current).length === 0) {
+        delete next[bo];
+      } else {
+        next[bo] = current;
+      }
+      return next;
+    });
+  };
+
+  const updateIntcomexDraft = (bo, lineKey, value) => {
+    if (!bo && bo !== 0) return;
+    setIntcomexDraft(prev => {
       const next = { ...prev };
       const current = { ...(next[bo] || {}) };
       if (value === undefined) {
@@ -771,17 +811,34 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     });
   };
 
-  const saveAxisAmounts = async (order) => {
+  const isIntcomexDirty = (order) => {
     const bo = order?.bo;
     if (!bo) return false;
-    const draft = axisDraft[bo];
+    const draft = intcomexDraft[bo];
     if (!draft) return false;
-    const payloadLines = Object.entries(draft)
-      .map(([key, value]) => {
+    return Object.entries(draft).some(([key, value]) => {
+      const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
+      if (!line) return true;
+      const draftAmount = normalizeAxisAmount(value);
+      const currentAmount = normalizeAxisAmount(line.montoIntcomex);
+      return draftAmount !== currentAmount;
+    });
+  };
+
+  const saveLineAmounts = async (order) => {
+    const bo = order?.bo;
+    if (!bo) return false;
+    const axis = axisDraft[bo] || {};
+    const intcomex = intcomexDraft[bo] || {};
+    const keys = Array.from(new Set([...Object.keys(axis), ...Object.keys(intcomex)]));
+    if (!keys.length) return false;
+    const payloadLines = keys
+      .map((key) => {
         const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
         if (!line) return null;
         return {
-          montoAxis: normalizeAxisAmount(value),
+          montoAxis: normalizeAxisAmount(axis[key]),
+          montoIntcomex: normalizeAxisAmount(intcomex[key]),
           sku: line.sku || '',
           mpn: line.mpn || ''
         };
@@ -791,7 +848,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     await boLineMetaAPI.save(bo, { lines: payloadLines });
     const updates = payloadLines.reduce((acc, item) => {
       const lineKey = getAxisLineKey(item);
-      acc[lineKey] = item.montoAxis;
+      acc[lineKey] = {
+        montoAxis: item.montoAxis,
+        montoIntcomex: item.montoIntcomex
+      };
       return acc;
     }, {});
     setOsoOrders(prev =>
@@ -801,13 +861,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           ...orderItem,
           lines: (orderItem.lines || []).map(line => (
             updates[getAxisLineKey(line)] !== undefined
-              ? { ...line, montoAxis: updates[getAxisLineKey(line)] }
+              ? {
+                ...line,
+                ...(updates[getAxisLineKey(line)].montoAxis !== undefined ? { montoAxis: updates[getAxisLineKey(line)].montoAxis } : {}),
+                ...(updates[getAxisLineKey(line)].montoIntcomex !== undefined ? { montoIntcomex: updates[getAxisLineKey(line)].montoIntcomex } : {})
+              }
               : line
           ))
         };
       })
     );
     setAxisDraft(prev => {
+      const next = { ...prev };
+      delete next[bo];
+      return next;
+    });
+    setIntcomexDraft(prev => {
       const next = { ...prev };
       delete next[bo];
       return next;
@@ -892,6 +961,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       (order.lines || []).forEach((line, idx) => {
         const entregaOor = line.tiempoEntrega || '';
         const montoAxis = getAxisMontoNumber(order?.bo, line);
+        const montoIntcomex = getIntcomexMontoNumber(order?.bo, line);
         rows.push({
           key: `${bo}-${line.lineIndex ?? idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
           lineIndex: line.lineIndex ?? idx,
@@ -913,6 +983,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           shippedQty: line.shippedQty ?? 0,
           montoAxis,
           montoFacturar: montoAxis * (Number(line.orderQty) || 0),
+          montoIntcomex,
+          montoFacturarIntcomex: montoIntcomex * (Number(line.orderQty) || 0),
           notas: ''
         });
       });
@@ -972,6 +1044,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           'Cant. Orden': item.orderQty,
           'Cant. Alocada': item.allocQty,
           'Cant. Despachada': item.shippedQty,
+          'Monto Axis': item.montoAxis || 0,
+          'Monto Intcomex': item.montoIntcomex || 0,
           Notas: getOsoReportValue(item, 'notas')
         }))
       );
@@ -1001,6 +1075,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             'Cant. Orden': item.orderQty,
             'Monto Axis': item.montoAxis || 0,
             'Monto a facturar': item.montoFacturar || 0,
+            'Monto Intcomex': item.montoIntcomex || 0,
+            'Monto a facturar (Intcomex)': item.montoFacturarIntcomex || 0,
             Notas: getOsoReportValue(item, 'notas')
           };
         })
@@ -1035,6 +1111,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           'Cant. Orden': item.orderQty,
           'Cant. Alocada': item.allocQty,
           'Cant. Despachada': item.shippedQty,
+          'Monto Axis': item.montoAxis || 0,
+          'Monto Intcomex': item.montoIntcomex || 0,
           Notas: item.notas
         }));
     }
@@ -1049,7 +1127,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const osoLineReportRows = useMemo(
     () => buildOsoLineReportRows(filteredOsoOrders),
-    [filteredOsoOrders, axisDraft, boMeta, boDraft]
+    [filteredOsoOrders, axisDraft, intcomexDraft, boMeta, boDraft]
   );
 
   const exportOsoReport = () => {
@@ -3358,8 +3436,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         });
         boSaved = true;
       }
-      if (isAxisDirty(order)) {
-        await saveAxisAmounts(order);
+      if (isAxisDirty(order) || isIntcomexDirty(order)) {
+        await saveLineAmounts(order);
         axisSaved = true;
       }
       if (!boSaved && !axisSaved) {
@@ -3642,8 +3720,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {mode === 'ordenes' && (
                 <button
                   onClick={() => saveBoMeta(order)}
-                  disabled={(!isDirty && !isAxisDirty(order)) || boSaving[order.bo]}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order)) ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
+                  disabled={(!isDirty && !isAxisDirty(order) && !isIntcomexDirty(order)) || boSaving[order.bo]}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order) || isIntcomexDirty(order)) ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
                 >
                   {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
                 </button>
@@ -3815,6 +3893,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <th className="px-2 py-2 text-left">SKU</th>
                     <th className="px-2 py-2 text-left">Producto</th>
                     <th className="px-2 py-2 text-right">Monto Axis</th>
+                    <th className="px-2 py-2 text-right">Monto Intcomex</th>
                     <th className="px-2 py-2 text-left">Entrega (OOR)</th>
                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
                     <th className="px-2 py-2 text-right">Cant. Orden</th>
@@ -3837,6 +3916,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           placeholder="0"
                         />
                       </td>
+                      <td className="px-2 py-2 text-right">
+                        <input
+                          type="number"
+                          value={getIntcomexMontoValue(order.bo, line)}
+                          onChange={(e) => updateIntcomexDraft(order.bo, getAxisLineKey(line), e.target.value)}
+                          disabled={!canEditAxis}
+                          className={`w-24 px-2 py-1 border border-slate-200 rounded text-xs text-right ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
+                          placeholder="0"
+                        />
+                      </td>
                       <td className="px-2 py-2">{line.tiempoEntrega || 'N/A'}</td>
                       <td className="px-2 py-2 text-right">{line.allocQty ?? 0}</td>
                       <td className="px-2 py-2 text-right">{line.orderQty ?? 0}</td>
@@ -3845,7 +3934,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   ))}
                   {(order.lines || []).length > 0 && (
                     <tr className="bg-slate-100/70 font-semibold text-slate-700">
-                      <td className="px-2 py-2" colSpan={5}>Totales</td>
+                      <td className="px-2 py-2" colSpan={6}>Totales</td>
                       <td className="px-2 py-2 text-right">{totalAllocQty}</td>
                       <td className="px-2 py-2 text-right">{totalOrderQty}</td>
                       <td className="px-2 py-2 text-right">{totalShippedQty}</td>
