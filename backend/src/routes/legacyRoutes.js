@@ -1868,7 +1868,7 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error guardando bo_meta:', error);
-    res.status(500).json({ error: 'Error del servidor' });
+    res.status(500).json({ error: 'Error del servidor', detail: error?.message || String(error) });
   }
 });
 
