@@ -555,10 +555,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const invoiceMonthOptions = useMemo(() => {
     const options = new Set();
-    const base = new Date();
-    const start = new Date(base.getFullYear() - 1, 0, 1);
-    for (let i = 0; i < 48; i += 1) {
-      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const now = new Date();
+    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const monthKeyToIndex = (key) => {
+      if (!/^\d{4}-\d{2}$/.test(key || '')) return Number.NEGATIVE_INFINITY;
+      const [year, month] = String(key).split('-').map(Number);
+      return (year * 12) + (month - 1);
+    };
+    const currentIndex = monthKeyToIndex(currentKey);
+
+    // Estimación de facturación: solo meses actuales/futuros.
+    // Igual incluimos meses pasados si ya están guardados, para que se vean y puedan corregirse.
+    for (let i = 0; i < 36; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       options.add(key);
     }
@@ -571,13 +580,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (key) options.add(key);
     });
     return Array.from(options)
-      .sort((a, b) => a.localeCompare(b))
+      .sort((a, b) => monthKeyToIndex(a) - monthKeyToIndex(b))
       .map((key) => {
         const [year, month] = key.split('-');
         const d = new Date(Number(year), Number(month) - 1, 1);
+        const idx = monthKeyToIndex(key);
+        const isPast = idx < currentIndex;
         return {
           value: key,
-          label: MONTH_LABEL_FORMATTER.format(d).replace('.', '')
+          label: `${MONTH_LABEL_FORMATTER.format(d).replace('.', '')}${isPast ? ' (pasado)' : ''}`,
+          disabled: isPast
         };
       });
   }, [boMeta, boDraft]);
@@ -3689,7 +3701,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   >
                     <option value="">Sin mes</option>
                     {invoiceMonthOptions.map(option => (
-                      <option key={`inv-month-${option.value}`} value={option.value}>
+                      <option key={`inv-month-${option.value}`} value={option.value} disabled={option.disabled}>
                         {option.label}
                       </option>
                     ))}
@@ -5954,7 +5966,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       >
                         <option value="">Todos</option>
                         {invoiceMonthOptions.map(option => (
-                          <option key={`filter-month-ordenes-${option.value}`} value={option.value}>
+                          <option key={`filter-month-ordenes-${option.value}`} value={option.value} disabled={option.disabled}>
                             {option.label}
                           </option>
                         ))}
@@ -6222,7 +6234,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       >
                         <option value="">Todos</option>
                         {invoiceMonthOptions.map(option => (
-                          <option key={`filter-month-compras-${option.value}`} value={option.value}>
+                          <option key={`filter-month-compras-${option.value}`} value={option.value} disabled={option.disabled}>
                             {option.label}
                           </option>
                         ))}
