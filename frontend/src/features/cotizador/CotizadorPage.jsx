@@ -3614,6 +3614,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const invoiceWeekValue = normalizeInvoiceWeekValue(
       draft.estimatedInvoiceWeek ?? boMeta[order.bo]?.estimatedInvoiceWeek ?? ''
     );
+    const missingInvoiceMonth = mode === 'ordenes' && !invoiceMonthValue;
     const purchaseDraftRow = purchaseDraft[order.bo] || {};
     const purchaseStatus = (purchaseDraftRow.purchaseStatus ?? boMeta[order.bo]?.purchaseStatus ?? '').toString().toLowerCase() === 'comprado'
       ? 'comprado'
@@ -3650,11 +3651,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         className={`border rounded-2xl bg-white shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] ${
           isPendingPurchase
             ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/40'
-            : (isEmbarcador ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200')
+            : missingInvoiceMonth
+              ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/30'
+              : (isEmbarcador ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200')
         }`}
       >
         <div className="px-4 py-3 border-b border-slate-100">
           <div className="flex flex-col gap-2">
+            {missingInvoiceMonth && !isPendingPurchase && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                <div className="font-semibold">Falta mes facturación</div>
+                <div className="mt-0.5 text-rose-700/80">Define “Mes fact.” para esta BO.</div>
+              </div>
+            )}
             {isPendingPurchase && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                 <div className="font-semibold">Pendiente compra</div>
