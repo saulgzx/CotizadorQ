@@ -1786,8 +1786,18 @@ app.get('/api/bo-meta', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // BO Meta - Guardar datos manuales (admin)
+let boMetaSchemaReady = false;
+const ensureBoMetaSchema = async () => {
+  if (boMetaSchemaReady) return;
+  // Make the endpoint resilient if initDB didn't run/migrate in some environments.
+  await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS estimated_invoice_month VARCHAR(7);`);
+  await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS estimated_invoice_week SMALLINT;`);
+  boMetaSchemaReady = true;
+};
+
 app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    await ensureBoMetaSchema();
     const bo = String(req.params.bo || '').trim();
     if (!bo) return res.status(400).json({ error: 'BO requerido' });
     const normalizeEmpty = (value) => {
