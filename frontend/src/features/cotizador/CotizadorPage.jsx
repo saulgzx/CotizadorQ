@@ -167,6 +167,7 @@ const formatDateTime = (value) => {
   if (Number.isNaN(date.getTime())) return 'N/A';
   return date.toLocaleString();
 };
+const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat('es-CL', { month: 'short', year: 'numeric' });
 
 const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
@@ -551,6 +552,35 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const getBoInvoiceWeek = (bo) => normalizeInvoiceWeekValue(getOsoMeta(bo).estimatedInvoiceWeek);
+
+  const invoiceMonthOptions = useMemo(() => {
+    const options = new Set();
+    const base = new Date();
+    const start = new Date(base.getFullYear() - 1, 0, 1);
+    for (let i = 0; i < 48; i += 1) {
+      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      options.add(key);
+    }
+    Object.values(boMeta || {}).forEach(meta => {
+      const key = normalizeInvoiceMonthValue(meta?.estimatedInvoiceMonth || meta?.estimatedInvoiceDate);
+      if (key) options.add(key);
+    });
+    Object.values(boDraft || {}).forEach(draft => {
+      const key = normalizeInvoiceMonthValue(draft?.estimatedInvoiceMonth);
+      if (key) options.add(key);
+    });
+    return Array.from(options)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => {
+        const [year, month] = key.split('-');
+        const d = new Date(Number(year), Number(month) - 1, 1);
+        return {
+          value: key,
+          label: MONTH_LABEL_FORMATTER.format(d).replace('.', '')
+        };
+      });
+  }, [boMeta, boDraft]);
 
   const isBoMetaDirty = (bo) => {
     const draft = boDraft[bo] || {};
@@ -3652,12 +3682,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </label>
                 <label className="flex items-center gap-1">
                   <span className="text-[10px] text-slate-500">Mes fact.</span>
-                  <input
-                    type="month"
+                  <select
                     value={invoiceMonthValue}
                     onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceMonth: e.target.value })}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
-                  />
+                  >
+                    <option value="">Sin mes</option>
+                    {invoiceMonthOptions.map(option => (
+                      <option key={`inv-month-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] text-slate-500">Semana</span>
@@ -5911,12 +5947,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     ))}
                     <label className="flex items-center gap-2 ml-2">
                       <span className="text-slate-500">Facturación mes</span>
-                      <input
-                        type="month"
+                      <select
                         value={osoInvoiceMonth}
                         onChange={(e) => setOsoInvoiceMonth(e.target.value)}
                         className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
-                      />
+                      >
+                        <option value="">Todos</option>
+                        {invoiceMonthOptions.map(option => (
+                          <option key={`filter-month-ordenes-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                 )}
@@ -6173,12 +6215,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     ))}
                     <label className="flex items-center gap-2 ml-2">
                       <span className="text-slate-500">Facturación mes</span>
-                      <input
-                        type="month"
+                      <select
                         value={osoInvoiceMonth}
                         onChange={(e) => setOsoInvoiceMonth(e.target.value)}
                         className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
-                      />
+                      >
+                        <option value="">Todos</option>
+                        {invoiceMonthOptions.map(option => (
+                          <option key={`filter-month-compras-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                 )}
