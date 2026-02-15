@@ -1830,13 +1830,13 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
 
     const result = await pool.query(
       `INSERT INTO bo_meta (bo, project_name, po_axis, estimated_invoice_date, estimated_invoice_month, estimated_invoice_week, s_and_d_status, invoiced, invoiced_at, purchase_status, purchase_dispatch, purchase_shipping, purchase_so, updated_at)
-       VALUES ($1, $2, $3, $4, CASE WHEN $14 THEN $5 ELSE NULL END, CASE WHEN $15 THEN $6 ELSE NULL END, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+       VALUES ($1, $2, $3, $4, CASE WHEN $14 THEN $5::varchar(7) ELSE NULL END, CASE WHEN $15 THEN $6::smallint ELSE NULL END, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
        ON CONFLICT (bo) DO UPDATE SET
          project_name = COALESCE($2, bo_meta.project_name),
          po_axis = COALESCE($3, bo_meta.po_axis),
          estimated_invoice_date = COALESCE($4, bo_meta.estimated_invoice_date),
-         estimated_invoice_month = CASE WHEN $14 THEN $5 ELSE bo_meta.estimated_invoice_month END,
-         estimated_invoice_week = CASE WHEN $15 THEN $6 ELSE bo_meta.estimated_invoice_week END,
+         estimated_invoice_month = CASE WHEN $14 THEN $5::varchar(7) ELSE bo_meta.estimated_invoice_month END,
+         estimated_invoice_week = CASE WHEN $15 THEN $6::smallint ELSE bo_meta.estimated_invoice_week END,
          s_and_d_status = COALESCE($7, bo_meta.s_and_d_status),
          invoiced = COALESCE($8, bo_meta.invoiced),
          invoiced_at = COALESCE($9, bo_meta.invoiced_at),
