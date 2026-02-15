@@ -1900,8 +1900,8 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
           `INSERT INTO bo_line_meta (bo, sku, mpn, monto_axis, monto_intcomex, updated_at)
            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
            ON CONFLICT (bo, sku, mpn) DO UPDATE
-           SET monto_axis = EXCLUDED.monto_axis,
-               monto_intcomex = EXCLUDED.monto_intcomex,
+           SET monto_axis = COALESCE(EXCLUDED.monto_axis, bo_line_meta.monto_axis),
+               monto_intcomex = COALESCE(EXCLUDED.monto_intcomex, bo_line_meta.monto_intcomex),
                updated_at = CURRENT_TIMESTAMP`,
           [bo, sku, mpn, montoAxis, montoIntcomex]
         );

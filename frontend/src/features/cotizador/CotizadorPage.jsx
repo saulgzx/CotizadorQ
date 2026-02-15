@@ -836,9 +836,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       .map((key) => {
         const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
         if (!line) return null;
+        const hasAxis = Object.prototype.hasOwnProperty.call(axis, key);
+        const hasIntcomex = Object.prototype.hasOwnProperty.call(intcomex, key);
         return {
-          montoAxis: normalizeAxisAmount(axis[key]),
-          montoIntcomex: normalizeAxisAmount(intcomex[key]),
+          // IMPORTANT: omit fields not being edited so we don't overwrite the other amount.
+          ...(hasAxis ? { montoAxis: normalizeAxisAmount(axis[key]) } : {}),
+          ...(hasIntcomex ? { montoIntcomex: normalizeAxisAmount(intcomex[key]) } : {}),
           sku: line.sku || '',
           mpn: line.mpn || ''
         };
