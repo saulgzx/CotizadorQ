@@ -529,12 +529,38 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return { ...meta, ...draft };
   };
 
+  const normalizeInvoiceMonthValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const normalizeInvoiceWeekValue = (value) => {
+    if (value === undefined || value === null || value === '') return '';
+    const parsed = parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) return '';
+    return String(parsed);
+  };
+
+  const getBoInvoiceMonth = (bo) => {
+    const meta = getOsoMeta(bo);
+    return normalizeInvoiceMonthValue(meta.estimatedInvoiceMonth) || normalizeInvoiceMonthValue(meta.estimatedInvoiceDate);
+  };
+
+  const getBoInvoiceWeek = (bo) => normalizeInvoiceWeekValue(getOsoMeta(bo).estimatedInvoiceWeek);
+
   const isBoMetaDirty = (bo) => {
     const draft = boDraft[bo] || {};
     return (
       (draft.projectName !== undefined && draft.projectName !== (boMeta[bo]?.projectName ?? '')) ||
       (draft.poAxis !== undefined && draft.poAxis !== (boMeta[bo]?.poAxis ?? '')) ||
-      (draft.estimatedInvoiceDate !== undefined && draft.estimatedInvoiceDate !== (boMeta[bo]?.estimatedInvoiceDate ?? ''))
+      (draft.estimatedInvoiceMonth !== undefined &&
+        normalizeInvoiceMonthValue(draft.estimatedInvoiceMonth) !== normalizeInvoiceMonthValue(boMeta[bo]?.estimatedInvoiceMonth || boMeta[bo]?.estimatedInvoiceDate)) ||
+      (draft.estimatedInvoiceWeek !== undefined &&
+        normalizeInvoiceWeekValue(draft.estimatedInvoiceWeek) !== normalizeInvoiceWeekValue(boMeta[bo]?.estimatedInvoiceWeek))
     );
   };
 
@@ -565,16 +591,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return status.toLowerCase() === osoStatusFilter;
     });
     const filteredByQuick = list.filter(order => {
-      const projectName = (boMeta[order.bo]?.projectName || '').trim();
-      const poAxis = (boMeta[order.bo]?.poAxis || '').trim();
-      const invoiceDate = boMeta[order.bo]?.estimatedInvoiceDate || '';
-      const toMonthKey = (value) => {
-        if (!value) return '';
-        const d = new Date(value);
-        if (Number.isNaN(d.getTime())) return '';
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      };
-      if (osoInvoiceMonth && toMonthKey(invoiceDate) !== osoInvoiceMonth) return false;
+      const meta = getOsoMeta(order.bo);
+      const projectName = (meta.projectName || '').trim();
+      const poAxis = (meta.poAxis || '').trim();
+      const invoiceMonth = normalizeInvoiceMonthValue(meta.estimatedInvoiceMonth) || normalizeInvoiceMonthValue(meta.estimatedInvoiceDate);
+      if (osoInvoiceMonth && invoiceMonth !== osoInvoiceMonth) return false;
       const allowedQuickFilters = new Set(['all', 'sd-pending', 'missing-project', 'missing-po']);
       const quickFilter = allowedQuickFilters.has(osoQuickFilter) ? osoQuickFilter : 'all';
       if (!quickFilter || quickFilter === 'all') return true;
@@ -589,6 +610,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (osoSort === 'porcentaje') {
       return [...filteredByQuick].sort((a, b) => (Number(b.allocPct) || 0) - (Number(a.allocPct) || 0));
     }
+    if (osoSort === 'fact-month') {
+      return [...filteredByQuick].sort((a, b) => {
+        const monthA = getBoInvoiceMonth(a.bo) || '9999-99';
+        const monthB = getBoInvoiceMonth(b.bo) || '9999-99';
+        if (monthA !== monthB) return monthA.localeCompare(monthB);
+        const weekA = Number(getBoInvoiceWeek(a.bo) || 99);
+        const weekB = Number(getBoInvoiceWeek(b.bo) || 99);
+        if (weekA !== weekB) return weekA - weekB;
+        return (a.bo || '').localeCompare(b.bo || '');
+      });
+    }
     if (osoSort === 'eta') {
       const toTs = (value) => {
         if (!value) return Number.POSITIVE_INFINITY;
@@ -598,7 +630,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return [...filteredByQuick].sort((a, b) => toTs(a.etaEstimated) - toTs(b.etaEstimated));
     }
     return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
-  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta, osoCompanyFilter, globalQuery, isAdmin]);
+  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta, boDraft, osoCompanyFilter, globalQuery, isAdmin]);
 
   const osoCompanies = useMemo(() => {
     const map = new Map();
@@ -810,6 +842,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     orders.forEach(order => {
       const bo = order?.bo || '';
       const cliente = getOsoCustomerName(order);
+      const invoiceMonth = getBoInvoiceMonth(order?.bo);
+      const invoiceWeek = getBoInvoiceWeek(order?.bo);
       const customerPo = order?.customerPO || getOsoMeta(order?.bo)?.customerPO || '';
       const poAxis = getOsoMeta(order?.bo)?.poAxis || '';
       const projectName = getOsoMeta(order?.bo)?.projectName || '';
@@ -830,6 +864,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           desc: line.desc || '',
           entregaOor,
           etaEstimado: entregaOor ? addDaysToIso(entregaOor, 15) : '',
+          invoiceMonth,
+          invoiceWeek: invoiceWeek ? Number(invoiceWeek) : '',
           allocQty: line.allocQty ?? 0,
           orderQty: line.orderQty ?? 0,
           shippedQty: line.shippedQty ?? 0,
@@ -889,6 +925,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           SKU: item.sku || 'N/A',
           Producto: item.desc || 'N/A',
           'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
+          'Mes Fact.': item.invoiceMonth || '',
+          'Semana Fact.': item.invoiceWeek || '',
           'Cant. Orden': item.orderQty,
           'Cant. Alocada': item.allocQty,
           'Cant. Despachada': item.shippedQty,
@@ -916,6 +954,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             SKU: item.sku || 'N/A',
             Producto: item.desc || 'N/A',
             'ETA Est.': getOsoReportValue(item, 'etaEstimado'),
+            'Mes Fact.': item.invoiceMonth || '',
+            'Semana Fact.': item.invoiceWeek || '',
             'Cant. Orden': item.orderQty,
             'Monto Axis': item.montoAxis || 0,
             'Monto a facturar': item.montoFacturar || 0,
@@ -948,6 +988,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           SKU: item.sku || 'N/A',
           Producto: item.desc || 'N/A',
           'ETA Est.': item.etaEstimado,
+          'Mes Fact.': item.invoiceMonth || '',
+          'Semana Fact.': item.invoiceWeek || '',
           'Cant. Orden': item.orderQty,
           'Cant. Alocada': item.allocQty,
           'Cant. Despachada': item.shippedQty,
@@ -985,7 +1027,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         Estado: getOrderStatus(order),
         'ETA Estimada': order.etaEstimated || '',
         'Planned Ship Date': order.plannedShipDate || '',
-        'Fecha Facturación': meta.estimatedInvoiceDate || '',
+        'Mes Facturación': getBoInvoiceMonth(order.bo) || '',
+        'Semana Facturación': getBoInvoiceWeek(order.bo) || '',
         Proyecto: meta.projectName || '',
         'PO Axis': meta.poAxis || '',
         'Orden Cliente': order.customerPO || meta.customerPO || '',
@@ -1006,7 +1049,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const customer = getOsoCustomerName(order);
       const allocPct = getOsoAllocPct(order, totals);
       const etaMonth = toMonthKey(order.etaEstimated);
-      const invoiceMonth = toMonthKey(getOsoMeta(order.bo).estimatedInvoiceDate);
+      const invoiceMonth = getBoInvoiceMonth(order.bo) || 'Sin fecha';
       const bucket = getAllocBucket(allocPct);
 
       const update = (map, key) => {
@@ -2089,10 +2132,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const orders = data.orders || [];
       const metaMap = (metaRows || []).reduce((acc, row) => {
         if (!row?.bo) return acc;
+        const invoiceMonth = normalizeInvoiceMonthValue(row.estimated_invoice_month || row.estimatedInvoiceMonth || row.estimated_invoice_date || row.estimatedInvoiceDate || '');
+        const invoiceWeek = normalizeInvoiceWeekValue(row.estimated_invoice_week ?? row.estimatedInvoiceWeek ?? '');
         acc[row.bo] = {
           projectName: row.project_name || row.projectName || '',
           poAxis: row.po_axis || row.poAxis || '',
           estimatedInvoiceDate: row.estimated_invoice_date || row.estimatedInvoiceDate || '',
+          estimatedInvoiceMonth: invoiceMonth,
+          estimatedInvoiceWeek: invoiceWeek,
           sAndDStatus: row.s_and_d_status || row.sAndDStatus || '',
           invoiced: row.invoiced ?? false,
           invoicedAt: row.invoiced_at || row.invoicedAt || '',
@@ -3236,7 +3283,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const payload = {
       projectName: normalizeEmpty(draft.projectName ?? boMeta[bo]?.projectName ?? ''),
       poAxis: normalizeEmpty(draft.poAxis ?? boMeta[bo]?.poAxis ?? ''),
-      estimatedInvoiceDate: normalizeEmpty(draft.estimatedInvoiceDate ?? boMeta[bo]?.estimatedInvoiceDate ?? '')
+      estimatedInvoiceMonth: normalizeEmpty(
+        normalizeInvoiceMonthValue(draft.estimatedInvoiceMonth ?? boMeta[bo]?.estimatedInvoiceMonth ?? boMeta[bo]?.estimatedInvoiceDate ?? '')
+      ),
+      estimatedInvoiceWeek: normalizeEmpty(
+        normalizeInvoiceWeekValue(draft.estimatedInvoiceWeek ?? boMeta[bo]?.estimatedInvoiceWeek ?? '')
+      )
     };
     try {
       setBoSaving(prev => ({ ...prev, [bo]: true }));
@@ -3247,7 +3299,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         updateBoMetaLocal(bo, {
           projectName: saved.project_name || saved.projectName || payload.projectName,
           poAxis: saved.po_axis || saved.poAxis || payload.poAxis,
-          estimatedInvoiceDate: saved.estimated_invoice_date || saved.estimatedInvoiceDate || payload.estimatedInvoiceDate,
+          estimatedInvoiceMonth: normalizeInvoiceMonthValue(
+            saved.estimated_invoice_month || saved.estimatedInvoiceMonth || payload.estimatedInvoiceMonth || boMeta[bo]?.estimatedInvoiceMonth || ''
+          ),
+          estimatedInvoiceWeek: normalizeInvoiceWeekValue(
+            saved.estimated_invoice_week ?? saved.estimatedInvoiceWeek ?? payload.estimatedInvoiceWeek ?? boMeta[bo]?.estimatedInvoiceWeek ?? ''
+          ),
           sAndDStatus: saved.s_and_d_status || saved.sAndDStatus || boMeta[bo]?.sAndDStatus,
           invoiced: saved.invoiced ?? boMeta[bo]?.invoiced,
           invoicedAt: saved.invoiced_at || saved.invoicedAt || boMeta[bo]?.invoicedAt
@@ -3431,7 +3488,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const draft = boDraft[order.bo] || {};
     const projectValue = draft.projectName ?? boMeta[order.bo]?.projectName ?? '';
     const poAxisValue = draft.poAxis ?? boMeta[order.bo]?.poAxis ?? '';
-    const invoiceDateValue = draft.estimatedInvoiceDate ?? boMeta[order.bo]?.estimatedInvoiceDate ?? '';
+    const invoiceMonthValue = normalizeInvoiceMonthValue(
+      draft.estimatedInvoiceMonth ?? boMeta[order.bo]?.estimatedInvoiceMonth ?? boMeta[order.bo]?.estimatedInvoiceDate ?? ''
+    );
+    const invoiceWeekValue = normalizeInvoiceWeekValue(
+      draft.estimatedInvoiceWeek ?? boMeta[order.bo]?.estimatedInvoiceWeek ?? ''
+    );
     const purchaseDraftRow = purchaseDraft[order.bo] || {};
     const purchaseStatus = (purchaseDraftRow.purchaseStatus ?? boMeta[order.bo]?.purchaseStatus ?? '').toString().toLowerCase() === 'comprado'
       ? 'comprado'
@@ -3589,14 +3651,37 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   />
                 </label>
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">Fecha fact.</span>
+                  <span className="text-[10px] text-slate-500">Mes fact.</span>
                   <input
-                    type="date"
-                    value={invoiceDateValue}
-                    onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceDate: e.target.value })}
+                    type="month"
+                    value={invoiceMonthValue}
+                    onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceMonth: e.target.value })}
                     className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
                   />
                 </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500">Semana</span>
+                  <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5">
+                    {[1, 2, 3, 4].map(week => (
+                      <button
+                        key={`${order.bo}-week-${week}`}
+                        type="button"
+                        onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: String(week) })}
+                        className={`px-2 py-0.5 text-[10px] rounded-full transition ${invoiceWeekValue === String(week) ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        {week}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: '' })}
+                      className={`px-2 py-0.5 text-[10px] rounded-full transition ${invoiceWeekValue === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                      title="Sin semana"
+                    >
+                      -
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
@@ -5724,6 +5809,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
                     <option value="porcentaje">Ordenar por %</option>
+                    <option value="fact-month">Ordenar por mes facturación</option>
+                    <option value="eta">Ordenar por ETA</option>
                   </select>
                   <div className="relative w-full md:w-52">
                     <button
@@ -5984,6 +6071,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
                     <option value="porcentaje">Ordenar por %</option>
+                    <option value="fact-month">Ordenar por mes facturación</option>
+                    <option value="eta">Ordenar por ETA</option>
                   </select>
                   <div className="relative w-full md:w-52">
                     <button
@@ -6318,6 +6407,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <th className="px-2 py-2 text-left">SKU</th>
                                     <th className="px-2 py-2 text-left">Producto</th>
                                     <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-left">Mes Fact.</th>
+                                    <th className="px-2 py-2 text-left">Sem.</th>
                                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
                                     <th className="px-2 py-2 text-right">Cant. Despachada</th>
@@ -6373,6 +6464,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           placeholder="YYYY-MM-DD"
                                         />
                                       </td>
+                                      <td className="px-2 py-2">{row.invoiceMonth || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.invoiceWeek || 'N/A'}</td>
                                       <td className="px-2 py-2 text-right">{row.orderQty}</td>
                                       <td className="px-2 py-2 text-right">{row.allocQty}</td>
                                       <td className="px-2 py-2 text-right">{row.shippedQty}</td>
@@ -6414,6 +6507,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <th className="px-2 py-2 text-left">SKU</th>
                                     <th className="px-2 py-2 text-left">Producto</th>
                                     <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-left">Mes Fact.</th>
+                                    <th className="px-2 py-2 text-left">Sem.</th>
                                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                                     <th className="px-2 py-2 text-right">Monto Axis</th>
                                     <th className="px-2 py-2 text-right">Monto a facturar</th>
@@ -6455,6 +6550,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           placeholder="YYYY-MM-DD"
                                         />
                                       </td>
+                                      <td className="px-2 py-2">{row.invoiceMonth || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.invoiceWeek || 'N/A'}</td>
                                       <td className="px-2 py-2 text-right">{row.orderQty}</td>
                                       <td className="px-2 py-2 text-right">{row.montoAxis || 0}</td>
                                       <td className="px-2 py-2 text-right">{row.montoFacturar || 0}</td>
@@ -6504,6 +6601,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <th className="px-2 py-2 text-left">SKU</th>
                                     <th className="px-2 py-2 text-left">Producto</th>
                                     <th className="px-2 py-2 text-left">ETA Est.</th>
+                                    <th className="px-2 py-2 text-left">Mes Fact.</th>
+                                    <th className="px-2 py-2 text-left">Sem.</th>
                                     <th className="px-2 py-2 text-right">Cant. Orden</th>
                                     <th className="px-2 py-2 text-right">Cant. Alocada</th>
                                     <th className="px-2 py-2 text-right">Cant. Despachada</th>
@@ -6545,6 +6644,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           placeholder="YYYY-MM-DD"
                                         />
                                       </td>
+                                      <td className="px-2 py-2">{row.invoiceMonth || 'N/A'}</td>
+                                      <td className="px-2 py-2">{row.invoiceWeek || 'N/A'}</td>
                                       <td className="px-2 py-2 text-right">{row.orderQty}</td>
                                       <td className="px-2 py-2 text-right">{row.allocQty}</td>
                                       <td className="px-2 py-2 text-right">{row.shippedQty}</td>
@@ -6610,6 +6711,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <th className="px-2 py-1 text-left">SKU</th>
                           <th className="px-2 py-1 text-left">Producto</th>
                           <th className="px-2 py-1 text-left">ETA Est.</th>
+                          <th className="px-2 py-1 text-left">Mes Fact.</th>
+                          <th className="px-2 py-1 text-left">Sem.</th>
                           <th className="px-2 py-1 text-right">Cant. Orden</th>
                           <th className="px-2 py-1 text-right">Cant. Alocada</th>
                           <th className="px-2 py-1 text-right">Cant. Despachada</th>
@@ -6626,6 +6729,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <td className="px-2 py-1">{row.sku || 'N/A'}</td>
                             <td className="px-2 py-1">{row.desc || 'N/A'}</td>
                             <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
+                            <td className="px-2 py-1">{row.invoiceMonth || 'N/A'}</td>
+                            <td className="px-2 py-1">{row.invoiceWeek || 'N/A'}</td>
                             <td className="px-2 py-1 text-right">{row.orderQty}</td>
                             <td className="px-2 py-1 text-right">{row.allocQty}</td>
                             <td className="px-2 py-1 text-right">{row.shippedQty}</td>
@@ -6659,6 +6764,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <th className="px-2 py-1 text-left">SKU</th>
                           <th className="px-2 py-1 text-left">Producto</th>
                           <th className="px-2 py-1 text-left">ETA Est.</th>
+                          <th className="px-2 py-1 text-left">Mes Fact.</th>
+                          <th className="px-2 py-1 text-left">Sem.</th>
                           <th className="px-2 py-1 text-right">Cant. Orden</th>
                           <th className="px-2 py-1 text-right">Monto Axis</th>
                           <th className="px-2 py-1 text-right">Monto a facturar</th>
@@ -6681,6 +6788,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <td className="px-2 py-1">{row.sku || 'N/A'}</td>
                               <td className="px-2 py-1">{row.desc || 'N/A'}</td>
                               <td className="px-2 py-1">{getOsoReportValue(row, 'etaEstimado')}</td>
+                              <td className="px-2 py-1">{row.invoiceMonth || 'N/A'}</td>
+                              <td className="px-2 py-1">{row.invoiceWeek || 'N/A'}</td>
                               <td className="px-2 py-1 text-right">{row.orderQty}</td>
                               <td className="px-2 py-1 text-right">{row.montoAxis || 0}</td>
                               <td className="px-2 py-1 text-right">{row.montoFacturar || 0}</td>
@@ -6722,6 +6831,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <th className="px-2 py-1 text-left">SKU</th>
                         <th className="px-2 py-1 text-left">Producto</th>
                         <th className="px-2 py-1 text-left">ETA Est.</th>
+                        <th className="px-2 py-1 text-left">Mes Fact.</th>
+                        <th className="px-2 py-1 text-left">Sem.</th>
                         <th className="px-2 py-1 text-right">Cant. Orden</th>
                         <th className="px-2 py-1 text-right">Cant. Alocada</th>
                         <th className="px-2 py-1 text-right">Cant. Despachada</th>
@@ -6738,6 +6849,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <td className="px-2 py-1">{row.sku || 'N/A'}</td>
                           <td className="px-2 py-1">{row.desc || 'N/A'}</td>
                           <td className="px-2 py-1">{row.etaEstimado}</td>
+                          <td className="px-2 py-1">{row.invoiceMonth || 'N/A'}</td>
+                          <td className="px-2 py-1">{row.invoiceWeek || 'N/A'}</td>
                           <td className="px-2 py-1 text-right">{row.orderQty}</td>
                           <td className="px-2 py-1 text-right">{row.allocQty}</td>
                           <td className="px-2 py-1 text-right">{row.shippedQty}</td>

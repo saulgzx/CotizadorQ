@@ -825,6 +825,8 @@ const initDB = async () => {
         project_name TEXT,
         po_axis TEXT,
         estimated_invoice_date DATE,
+        estimated_invoice_month VARCHAR(7),
+        estimated_invoice_week SMALLINT,
         s_and_d_status VARCHAR(20),
         invoiced BOOLEAN DEFAULT false,
         invoiced_at TIMESTAMP,
@@ -885,6 +887,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS project_name TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS po_axis TEXT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS estimated_invoice_date DATE;`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS estimated_invoice_month VARCHAR(7);`);
+    await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS estimated_invoice_week SMALLINT;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS s_and_d_status VARCHAR(20);`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS invoiced BOOLEAN DEFAULT false;`);
     await pool.query(`ALTER TABLE bo_meta ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMP;`);
@@ -1787,6 +1791,8 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
       projectName,
       poAxis,
       estimatedInvoiceDate,
+      estimatedInvoiceMonth,
+      estimatedInvoiceWeek,
       sAndDStatus,
       invoiced,
       invoicedAt,
@@ -1795,21 +1801,31 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
       purchaseShipping,
       purchaseSo
     } = req.body || {};
+    const hasEstimatedInvoiceMonth = Object.prototype.hasOwnProperty.call(req.body || {}, 'estimatedInvoiceMonth');
+    const hasEstimatedInvoiceWeek = Object.prototype.hasOwnProperty.call(req.body || {}, 'estimatedInvoiceWeek');
+    const normalizeInvoiceWeek = (value) => {
+      if (value === undefined || value === null || value === '') return null;
+      const parsed = parseInt(String(value), 10);
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) return null;
+      return parsed;
+    };
 
     const result = await pool.query(
-      `INSERT INTO bo_meta (bo, project_name, po_axis, estimated_invoice_date, s_and_d_status, invoiced, invoiced_at, purchase_status, purchase_dispatch, purchase_shipping, purchase_so, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+      `INSERT INTO bo_meta (bo, project_name, po_axis, estimated_invoice_date, estimated_invoice_month, estimated_invoice_week, s_and_d_status, invoiced, invoiced_at, purchase_status, purchase_dispatch, purchase_shipping, purchase_so, updated_at)
+       VALUES ($1, $2, $3, $4, CASE WHEN $14 THEN $5 ELSE NULL END, CASE WHEN $15 THEN $6 ELSE NULL END, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
        ON CONFLICT (bo) DO UPDATE SET
          project_name = COALESCE($2, bo_meta.project_name),
          po_axis = COALESCE($3, bo_meta.po_axis),
          estimated_invoice_date = COALESCE($4, bo_meta.estimated_invoice_date),
-         s_and_d_status = COALESCE($5, bo_meta.s_and_d_status),
-         invoiced = COALESCE($6, bo_meta.invoiced),
-         invoiced_at = COALESCE($7, bo_meta.invoiced_at),
-         purchase_status = COALESCE($8, bo_meta.purchase_status),
-         purchase_dispatch = COALESCE($9, bo_meta.purchase_dispatch),
-         purchase_shipping = COALESCE($10, bo_meta.purchase_shipping),
-         purchase_so = COALESCE($11, bo_meta.purchase_so),
+         estimated_invoice_month = CASE WHEN $14 THEN $5 ELSE bo_meta.estimated_invoice_month END,
+         estimated_invoice_week = CASE WHEN $15 THEN $6 ELSE bo_meta.estimated_invoice_week END,
+         s_and_d_status = COALESCE($7, bo_meta.s_and_d_status),
+         invoiced = COALESCE($8, bo_meta.invoiced),
+         invoiced_at = COALESCE($9, bo_meta.invoiced_at),
+         purchase_status = COALESCE($10, bo_meta.purchase_status),
+         purchase_dispatch = COALESCE($11, bo_meta.purchase_dispatch),
+         purchase_shipping = COALESCE($12, bo_meta.purchase_shipping),
+         purchase_so = COALESCE($13, bo_meta.purchase_so),
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [
@@ -1817,13 +1833,17 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
         normalizeEmpty(projectName),
         normalizeEmpty(poAxis),
         normalizeEmpty(estimatedInvoiceDate),
+        normalizeEmpty(estimatedInvoiceMonth),
+        normalizeInvoiceWeek(estimatedInvoiceWeek),
         normalizeEmpty(sAndDStatus),
         typeof invoiced === 'boolean' ? invoiced : null,
         normalizeEmpty(invoicedAt),
         normalizeEmpty(purchaseStatus),
         normalizeEmpty(purchaseDispatch),
         normalizeEmpty(purchaseShipping),
-        normalizeEmpty(purchaseSo)
+        normalizeEmpty(purchaseSo),
+        hasEstimatedInvoiceMonth,
+        hasEstimatedInvoiceWeek
       ]
     );
     invalidateCacheByPrefix([CACHE_KEY_OSO_ORDERS]);
