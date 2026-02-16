@@ -1336,6 +1336,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [editingCotizacionId, setEditingCotizacionId] = useState(null);
   const [editingCotizacionForm, setEditingCotizacionForm] = useState(null);
   const userCardRefs = useRef({});
+  const nuevoUsuarioFormRef = useRef(null);
 
   const fieldLabelClass = isClient
     ? 'flex flex-col gap-1 text-xs text-gray-500'
@@ -2938,16 +2939,26 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const createUsuario = async () => {
-    if (!nuevoUsuario.usuario || !nuevoUsuario.password) {
+    const formData = nuevoUsuarioFormRef.current ? new FormData(nuevoUsuarioFormRef.current) : null;
+    const usuarioFromForm = (formData?.get('nuevo_usuario') || '').toString();
+    const nombreFromForm = (formData?.get('nuevo_nombre') || '').toString();
+    const passwordFromForm = (formData?.get('nuevo_password') || '').toString();
+
+    const usuarioValue = (nuevoUsuario.usuario || usuarioFromForm).trim();
+    const nombreValue = (nuevoUsuario.nombre || nombreFromForm).trim();
+    const passwordValue = (nuevoUsuario.password || passwordFromForm).toString();
+
+    if (!usuarioValue || !passwordValue.trim()) {
       alert('Usuario y contraseña son requeridos');
       return;
     }
+
     try {
       setUsuariosLoading(true);
       const payload = {
-        usuario: nuevoUsuario.usuario,
-        nombre: nuevoUsuario.nombre,
-        password: nuevoUsuario.password,
+        usuario: usuarioValue,
+        nombre: nombreValue,
+        password: passwordValue,
         role: 'client',
         gp: 0.15,
         gp_qnap: 0.15,
@@ -4942,28 +4953,41 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </button>
                 </div>
                 {showUsuarioForm && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                  <form
+                    ref={nuevoUsuarioFormRef}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      createUsuario();
+                    }}
+                    className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3"
+                  >
                     <input
+                      name="nuevo_usuario"
+                      autoComplete="username"
                       placeholder="Usuario"
                       value={nuevoUsuario.usuario}
                       onChange={e => setNuevoUsuario(u => ({ ...u, usuario: e.target.value }))}
                       className="px-3 py-2 border rounded-lg text-sm"
                     />
                     <input
+                      name="nuevo_nombre"
+                      autoComplete="name"
                       placeholder="Nombre"
                       value={nuevoUsuario.nombre}
                       onChange={e => setNuevoUsuario(u => ({ ...u, nombre: e.target.value }))}
                       className="px-3 py-2 border rounded-lg text-sm"
                     />
                     <input
+                      name="nuevo_password"
                       placeholder="Contraseña"
                       type="password"
+                      autoComplete="new-password"
                       value={nuevoUsuario.password}
                       onChange={e => setNuevoUsuario(u => ({ ...u, password: e.target.value }))}
                       className="px-3 py-2 border rounded-lg text-sm"
                     />
                     <button
-                      onClick={createUsuario}
+                      type="submit"
                       disabled={usuariosLoading}
                       className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm md:col-span-3"
                     >
@@ -4972,7 +4996,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     {usuariosError && (
                       <div className="text-xs text-red-600 md:col-span-3">{usuariosError}</div>
                     )}
-                  </div>
+                  </form>
                 )}
 
                 {usuariosLoading ? (
