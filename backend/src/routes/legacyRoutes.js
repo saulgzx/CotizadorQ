@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const { Pool } = require('pg');
+const PDFDocument = require('pdfkit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
@@ -56,7 +57,7 @@ app.use((err, req, res, next) => {
 });
 app.use(express.json({ limit: '10mb' }));
 
-// Conexión a PostgreSQL
+// ConexiÃ³n a PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -194,7 +195,7 @@ const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
   sku: ['sku', 'codigo', 'code', 'partnumber', 'part number', 'part no', 'item code', 'item', 'pn'],
   mpn: ['mpn', 'model', 'modelo', 'part number manufacturer', 'manufacturer part number'],
-  desc: ['descripción', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
+  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
   precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
   gp: ['gp', 'margen', 'margin', 'gp (%)', 'gp %'],
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
@@ -366,6 +367,121 @@ const buildCotizacionPdfHtml = ({ cotizacion, items, total, isClient }) => {
     </body>
   </html>`;
 };
+
+const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => new Promise((resolve, reject) => {
+  try {
+    const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: 'Cotizacion' } });
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    let y = doc.y;
+
+    doc.font('Helvetica-Bold').fontSize(26).fillColor('#0f2f63').text('INTCOMEX', doc.page.margins.left, y);
+    doc.font('Helvetica').fontSize(11).fillColor('#374151')
+      .text(`Fecha: ${formatPdfDateEs(cotizacion.fecha)}`, doc.page.margins.left, y + 8, { align: 'right' });
+    y = doc.y + 14;
+
+    doc.roundedRect(doc.page.margins.left, y, pageWidth, 54, 6).fill('#f3f4f6');
+    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(10)
+      .text('Nombre:', doc.page.margins.left + 10, y + 10)
+      .text('Empresa:', doc.page.margins.left + (pageWidth / 2), y + 10)
+      .text('PID:', doc.page.margins.left + 10, y + 30)
+      .text('Nombre del proyecto:', doc.page.margins.left + (pageWidth / 2), y + 30);
+    doc.font('Helvetica').fontSize(10)
+      .text(String(cotizacion.nombre || 'N/A'), doc.page.margins.left + 62, y + 10)
+      .text(String(cotizacion.empresa || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 52, y + 10)
+      .text(String(cotizacion.pid || 'N/A'), doc.page.margins.left + 34, y + 30)
+      .text(String(cotizacion.proyecto || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 110, y + 30);
+    y += 68;
+
+    const cols = [70, 35, 70, 70, 145, 60, 65, 70];
+    const headers = ['Marca', 'Cant.', 'SKU', 'MPN', 'Descripcion', 'P. Unit.', 'P. Total', 'Entrega'];
+    const drawHeader = () => {
+      let x = doc.page.margins.left;
+      doc.rect(x, y, pageWidth, 20).fill('#e5e7eb');
+      doc.fillColor('#111827').font('Helvetica-Bold').fontSize(9);
+      headers.forEach((header, idx) => {
+        const w = cols[idx];
+        const align = idx >= 5 ? 'right' : (idx === 1 || idx === 7 ? 'center' : 'left');
+        doc.text(header, x + 4, y + 6, { width: w - 8, align, ellipsis: true });
+        x += w;
+      });
+      y += 20;
+    };
+    drawHeader();
+
+    const addNewPageIfNeeded = (needed = 22) => {
+      if (y + needed <= doc.page.height - doc.page.margins.bottom - 120) return;
+      doc.addPage();
+      y = doc.page.margins.top;
+      drawHeader();
+    };
+
+    doc.font('Helvetica').fontSize(9).fillColor('#1f2937');
+    items.forEach((item) => {
+      addNewPageIfNeeded(18);
+      let x = doc.page.margins.left;
+      const row = [
+        item.marca || '',
+        String(item.cantidad || ''),
+        item.sku || '',
+        item.mpn || '',
+        item.descripcion || '',
+        formatPdfCurrency(item.precio_unitario),
+        formatPdfCurrency(item.precio_total),
+        item.tiempo_entrega || ''
+      ];
+      row.forEach((value, idx) => {
+        const w = cols[idx];
+        const align = idx >= 5 ? 'right' : (idx === 1 || idx === 7 ? 'center' : 'left');
+        const font = (idx === 2 || idx === 3) ? 'Helvetica-Oblique' : (idx === 6 ? 'Helvetica-Bold' : 'Helvetica');
+        doc.font(font).text(String(value), x + 4, y + 5, { width: w - 8, align, ellipsis: true });
+        x += w;
+      });
+      doc.moveTo(doc.page.margins.left, y + 18).lineTo(doc.page.margins.left + pageWidth, y + 18).strokeColor('#f3f4f6').lineWidth(1).stroke();
+      y += 18;
+    });
+
+    y += 8;
+    doc.roundedRect(doc.page.margins.left + pageWidth - 220, y, 220, 26, 6).fill('#2563eb');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11)
+      .text(`TOTAL (No incluye IVA): ${formatPdfCurrency(total)}`, doc.page.margins.left + pageWidth - 214, y + 8, { width: 208, align: 'right' });
+    y += 40;
+
+    addNewPageIfNeeded(130);
+    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(10).text('OBSERVACIONES Y CONDICIONES:', doc.page.margins.left, y);
+    y += 16;
+    const notes = [
+      'Los valores estan expresados en dolares americanos. No incluye IVA.',
+      'La cotizacion posee una validez de 15 dias desde la fecha de emision.',
+      'El tipo de cambio a utilizar sera el dolar observado del dia anterior mas $5.',
+      'Los valores son validos considerando la compra total de la cotizacion.',
+      'Las garantias son de acuerdo con las politicas de cada marca.',
+      'Intcomex Chile otorga 24hrs para informar problemas de garantias en pantallas.',
+      'No se permite la anulacion de OC sobre equipos a importacion calzada.',
+      'La persona que autoriza la OC es responsable del cumplimiento del pago.'
+    ];
+    if (isClient) notes.push('La presente cotizacion no constituye oferta formal ni vinculante hasta su validacion por Product Manager (Alexis Gonzalez).');
+    doc.font('Helvetica').fontSize(9);
+    notes.forEach((note, idx) => {
+      addNewPageIfNeeded(14);
+      doc.text(`${idx + 1}. ${note}`, doc.page.margins.left, y, { width: pageWidth, lineGap: 1 });
+      y = doc.y + 2;
+    });
+
+    y += 8;
+    addNewPageIfNeeded(26);
+    doc.rect(doc.page.margins.left, y, pageWidth, 26).fill('#1f2937');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9)
+      .text('Favor Emitir Orden de Compra a: INTCOMEX CHILE S.A.', doc.page.margins.left, y + 5, { width: pageWidth, align: 'center' });
+    doc.end();
+  } catch (error) {
+    reject(error);
+  }
+});
 
 const resolvePdfExecutablePath = async () => {
   const envCandidates = [
@@ -606,7 +722,7 @@ const getSheetColumnIndexes = (origen, headers) => {
     if (idx.tiempo < 0) idx.tiempo = 9;
   }
 
-  // Fallback a estructura est�ndar cuando faltan columnas claves.
+  // Fallback a estructura estándar cuando faltan columnas claves.
   if (idx.sku < 0 || idx.desc < 0) {
     if (origen === 'AXIS') {
       idx.marca = idx.marca >= 0 ? idx.marca : 0;
@@ -643,7 +759,7 @@ const getStockColumnIndexes = (headers) => {
 const getStockCatalogColumnIndexes = (headers) => {
   const idxImage = findHeaderIndex(headers, ['Product Image', 'Imagen', 'Image']);
   const idxBrand = findHeaderIndex(headers, ['Manuf. Brand', 'Brand', 'Marca', 'Manufacturer']);
-  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'Descripción', 'Descripcion', 'Description']);
+  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'DescripciÃ³n', 'Descripcion', 'Description']);
   const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
   const idxMpn = findHeaderIndex(headers, ['MPN', 'Model', 'Modelo']);
   const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
@@ -1527,7 +1643,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     const userId = req.user?.id;
     if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
+    if (!password) return res.status(400).json({ error: 'ContraseÃ±a requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, userId]);
     if (result.rows.length === 0) {
@@ -1535,7 +1651,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     }
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error actualizando contraseña propia:', error);
+    console.error('Error actualizando contraseÃ±a propia:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -1544,15 +1660,15 @@ app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validat
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contrase�a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contraseï¿½a requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
-    res.json({ message: 'Contrase�a actualizada' });
+    res.json({ message: 'Contraseï¿½a actualizada' });
   } catch (error) {
-    console.error('Error actualizando contrase�a:', error);
+    console.error('Error actualizando contraseï¿½a:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2578,7 +2694,7 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     let totalFinal = total;
     let itemsFinal = items;
 
-    // Validar entrada mínima
+    // Validar entrada mÃ­nima
     if (!cliente || typeof cliente !== 'object') {
       return res.status(400).json({ error: 'Cliente requerido' });
     }
@@ -2744,7 +2860,7 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
       [normalized, id]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Cotización no encontrada' });
+      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
     }
     res.json(result.rows[0]);
   } catch (error) {
@@ -2794,7 +2910,7 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, async (req, re
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Cotización no encontrada' });
+      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
     }
     if (Array.isArray(items)) {
       await client.query('DELETE FROM cotizacion_items WHERE cotizacion_id = $1', [id]);
@@ -2833,7 +2949,7 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, async (req, re
     } catch (rollbackError) {
       console.error('Error haciendo rollback:', rollbackError);
     }
-    console.error('Error actualizando cotización:', error);
+    console.error('Error actualizando cotizaciÃ³n:', error);
     res.status(500).json({ error: 'Error del servidor' });
   } finally {
     client.release();
@@ -2983,11 +3099,11 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
+      return res.status(404).json({ error: 'CotizaciÃƒÂ³n no encontrada' });
     }
 
     await client.query('COMMIT');
-    res.json({ message: 'CotizaciÃ³n eliminada', cotizacion: result.rows[0] });
+    res.json({ message: 'CotizaciÃƒÂ³n eliminada', cotizacion: result.rows[0] });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -3003,7 +3119,6 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 
 // COTIZACIONES - Exportar PDF directo
 app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
-  let browser = null;
   try {
     const payload = req.body || {};
     const cliente = payload?.cliente && typeof payload.cliente === 'object' ? payload.cliente : {};
@@ -3042,16 +3157,13 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
       fecha: payload?.created_at || payload?.fecha || new Date().toISOString()
     };
     const isClient = String(payload?.usuario_role || req.user?.role || '').toLowerCase() === 'client';
-    const html = buildCotizacionPdfHtml({ cotizacion, items: normalizedItems, total, isClient });
     const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa);
 
-    browser = await launchPdfBrowser();
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }
+    const pdfBuffer = await generateCotizacionPdfBuffer({
+      cotizacion,
+      items: normalizedItems,
+      total,
+      isClient
     });
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -3062,14 +3174,6 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     logError(req, error, 'cotizacion_pdf_failed');
     const detail = String(error?.message || '').slice(0, 220);
     return res.status(500).json({ error: 'Error generando PDF', detail });
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error('Error cerrando browser PDF:', closeError);
-      }
-    }
   }
 });
 

@@ -25,6 +25,7 @@
     "googleapis": "^144.0.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.16.0",
     "pg": "^8.11.3",
     "pino": "^9.6.0",
     "puppeteer-core": "^24.4.0",
