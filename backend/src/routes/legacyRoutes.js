@@ -76,6 +76,7 @@ const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
 const APP_VERSION = process.env.APP_VERSION || '2026-02-05-stock';
 const LOGIN_RATE_LIMIT_MAX = parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '5', 10);
 const LOGIN_RATE_LIMIT_WINDOW_MIN = parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MIN || '15', 10);
+const LOGIN_RATE_LIMIT_BYPASS_USERS = new Set(['agonz']);
 const STOCK_CACHE_TTL_SEC = parseInt(process.env.STOCK_CACHE_TTL_SEC || '120', 10);
 const STOCK_CATALOG_CACHE_TTL_SEC = parseInt(process.env.STOCK_CATALOG_CACHE_TTL_SEC || '180', 10);
 const OSO_ORDERS_CACHE_TTL_SEC = parseInt(process.env.OSO_ORDERS_CACHE_TTL_SEC || '120', 10);
@@ -170,12 +171,16 @@ const getExternalErrorMessage = (error, fallback = 'Error consultando servicio e
   return fallback;
 };
 
+const shouldBypassLoginRateLimit = (usuario) =>
+  LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
+
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: Number.isFinite(LOGIN_RATE_LIMIT_MAX) && LOGIN_RATE_LIMIT_MAX > 0 ? LOGIN_RATE_LIMIT_MAX : 5,
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  skip: (req) => shouldBypassLoginRateLimit(req?.body?.usuario),
   message: { error: 'Demasiados intentos de inicio de sesion. Intenta mas tarde.' }
 });
 
@@ -1056,6 +1061,7 @@ const { requireAuth, requireAdmin, requireOwnerOrAdmin } = buildAuthMiddlewares(
 });
 
 const isDbLoginRateLimited = async ({ usuario, req }) => {
+  if (shouldBypassLoginRateLimit(usuario)) return false;
   const ip = getRequestIp(req);
   const windowMin = Number.isFinite(LOGIN_RATE_LIMIT_WINDOW_MIN) && LOGIN_RATE_LIMIT_WINDOW_MIN > 0
     ? LOGIN_RATE_LIMIT_WINDOW_MIN
