@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
 const bcrypt = require('bcryptjs');
@@ -368,6 +369,18 @@ const buildCotizacionPdfHtml = ({ cotizacion, items, total, isClient }) => {
   </html>`;
 };
 
+const resolvePdfLogoPath = () => {
+  const candidates = [
+    path.resolve(__dirname, '../../../frontend/public/logo.png'),
+    path.resolve(process.cwd(), 'frontend/public/logo.png'),
+    path.resolve(process.cwd(), 'public/logo.png')
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+};
+
 const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => new Promise((resolve, reject) => {
   try {
     const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: 'Cotizacion' } });
@@ -379,10 +392,15 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     let y = doc.y;
 
-    doc.font('Helvetica-Bold').fontSize(26).fillColor('#0f2f63').text('INTCOMEX', doc.page.margins.left, y);
+    const logoPath = resolvePdfLogoPath();
+    if (logoPath) {
+      doc.image(logoPath, doc.page.margins.left, y, { fit: [190, 52], align: 'left', valign: 'top' });
+    } else {
+      doc.font('Helvetica-Bold').fontSize(26).fillColor('#0f2f63').text('INTCOMEX', doc.page.margins.left, y);
+    }
     doc.font('Helvetica').fontSize(11).fillColor('#374151')
       .text(`Fecha: ${formatPdfDateEs(cotizacion.fecha)}`, doc.page.margins.left, y + 8, { align: 'right' });
-    y = doc.y + 14;
+    y += 54;
 
     doc.roundedRect(doc.page.margins.left, y, pageWidth, 54, 6).fill('#f3f4f6');
     doc.fillColor('#111827').font('Helvetica-Bold').fontSize(10)
@@ -391,13 +409,23 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
       .text('PID:', doc.page.margins.left + 10, y + 30)
       .text('Nombre del proyecto:', doc.page.margins.left + (pageWidth / 2), y + 30);
     doc.font('Helvetica').fontSize(10)
-      .text(String(cotizacion.nombre || 'N/A'), doc.page.margins.left + 62, y + 10)
-      .text(String(cotizacion.empresa || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 52, y + 10)
-      .text(String(cotizacion.pid || 'N/A'), doc.page.margins.left + 34, y + 30)
-      .text(String(cotizacion.proyecto || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 110, y + 30);
+      .text(String(cotizacion.nombre || 'N/A'), doc.page.margins.left + 62, y + 10, { width: (pageWidth / 2) - 72, ellipsis: true })
+      .text(String(cotizacion.empresa || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 52, y + 10, { width: (pageWidth / 2) - 62, ellipsis: true })
+      .text(String(cotizacion.pid || 'N/A'), doc.page.margins.left + 34, y + 30, { width: (pageWidth / 2) - 44, ellipsis: true })
+      .text(String(cotizacion.proyecto || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 110, y + 30, { width: (pageWidth / 2) - 120, ellipsis: true });
     y += 68;
 
-    const cols = [70, 35, 70, 70, 145, 60, 65, 70];
+    const cols = [
+      Math.round(pageWidth * 0.11), // Marca
+      Math.round(pageWidth * 0.06), // Cant
+      Math.round(pageWidth * 0.12), // SKU
+      Math.round(pageWidth * 0.12), // MPN
+      Math.round(pageWidth * 0.26), // Descripcion
+      Math.round(pageWidth * 0.11), // P Unit
+      Math.round(pageWidth * 0.11), // P Total
+      0 // Entrega (remainder)
+    ];
+    cols[7] = pageWidth - cols.slice(0, 7).reduce((sum, w) => sum + w, 0);
     const headers = ['Marca', 'Cant.', 'SKU', 'MPN', 'Descripcion', 'P. Unit.', 'P. Total', 'Entrega'];
     const drawHeader = () => {
       let x = doc.page.margins.left;
@@ -422,8 +450,6 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
 
     doc.font('Helvetica').fontSize(9).fillColor('#1f2937');
     items.forEach((item) => {
-      addNewPageIfNeeded(18);
-      let x = doc.page.margins.left;
       const row = [
         item.marca || '',
         String(item.cantidad || ''),
@@ -434,15 +460,22 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
         formatPdfCurrency(item.precio_total),
         item.tiempo_entrega || ''
       ];
+      const textHeights = row.map((value, idx) => {
+        const w = cols[idx];
+        return doc.heightOfString(String(value), { width: w - 8, align: idx >= 5 ? 'right' : 'left' });
+      });
+      const rowHeight = Math.max(18, Math.ceil(Math.max(...textHeights)) + 8);
+      addNewPageIfNeeded(rowHeight + 2);
+      let x = doc.page.margins.left;
       row.forEach((value, idx) => {
         const w = cols[idx];
         const align = idx >= 5 ? 'right' : (idx === 1 || idx === 7 ? 'center' : 'left');
         const font = (idx === 2 || idx === 3) ? 'Helvetica-Oblique' : (idx === 6 ? 'Helvetica-Bold' : 'Helvetica');
-        doc.font(font).text(String(value), x + 4, y + 5, { width: w - 8, align, ellipsis: true });
+        doc.font(font).text(String(value), x + 4, y + 4, { width: w - 8, align });
         x += w;
       });
-      doc.moveTo(doc.page.margins.left, y + 18).lineTo(doc.page.margins.left + pageWidth, y + 18).strokeColor('#f3f4f6').lineWidth(1).stroke();
-      y += 18;
+      doc.moveTo(doc.page.margins.left, y + rowHeight).lineTo(doc.page.margins.left + pageWidth, y + rowHeight).strokeColor('#f3f4f6').lineWidth(1).stroke();
+      y += rowHeight;
     });
 
     y += 8;
