@@ -6,6 +6,8 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 require('dotenv').config();
 const { buildAuthMiddlewares } = require('../middlewares/auth');
 const {
@@ -212,6 +214,167 @@ const extractSheetId = (value) => {
     return normalizeSpreadsheetId(rawValue.split(marker)[1].split('/')[0]);
   }
   return normalizeSpreadsheetId(rawValue);
+};
+
+const PDF_USD_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+const formatPdfCurrency = (value) => PDF_USD_FORMATTER.format(parseNumber(value, 0));
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const sanitizePdfFilenamePart = (value) => {
+  if (!value) return '';
+  const normalized = String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || '';
+};
+
+const getPdfDateKey = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-CA');
+};
+
+const buildPdfFilename = (dateValue, projectName, integratorName) => {
+  const dateKey = getPdfDateKey(dateValue) || getPdfDateKey(new Date());
+  const project = sanitizePdfFilenamePart(projectName);
+  const integrator = sanitizePdfFilenamePart(integratorName);
+  const namePart = project || integrator || 'cotizacion';
+  return `${dateKey || 'export'}_${namePart}_v1`;
+};
+
+const formatPdfDateEs = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleDateString('es-CL', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const buildCotizacionPdfHtml = ({ cotizacion, items, total, isClient }) => {
+  const rows = items.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.marca)}</td>
+      <td class="center">${escapeHtml(item.cantidad)}</td>
+      <td class="mono">${escapeHtml(item.sku)}</td>
+      <td class="mono">${escapeHtml(item.mpn)}</td>
+      <td>${escapeHtml(item.descripcion)}</td>
+      <td class="right">${escapeHtml(formatPdfCurrency(item.precio_unitario))}</td>
+      <td class="right strong">${escapeHtml(formatPdfCurrency(item.precio_total))}</td>
+      <td class="center">${escapeHtml(item.tiempo_entrega)}</td>
+    </tr>
+  `).join('');
+
+  const clientDisclaimer = isClient
+    ? '<li>La presente cotizacion no constituye oferta formal ni vinculante hasta su validacion por Product Manager (Alexis Gonzalez).</li>'
+    : '';
+
+  return `<!doctype html>
+  <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      <style>
+        @page { size: A4; margin: 10mm; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; margin: 0; font-size: 12px; }
+        .card { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border-bottom: 1px solid #e5e7eb; }
+        .brand { font-size: 30px; font-weight: 800; color: #0f2f63; letter-spacing: 0.5px; }
+        .meta { font-size: 12px; color: #4b5563; }
+        .client { background: #f9fafb; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+        .client b { color: #111827; }
+        .table-wrap { padding: 12px 20px 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { background: #f3f4f6; text-align: left; padding: 8px 6px; color: #111827; }
+        td { padding: 7px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+        .mono { font-family: "Courier New", Courier, monospace; font-size: 11px; }
+        .right { text-align: right; white-space: nowrap; }
+        .center { text-align: center; }
+        .strong { font-weight: 700; }
+        .total-row { margin-top: 10px; display: flex; justify-content: flex-end; }
+        .total-box { background: #2563eb; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 700; }
+        .notes { background: #f9fafb; border-top: 1px solid #e5e7eb; padding: 12px 20px; }
+        .notes h3 { margin: 0 0 8px; font-size: 13px; }
+        .notes ol { margin: 0; padding-left: 18px; line-height: 1.45; }
+        .footer { background: #1f2937; color: #fff; text-align: center; font-size: 11px; padding: 10px 12px; }
+        .footer small { color: #d1d5db; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div class="brand">INTCOMEX</div>
+          <div class="meta"><b>Fecha:</b> ${escapeHtml(formatPdfDateEs(cotizacion.fecha))}</div>
+        </div>
+        <div class="client">
+          <div><b>Nombre:</b> ${escapeHtml(cotizacion.nombre || 'N/A')}</div>
+          <div><b>Empresa:</b> ${escapeHtml(cotizacion.empresa || 'N/A')}</div>
+          <div><b>PID:</b> ${escapeHtml(cotizacion.pid || 'N/A')}</div>
+          <div><b>Nombre del proyecto:</b> ${escapeHtml(cotizacion.proyecto || 'N/A')}</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Marca</th>
+                <th class="center">Cant.</th>
+                <th>SKU</th>
+                <th>MPN</th>
+                <th>Descripcion</th>
+                <th class="right">P. Unit.</th>
+                <th class="right">P. Total</th>
+                <th class="center">Entrega</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="total-row">
+            <div class="total-box">TOTAL (No incluye IVA): ${escapeHtml(formatPdfCurrency(total))}</div>
+          </div>
+        </div>
+        <div class="notes">
+          <h3>OBSERVACIONES Y CONDICIONES:</h3>
+          <ol>
+            <li>Los valores estan expresados en dolares americanos. No incluye IVA.</li>
+            <li>La cotizacion posee una validez de 15 dias desde la fecha de emision.</li>
+            <li>El tipo de cambio a utilizar sera el dolar observado del dia anterior mas $5.</li>
+            <li>Los valores son validos considerando la compra total de la cotizacion.</li>
+            <li>Las garantias son de acuerdo con las politicas de cada marca.</li>
+            <li>Intcomex Chile otorga 24hrs para informar problemas de garantias en pantallas.</li>
+            <li>No se permite la anulacion de OC sobre equipos a importacion calzada.</li>
+            <li>La persona que autoriza la OC es responsable del cumplimiento del pago.</li>
+            ${clientDisclaimer}
+          </ol>
+        </div>
+        <div class="footer">
+          <div><b>Favor Emitir Orden de Compra a: INTCOMEX CHILE S.A.</b></div>
+          <small>Rut: 96.705.940-4 - Cordillera 331 - Quilicura - Santiago</small>
+        </div>
+      </div>
+    </body>
+  </html>`;
+};
+
+const launchPdfBrowser = async () => {
+  const explicitPath = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim();
+  const executablePath = explicitPath || await chromium.executablePath();
+  return puppeteer.launch({
+    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
+    defaultViewport: chromium.defaultViewport,
+    executablePath,
+    headless: true
+  });
 };
 
 const compactErrorForLog = (error) => ({
@@ -2809,6 +2972,77 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
     res.status(500).json({ error: 'Error del servidor' });
   } finally {
     client.release();
+  }
+});
+
+// COTIZACIONES - Exportar PDF directo
+app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
+  let browser = null;
+  try {
+    const payload = req.body || {};
+    const cliente = payload?.cliente && typeof payload.cliente === 'object' ? payload.cliente : {};
+    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+    if (rawItems.length === 0) {
+      return res.status(400).json({ error: 'No hay items para exportar' });
+    }
+
+    const normalizedItems = rawItems.map(item => {
+      const cantidad = parseInt(item?.cantidad || item?.cant || 1, 10) || 1;
+      const precioUnitario = parseNumber(item?.precio_unitario, 0);
+      const precioTotal = Number.isFinite(Number(item?.precio_total))
+        ? parseNumber(item?.precio_total, 0)
+        : Number((precioUnitario * cantidad).toFixed(2));
+      return {
+        marca: String(item?.marca || ''),
+        cantidad,
+        sku: String(item?.sku || ''),
+        mpn: String(item?.mpn || ''),
+        descripcion: String(item?.descripcion || item?.desc || ''),
+        precio_unitario: Number(precioUnitario.toFixed(2)),
+        precio_total: Number(precioTotal.toFixed(2)),
+        tiempo_entrega: String(item?.tiempo_entrega || item?.tiempo || '')
+      };
+    });
+
+    const computedTotal = normalizedItems.reduce((sum, item) => sum + parseNumber(item.precio_total, 0), 0);
+    const total = Number.isFinite(Number(payload?.total))
+      ? parseNumber(payload.total, 0)
+      : Number(computedTotal.toFixed(2));
+    const cotizacion = {
+      nombre: cliente?.nombre || 'N/A',
+      empresa: cliente?.empresa || 'N/A',
+      pid: cliente?.pid || cliente?.email || 'N/A',
+      proyecto: cliente?.proyecto || cliente?.telefono || 'N/A',
+      fecha: payload?.created_at || payload?.fecha || new Date().toISOString()
+    };
+    const isClient = String(payload?.usuario_role || req.user?.role || '').toLowerCase() === 'client';
+    const html = buildCotizacionPdfHtml({ cotizacion, items: normalizedItems, total, isClient });
+    const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa);
+
+    browser = await launchPdfBrowser();
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(pdfBuffer);
+  } catch (error) {
+    logError(req, error, 'cotizacion_pdf_failed');
+    return res.status(500).json({ error: 'Error generando PDF' });
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error cerrando browser PDF:', closeError);
+      }
+    }
   }
 });
 

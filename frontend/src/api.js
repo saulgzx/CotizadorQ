@@ -271,6 +271,34 @@ export const cotizacionesAPI = {
     if (!response.ok) throw new Error('Error obteniendo funnel');
     return response.json();
   },
+  downloadPdf: async (payload, filenameBase = 'cotizacion') => {
+    const response = await fetchWithAuth('/api/cotizaciones/pdf', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let detail = '';
+      if (text) {
+        try {
+          const parsed = JSON.parse(text);
+          detail = parsed?.error || parsed?.message || text;
+        } catch {
+          detail = text;
+        }
+      }
+      throw new Error(`Error exportando PDF (${response.status})${detail ? `: ${detail}` : ''}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 // API de Usuarios

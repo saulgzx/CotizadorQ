@@ -1324,7 +1324,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     producto: '',
     estados: []
   });
-  const [printQuote, setPrintQuote] = useState(null);
   const [calcParams, setCalcParams] = useState({
     INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT,
     IC: CONSTANTS.IC,
@@ -2555,14 +2554,95 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     exportAxisJson(payload, `axis-${cot.id || 'export'}.json`);
   };
 
-  const exportCotizacionPdf = async () => {
-    const filenameBase = buildExportFilename(new Date(), cliente.proyecto, cliente.empresa);
-    const element = document.querySelector('.print-area');
-    await downloadPdfFromElement(element, filenameBase);
+  const buildPdfPayloadFromCurrentQuote = () => {
+    const items = cotizacion.map(item => {
+      const cantidad = parseInt(item.cant || 1, 10) || 1;
+      const precioUnitario = Number(calcularPrecioClienteItem(item) || 0);
+      return {
+        marca: item.marca || '',
+        cantidad,
+        sku: item.sku || '',
+        mpn: item.mpn || '',
+        descripcion: item.desc || '',
+        precio_unitario: precioUnitario,
+        precio_total: Number((precioUnitario * cantidad).toFixed(2)),
+        tiempo_entrega: item.tiempo || ''
+      };
+    });
+    return {
+      created_at: new Date().toISOString(),
+      usuario_role: isAdmin ? 'admin' : 'client',
+      cliente: {
+        nombre: cliente.nombre || '',
+        empresa: cliente.empresa || '',
+        pid: cliente.pid || '',
+        proyecto: cliente.proyecto || ''
+      },
+      items,
+      total: Number(totalCotizacion || 0)
+    };
   };
 
-  const exportHistorialPdf = (cot) => {
-    setPrintQuote(cot);
+  const buildPdfPayloadFromHistorial = (cot) => {
+    const items = Array.isArray(cot?.items) ? cot.items : [];
+    return {
+      created_at: cot?.created_at || new Date().toISOString(),
+      usuario_role: cot?.usuario_role || (isAdmin ? 'admin' : 'client'),
+      cliente: {
+        nombre: cot?.cliente_nombre || '',
+        empresa: cot?.cliente_empresa || '',
+        pid: cot?.cliente_email || '',
+        proyecto: cot?.cliente_telefono || ''
+      },
+      items: items.map(item => {
+        const cantidad = parseInt(item?.cantidad || item?.cant || 1, 10) || 1;
+        const precioUnitario = Number(item?.precio_unitario || 0);
+        const precioTotal = Number.isFinite(Number(item?.precio_total))
+          ? Number(item.precio_total)
+          : Number((precioUnitario * cantidad).toFixed(2));
+        return {
+          marca: item?.marca || '',
+          cantidad,
+          sku: item?.sku || '',
+          mpn: item?.mpn || '',
+          descripcion: item?.descripcion || item?.desc || '',
+          precio_unitario: precioUnitario,
+          precio_total: precioTotal,
+          tiempo_entrega: item?.tiempo_entrega || item?.tiempo || ''
+        };
+      }),
+      total: Number(cot?.total || 0)
+    };
+  };
+
+  const exportCotizacionPdf = async () => {
+    if (cotizacion.length === 0) {
+      alert('No hay productos para exportar');
+      return;
+    }
+    const filenameBase = buildExportFilename(new Date(), cliente.proyecto, cliente.empresa);
+    try {
+      setSaving(true);
+      const payload = buildPdfPayloadFromCurrentQuote();
+      await cotizacionesAPI.downloadPdf(payload, filenameBase);
+    } catch (error) {
+      alert(error.message || 'Error exportando PDF');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const exportHistorialPdf = async (cot) => {
+    try {
+      setSaving(true);
+      const filenameBase = buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa);
+      const payload = buildPdfPayloadFromHistorial(cot);
+      await cotizacionesAPI.downloadPdf(payload, filenameBase);
+    } catch (error) {
+      alert(error.message || 'Error exportando PDF');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const exportHistorialExcel = (cot) => {
@@ -2615,18 +2695,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const filenameBase = `stock-${getDateKeyCompact(new Date()) || 'export'}`;
     await downloadPdfFromElement(stockExportRef.current, filenameBase);
   };
-
-  useEffect(() => {
-    if (!printQuote) return;
-    const filenameBase = buildExportFilename(printQuote.created_at || new Date(), printQuote.cliente_telefono, printQuote.cliente_empresa);
-    const run = async () => {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const element = document.querySelector('.print-area');
-      await downloadPdfFromElement(element, filenameBase);
-      setPrintQuote(null);
-    };
-    run();
-  }, [printQuote]);
 
   const handleProjectUpload = async (event) => {
     const file = event.target.files?.[0];
@@ -4244,7 +4312,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const fecha = new Date().toLocaleDateString('es-CL', { year: 'numeric', month: 'long', day: 'numeric' });
     return (
       <div className="min-h-screen bg-gray-100 p-4 print:bg-white">
-        <div data-pdf-root="1" className={`max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden ${printQuote ? '' : 'print-area'}`}>
+        <div data-pdf-root="1" className="max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden print-area">
           <div className="p-8 border-b bg-white">
             <div className="flex items-center justify-between gap-4">
               <div style={{ width: '208px', height: '56px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
@@ -4348,95 +4416,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // VISTA PRINCIPAL
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(1200px_circle_at_top_left,#e0f2fe,transparent_55%),radial-gradient(900px_circle_at_bottom_right,#fef3c7,transparent_60%)] bg-[#f7f4ef]">
-      {printQuote && (
-        <div className="print-area bg-white">
-          <div data-pdf-root="1" className="max-w-4xl mx-auto bg-white rounded-lg overflow-hidden">
-            <div className="p-8 border-b bg-white">
-              <div className="flex items-center justify-between gap-4">
-                <div style={{ width: '208px', height: '56px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-                  <img
-                    src="/logo.png"
-                    alt="Logo"
-                    width={208}
-                    height={56}
-                    style={{ width: '208px', height: '56px', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
-                  />
-                </div>
-                <div className="text-right text-xs text-gray-500">
-                  <div>
-                    <span className="font-semibold text-gray-700">Fecha:</span>{' '}
-                    {printQuote.created_at
-                      ? new Date(printQuote.created_at).toLocaleDateString('es-CL', { year: 'numeric', month: 'long', day: 'numeric' })
-                      : 'N/A'}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="p-4 bg-gray-50 border-b grid grid-cols-2 gap-2 text-sm">
-              <div><b>Nombre:</b> {printQuote.cliente_nombre || 'N/A'}</div>
-              <div><b>Empresa:</b> {printQuote.cliente_empresa || 'N/A'}</div>
-              <div><b>PID:</b> {printQuote.cliente_email || 'N/A'}</div>
-              <div><b>Nombre del proyecto:</b> {printQuote.cliente_telefono || 'N/A'}</div>
-            </div>
-            <div className="p-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="px-2 py-2 text-left">Marca</th>
-                    <th className="px-2 py-2 text-center">Cant.</th>
-                    <th className="px-2 py-2 text-left">SKU</th>
-                    <th className="px-2 py-2 text-left">MPN</th>
-                    <th className="px-2 py-2 text-left">Descripción</th>
-                    <th className="px-2 py-2 text-right">P. Unit.</th>
-                    <th className="px-2 py-2 text-right">P. Total</th>
-                    <th className="px-2 py-2 text-center">Entrega</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(printQuote.items || []).map((item, i) => (
-                    <tr key={`${printQuote.id}-${item.id || i}`} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="px-2 py-2">{item.marca}</td>
-                      <td className="px-2 py-2 text-center">{item.cantidad}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{item.sku}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{item.mpn}</td>
-                      <td className="px-2 py-2">{item.descripcion}</td>
-                      <td className="px-2 py-2 text-right">{formatCurrency(item.precio_unitario || 0)}</td>
-                      <td className="px-2 py-2 text-right font-semibold">{formatCurrency(item.precio_total || 0)}</td>
-                      <td className="px-2 py-2 text-center text-xs">{item.tiempo_entrega}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="mt-4 flex justify-end">
-                <div className="bg-blue-600 text-white px-6 py-3 rounded-lg">
-                  <span className="text-sm">TOTAL (No incluye IVA): </span>
-                  <span className="text-xl font-bold">{formatCurrency(printQuote.total || 0)}</span>
-                </div>
-              </div>
-            </div>
-            <div className="p-4 bg-gray-50 border-t text-xs text-gray-600">
-              <h3 className="font-bold text-gray-800 mb-2">OBSERVACIONES Y CONDICIONES:</h3>
-              <ol className="list-decimal list-inside space-y-1">
-                <li>Los valores están expresados en dólares americanos. No incluye IVA.</li>
-                <li>La cotización posee una validez de 15 días desde la fecha de emisión.</li>
-                <li>El tipo de cambio a utilizar será el dólar observado del día anterior más $5.</li>
-                <li>Los valores son válidos considerando la compra total de la cotización.</li>
-                <li>Las garantías son de acuerdo con las políticas de cada marca.</li>
-                <li>Intcomex Chile otorga 24hrs para informar problemas de garantías en pantallas.</li>
-                <li>No se permite la anulación de OC sobre equipos a importación calzada.</li>
-                <li>La persona que autoriza la OC es responsable del cumplimiento del pago.</li>
-                {printQuote?.usuario_role === 'client' && (
-                  <li>La presente cotizacion, no constituye una oferta formal ni vinculante hasta su validación por el Product Manager. (Alexis González)</li>
-                )}
-              </ol>
-            </div>
-            <div className="p-3 bg-gray-800 text-white text-center text-sm">
-              <p className="font-semibold">Favor Emitir Orden de Compra a: INTCOMEX CHILE S.A.</p>
-              <p className="text-gray-300">Rut: 96.705.940-4 - Cordillera 331 - Quilicura - Santiago</p>
-            </div>
-          </div>
-        </div>
-      )}
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
