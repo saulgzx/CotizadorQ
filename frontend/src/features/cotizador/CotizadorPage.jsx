@@ -1475,7 +1475,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const buildExportFilename = (dateValue, projectName, integratorName) => {
-    const dateKey = getDateKeyCompact(dateValue) || getDateKeyCompact(new Date());
+    const dateKey = getDateKey(dateValue) || getDateKey(new Date());
     const project = sanitizeFilenamePart(projectName);
     const integrator = sanitizeFilenamePart(integratorName);
     const namePart = project || integrator || 'cotizacion';
