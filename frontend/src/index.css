@@ -35,8 +35,15 @@
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
   body {
     background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   body * {
@@ -53,5 +60,24 @@
     left: 0;
     top: 0;
     width: 100%;
+  }
+
+  .print-area table {
+    page-break-inside: auto;
+  }
+
+  .print-area thead {
+    display: table-header-group;
+  }
+
+  .print-area tfoot {
+    display: table-footer-group;
+  }
+
+  .print-area tr,
+  .print-area td,
+  .print-area th {
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 }

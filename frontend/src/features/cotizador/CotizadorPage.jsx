@@ -1482,6 +1482,42 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return `${dateKey || 'export'}_${namePart}_v1`;
   };
 
+  const printUsingBrowserDialog = async ({ filenameBase, onAfterPrint } = {}) => {
+    let prevTitle = null;
+    try {
+      setSaving(true);
+      if (document?.fonts?.ready) {
+        await document.fonts.ready;
+      }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      prevTitle = document.title;
+      if (filenameBase) document.title = filenameBase;
+
+      await new Promise((resolve) => {
+        let settled = false;
+        let timeoutId = null;
+        const finalize = () => {
+          if (settled) return;
+          settled = true;
+          if (timeoutId) window.clearTimeout(timeoutId);
+          window.removeEventListener('afterprint', finalize);
+          if (prevTitle !== null) document.title = prevTitle;
+          setSaving(false);
+          if (typeof onAfterPrint === 'function') onAfterPrint();
+          resolve();
+        };
+
+        window.addEventListener('afterprint', finalize);
+        timeoutId = window.setTimeout(finalize, 120000);
+        window.print();
+      });
+    } catch (error) {
+      if (prevTitle !== null) document.title = prevTitle;
+      setSaving(false);
+      alert(error.message || 'Error preparando impresión');
+    }
+  };
+
   const downloadPdfFromElement = async (element, filenameBase) => {
     if (!element) {
       alert('No se pudo generar el PDF.');
@@ -2557,8 +2593,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const exportCotizacionPdf = async () => {
     const filenameBase = buildExportFilename(new Date(), cliente.proyecto, cliente.empresa);
-    const element = document.querySelector('.print-area');
-    await downloadPdfFromElement(element, filenameBase);
+    await printUsingBrowserDialog({ filenameBase });
   };
 
   const exportHistorialPdf = (cot) => {
@@ -2619,13 +2654,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   useEffect(() => {
     if (!printQuote) return;
     const filenameBase = buildExportFilename(printQuote.created_at || new Date(), printQuote.cliente_telefono, printQuote.cliente_empresa);
+    let cancelled = false;
     const run = async () => {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const element = document.querySelector('.print-area');
-      await downloadPdfFromElement(element, filenameBase);
-      setPrintQuote(null);
+      await printUsingBrowserDialog({
+        filenameBase,
+        onAfterPrint: () => {
+          if (!cancelled) setPrintQuote(null);
+        }
+      });
     };
     run();
+    return () => {
+      cancelled = true;
+    };
   }, [printQuote]);
 
   const handleProjectUpload = async (event) => {
