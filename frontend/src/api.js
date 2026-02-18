@@ -299,6 +299,34 @@ export const cotizacionesAPI = {
     link.remove();
     window.URL.revokeObjectURL(url);
   },
+  openPdfPreview: async (payload) => {
+    const response = await fetchWithAuth('/api/cotizaciones/pdf?disposition=inline', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let detail = '';
+      if (text) {
+        try {
+          const parsed = JSON.parse(text);
+          detail = parsed?.error || parsed?.message || parsed?.detail || text;
+        } catch {
+          detail = text;
+        }
+      }
+      throw new Error(`Error exportando PDF (${response.status})${detail ? `: ${detail}` : ''}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const win = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      window.URL.revokeObjectURL(url);
+      throw new Error('El navegador bloqueó la apertura del PDF. Habilita popups para este sitio.');
+    }
+    // Keep blob URL alive briefly so the new tab can load it reliably.
+    setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+  },
 };
 
 // API de Usuarios

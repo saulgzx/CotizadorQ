@@ -371,6 +371,7 @@ const buildCotizacionPdfHtml = ({ cotizacion, items, total, isClient }) => {
 
 const resolvePdfLogoPath = () => {
   const candidates = [
+    path.resolve(__dirname, '../../assets/logo.png'),
     path.resolve(__dirname, '../../../frontend/public/logo.png'),
     path.resolve(process.cwd(), 'frontend/public/logo.png'),
     path.resolve(process.cwd(), 'public/logo.png')
@@ -3153,6 +3154,9 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 // COTIZACIONES - Exportar PDF directo
 app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
   try {
+    const disposition = String(req.query.disposition || 'attachment').toLowerCase() === 'inline'
+      ? 'inline'
+      : 'attachment';
     const payload = req.body || {};
     const cliente = payload?.cliente && typeof payload.cliente === 'object' ? payload.cliente : {};
     const rawItems = Array.isArray(payload?.items) ? payload.items : [];
@@ -3200,7 +3204,7 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}.pdf"`);
     res.setHeader('Cache-Control', 'no-store');
     return res.send(pdfBuffer);
   } catch (error) {
