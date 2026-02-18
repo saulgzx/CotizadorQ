@@ -416,17 +416,47 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
       .text(String(cotizacion.proyecto || 'N/A'), doc.page.margins.left + (pageWidth / 2) + 110, y + 30, { width: (pageWidth / 2) - 120, ellipsis: true });
     y += 68;
 
+    const baseCols = {
+      marca: Math.round(pageWidth * 0.11),
+      cant: Math.round(pageWidth * 0.06),
+      sku: Math.round(pageWidth * 0.12),
+      mpn: Math.round(pageWidth * 0.12),
+      unit: Math.round(pageWidth * 0.11),
+      total: Math.round(pageWidth * 0.11)
+    };
+    const fixedSpace = baseCols.marca + baseCols.cant + baseCols.sku + baseCols.mpn + baseCols.unit + baseCols.total;
+    const variableSpace = Math.max(120, pageWidth - fixedSpace);
+
+    const measureDemand = (values = []) => {
+      doc.font('Helvetica').fontSize(9);
+      let maxWidth = 0;
+      values.forEach((value) => {
+        const w = doc.widthOfString(String(value || '').trim());
+        if (w > maxWidth) maxWidth = w;
+      });
+      return maxWidth + 14;
+    };
+
+    const descDemand = measureDemand(['Descripcion', ...items.map(item => item?.descripcion || '')]);
+    const entregaDemand = measureDemand(['Entrega', ...items.map(item => item?.tiempo_entrega || '')]);
+    const demandSum = Math.max(1, descDemand + entregaDemand);
+
+    const descMin = Math.round(variableSpace * 0.30);
+    const descMax = Math.round(variableSpace * 0.62);
+    let descWidth = Math.round(variableSpace * (descDemand / demandSum));
+    descWidth = Math.max(descMin, Math.min(descMax, descWidth));
+    const entregaWidth = variableSpace - descWidth;
+
     const cols = [
-      Math.round(pageWidth * 0.11), // Marca
-      Math.round(pageWidth * 0.06), // Cant
-      Math.round(pageWidth * 0.12), // SKU
-      Math.round(pageWidth * 0.12), // MPN
-      Math.round(pageWidth * 0.26), // Descripcion
-      Math.round(pageWidth * 0.11), // P Unit
-      Math.round(pageWidth * 0.11), // P Total
-      0 // Entrega (remainder)
+      baseCols.marca,
+      baseCols.cant,
+      baseCols.sku,
+      baseCols.mpn,
+      descWidth,
+      baseCols.unit,
+      baseCols.total,
+      entregaWidth
     ];
-    cols[7] = pageWidth - cols.slice(0, 7).reduce((sum, w) => sum + w, 0);
     const headers = ['Marca', 'Cant.', 'SKU', 'MPN', 'Descripcion', 'P. Unit.', 'P. Total', 'Entrega'];
     const drawHeader = () => {
       let x = doc.page.margins.left;
