@@ -300,6 +300,15 @@ export const cotizacionesAPI = {
     window.URL.revokeObjectURL(url);
   },
   openPdfPreview: async (payload) => {
+    const win = window.open('', '_blank', 'noopener,noreferrer');
+    if (!win) {
+      throw new Error('El navegador bloqueó la apertura del PDF. Habilita popups para este sitio.');
+    }
+    win.document.title = 'Generando PDF...';
+    win.document.body.style.fontFamily = 'Segoe UI, Arial, sans-serif';
+    win.document.body.style.padding = '16px';
+    win.document.body.textContent = 'Generando PDF...';
+
     const response = await fetchWithAuth('/api/cotizaciones/pdf?disposition=inline', {
       method: 'POST',
       body: JSON.stringify(payload || {}),
@@ -315,15 +324,12 @@ export const cotizacionesAPI = {
           detail = text;
         }
       }
+      win.close();
       throw new Error(`Error exportando PDF (${response.status})${detail ? `: ${detail}` : ''}`);
     }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
-    const win = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!win) {
-      window.URL.revokeObjectURL(url);
-      throw new Error('El navegador bloqueó la apertura del PDF. Habilita popups para este sitio.');
-    }
+    win.location.href = url;
     // Keep blob URL alive briefly so the new tab can load it reliably.
     setTimeout(() => window.URL.revokeObjectURL(url), 60000);
   },
