@@ -1,7 +1,8 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -55,7 +56,7 @@ app.use((err, req, res, next) => {
 });
 app.use(express.json({ limit: '10mb' }));
 
-// ConexiÃ³n a PostgreSQL
+// Conexión a PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -193,7 +194,7 @@ const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
   sku: ['sku', 'codigo', 'code', 'partnumber', 'part number', 'part no', 'item code', 'item', 'pn'],
   mpn: ['mpn', 'model', 'modelo', 'part number manufacturer', 'manufacturer part number'],
-  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
+  desc: ['descripción', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
   precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
   gp: ['gp', 'margen', 'margin', 'gp (%)', 'gp %'],
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
@@ -366,9 +367,34 @@ const buildCotizacionPdfHtml = ({ cotizacion, items, total, isClient }) => {
   </html>`;
 };
 
+const resolvePdfExecutablePath = async () => {
+  const envCandidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+    process.env.CHROMIUM_PATH
+  ]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  const systemCandidates = [
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome'
+  ];
+  const lambdaPath = await chromium.executablePath().catch(() => '');
+  const allCandidates = [...envCandidates, lambdaPath, ...systemCandidates]
+    .map(path => String(path || '').trim())
+    .filter(Boolean);
+
+  for (const path of allCandidates) {
+    if (fs.existsSync(path)) return path;
+  }
+  throw new Error('No Chrome executable found. Checked: ' + (allCandidates.join(', ') || 'none'));
+};
+
 const launchPdfBrowser = async () => {
-  const explicitPath = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim();
-  const executablePath = explicitPath || await chromium.executablePath();
+  chromium.setGraphicsMode = false;
+  const executablePath = await resolvePdfExecutablePath();
   return puppeteer.launch({
     args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
     defaultViewport: chromium.defaultViewport,
@@ -580,7 +606,7 @@ const getSheetColumnIndexes = (origen, headers) => {
     if (idx.tiempo < 0) idx.tiempo = 9;
   }
 
-  // Fallback a estructura estándar cuando faltan columnas claves.
+  // Fallback a estructura est�ndar cuando faltan columnas claves.
   if (idx.sku < 0 || idx.desc < 0) {
     if (origen === 'AXIS') {
       idx.marca = idx.marca >= 0 ? idx.marca : 0;
@@ -617,7 +643,7 @@ const getStockColumnIndexes = (headers) => {
 const getStockCatalogColumnIndexes = (headers) => {
   const idxImage = findHeaderIndex(headers, ['Product Image', 'Imagen', 'Image']);
   const idxBrand = findHeaderIndex(headers, ['Manuf. Brand', 'Brand', 'Marca', 'Manufacturer']);
-  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'DescripciÃ³n', 'Descripcion', 'Description']);
+  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'Descripción', 'Descripcion', 'Description']);
   const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
   const idxMpn = findHeaderIndex(headers, ['MPN', 'Model', 'Modelo']);
   const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
@@ -1501,7 +1527,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     const userId = req.user?.id;
     if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'ContraseÃ±a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, userId]);
     if (result.rows.length === 0) {
@@ -1509,7 +1535,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     }
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error actualizando contraseÃ±a propia:', error);
+    console.error('Error actualizando contraseña propia:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -1518,15 +1544,15 @@ app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validat
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contraseï¿½a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contrase�a requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
-    res.json({ message: 'Contraseï¿½a actualizada' });
+    res.json({ message: 'Contrase�a actualizada' });
   } catch (error) {
-    console.error('Error actualizando contraseï¿½a:', error);
+    console.error('Error actualizando contrase�a:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2552,7 +2578,7 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     let totalFinal = total;
     let itemsFinal = items;
 
-    // Validar entrada mÃ­nima
+    // Validar entrada mínima
     if (!cliente || typeof cliente !== 'object') {
       return res.status(400).json({ error: 'Cliente requerido' });
     }
@@ -2718,7 +2744,7 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
       [normalized, id]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     res.json(result.rows[0]);
   } catch (error) {
@@ -2768,7 +2794,7 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, async (req, re
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     if (Array.isArray(items)) {
       await client.query('DELETE FROM cotizacion_items WHERE cotizacion_id = $1', [id]);
@@ -2807,7 +2833,7 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, async (req, re
     } catch (rollbackError) {
       console.error('Error haciendo rollback:', rollbackError);
     }
-    console.error('Error actualizando cotizaciÃ³n:', error);
+    console.error('Error actualizando cotización:', error);
     res.status(500).json({ error: 'Error del servidor' });
   } finally {
     client.release();
@@ -2957,11 +2983,11 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃƒÂ³n no encontrada' });
+      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
     }
 
     await client.query('COMMIT');
-    res.json({ message: 'CotizaciÃƒÂ³n eliminada', cotizacion: result.rows[0] });
+    res.json({ message: 'CotizaciÃ³n eliminada', cotizacion: result.rows[0] });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -3034,7 +3060,8 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     return res.send(pdfBuffer);
   } catch (error) {
     logError(req, error, 'cotizacion_pdf_failed');
-    return res.status(500).json({ error: 'Error generando PDF' });
+    const detail = String(error?.message || '').slice(0, 220);
+    return res.status(500).json({ error: 'Error generando PDF', detail });
   } finally {
     if (browser) {
       try {
