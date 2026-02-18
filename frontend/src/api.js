@@ -299,15 +299,15 @@ export const cotizacionesAPI = {
     link.remove();
     window.URL.revokeObjectURL(url);
   },
-  openPdfPreview: async (payload) => {
+  openPdfPreview: async (payload, filenameBase = 'cotizacion') => {
     const win = window.open('', '_blank', 'noopener,noreferrer');
-    if (!win) {
-      throw new Error('El navegador bloqueó la apertura del PDF. Habilita popups para este sitio.');
+    const popupBlocked = !win;
+    if (!popupBlocked) {
+      win.document.title = 'Generando PDF...';
+      win.document.body.style.fontFamily = 'Segoe UI, Arial, sans-serif';
+      win.document.body.style.padding = '16px';
+      win.document.body.textContent = 'Generando PDF...';
     }
-    win.document.title = 'Generando PDF...';
-    win.document.body.style.fontFamily = 'Segoe UI, Arial, sans-serif';
-    win.document.body.style.padding = '16px';
-    win.document.body.textContent = 'Generando PDF...';
 
     const response = await fetchWithAuth('/api/cotizaciones/pdf?disposition=inline', {
       method: 'POST',
@@ -324,12 +324,21 @@ export const cotizacionesAPI = {
           detail = text;
         }
       }
-      win.close();
+      if (!popupBlocked) win.close();
       throw new Error(`Error exportando PDF (${response.status})${detail ? `: ${detail}` : ''}`);
     }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
-    win.location.href = url;
+    if (popupBlocked) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filenameBase}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } else {
+      win.location.href = url;
+    }
     // Keep blob URL alive briefly so the new tab can load it reliably.
     setTimeout(() => window.URL.revokeObjectURL(url), 60000);
   },
