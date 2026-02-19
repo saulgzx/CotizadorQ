@@ -36,6 +36,15 @@ const safeJsonParse = (value, fallback) => {
   }
 };
 
+const safeJsonParseArray = (value, fallback = []) => {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 const getUserKey = (user) => {
   const raw = user?.id ?? user?.user_id ?? user?.usuario_id ?? user?.usuario ?? user?.username ?? user?.email ?? '';
   return raw.toString().toLowerCase().trim();
@@ -365,12 +374,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [osoCompanyFilter, setOsoCompanyFilter] = useState('');
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [pinnedBos, setPinnedBos] = useState(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem('pinnedBos') || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return safeJsonParseArray(localStorage.getItem('pinnedBos'), []);
   });
   const [boMeta, setBoMeta] = useState({});
   const [boDraft, setBoDraft] = useState({});
@@ -415,11 +419,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [showUsuarioForm, setShowUsuarioForm] = useState(false);
   const [selectedUsuarioId, setSelectedUsuarioId] = useState(null);
   const [empresaConfigs, setEmpresaConfigs] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('empresaConfigs') || '{}');
-    } catch {
-      return {};
-    }
+    return safeJsonParse(localStorage.getItem('empresaConfigs'), {});
   });
 
   useEffect(() => {
@@ -1601,8 +1601,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
     if (token && savedUser) {
+      const parsedUser = safeJsonParse(savedUser, null);
+      if (!parsedUser) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setIsLoggedIn(false);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
       setIsLoggedIn(true);
-      const parsedUser = JSON.parse(savedUser);
       registerSessionForUser(parsedUser);
       setUser(parsedUser);
       applyUserDefaults(parsedUser);
