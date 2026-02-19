@@ -300,7 +300,7 @@ export const cotizacionesAPI = {
     window.URL.revokeObjectURL(url);
   },
   openPdfPreview: async (payload, filenameBase = 'cotizacion') => {
-    const win = window.open('', '_blank', 'noopener,noreferrer');
+    const win = window.open('about:blank', '_blank');
     const popupBlocked = !win;
     if (!popupBlocked) {
       win.document.title = 'Generando PDF...';
@@ -338,6 +338,23 @@ export const cotizacionesAPI = {
       link.remove();
     } else {
       win.location.href = url;
+      // Some browsers keep the transient about:blank tab. Close it and fallback to download.
+      setTimeout(() => {
+        try {
+          if (win.closed) return;
+          if (win.location.href === 'about:blank') {
+            win.close();
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${filenameBase}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          }
+        } catch {
+          // Ignore cross-origin access errors if the tab already navigated.
+        }
+      }, 1200);
     }
     // Keep blob URL alive briefly so the new tab can load it reliably.
     setTimeout(() => window.URL.revokeObjectURL(url), 60000);
