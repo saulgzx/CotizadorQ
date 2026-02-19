@@ -915,13 +915,16 @@ const getSheetData = async (sheets, spreadsheetId, tabName, valueRenderOption = 
 
 const findRowIndexByKey = (rows, idx, producto) => {
   const skuValue = String(producto.sku || '').trim().toLowerCase();
+  const mpnValue = String(producto.mpn || '').trim().toLowerCase();
   const descValue = String(producto.descripcion || producto.desc || '').trim().toLowerCase();
   if (rows.length <= 1) return -1;
   for (let i = 1; i < rows.length; i += 1) {
     const row = rows[i] || [];
     const skuCell = idx.sku >= 0 ? String(row[idx.sku] || '').trim().toLowerCase() : '';
+    const mpnCell = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim().toLowerCase() : '';
     const descCell = idx.desc >= 0 ? String(row[idx.desc] || '').trim().toLowerCase() : '';
     if (skuValue && skuCell === skuValue) return i + 1;
+    if (mpnValue && mpnCell === mpnValue) return i + 1;
     if (!skuValue && descValue && descCell === descValue) return i + 1;
   }
   return -1;
@@ -1023,8 +1026,9 @@ const syncProductosFromSheet = async (options = {}) => {
     for (let i = 0; i < dataRows.length; i += 1) {
       const row = dataRows[i] || [];
       const sku = idx.sku >= 0 ? String(row[idx.sku] || '').trim() : '';
+      const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
       const descripcion = idx.desc >= 0 ? String(row[idx.desc] || '').trim() : '';
-      if (!sku && !descripcion) {
+      if (!sku && !mpn && !descripcion) {
         skipped += 1;
         continue;
       }
@@ -1038,7 +1042,7 @@ const syncProductosFromSheet = async (options = {}) => {
         rebate_partner_gold: origen === 'AXIS' ? parseNumber(row.length > 7 ? row[7] : 0, 0) : 0,
         rebate_partner_multiregional: origen === 'AXIS' ? parseNumber(row.length > 8 ? row[8] : 0, 0) : 0,
         sku,
-        mpn: idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '',
+        mpn,
         descripcion,
         precio_disty: parseNumber(idx.precio >= 0 ? row[idx.precio] : 0, 0),
         gp: parseGpValue(idx.gp >= 0 ? row[idx.gp] : 0, 0.15),
@@ -1047,8 +1051,17 @@ const syncProductosFromSheet = async (options = {}) => {
       };
 
       const existing = await client.query(
-        'SELECT id FROM productos WHERE origen = $1 AND ((sku = $2 AND $2 <> \'\') OR ($2 = \'\' AND descripcion = $3)) ORDER BY id DESC LIMIT 1',
-        [producto.origen, producto.sku, producto.descripcion]
+        `SELECT id
+         FROM productos
+         WHERE origen = $1
+           AND (
+             ($2 <> '' AND sku = $2)
+             OR ($3 <> '' AND mpn = $3)
+             OR ($2 = '' AND $3 = '' AND $4 <> '' AND descripcion = $4)
+           )
+         ORDER BY id DESC
+         LIMIT 1`,
+        [producto.origen, producto.sku, producto.mpn, producto.descripcion]
       );
       if (existing.rows.length > 0) {
         await client.query(
