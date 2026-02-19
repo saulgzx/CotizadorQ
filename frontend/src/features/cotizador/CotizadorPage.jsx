@@ -1474,7 +1474,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const buildExportFilename = (dateValue, projectName, integratorName) => {
-    const dateKey = getDateKey(dateValue) || getDateKey(new Date());
+    const dateKey = getDateKeyCompact(dateValue) || getDateKeyCompact(new Date());
     const project = sanitizeFilenamePart(projectName);
     const integrator = sanitizeFilenamePart(integratorName);
     const namePart = project || integrator || 'cotizacion';
@@ -2632,7 +2632,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     try {
       setSaving(true);
       const payload = buildPdfPayloadFromCurrentQuote();
-      await cotizacionesAPI.openPdfPreview(payload, filenameBase);
+      await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
       alert(error.message || 'Error exportando PDF');
     } finally {
@@ -2645,7 +2645,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setSaving(true);
       const filenameBase = buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa);
       const payload = buildPdfPayloadFromHistorial(cot);
-      await cotizacionesAPI.openPdfPreview(payload, filenameBase);
+      await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
       alert(error.message || 'Error exportando PDF');
     } finally {
