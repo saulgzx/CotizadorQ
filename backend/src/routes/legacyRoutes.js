@@ -923,8 +923,9 @@ const findRowIndexByKey = (rows, idx, producto) => {
     const skuCell = idx.sku >= 0 ? String(row[idx.sku] || '').trim().toLowerCase() : '';
     const mpnCell = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim().toLowerCase() : '';
     const descCell = idx.desc >= 0 ? String(row[idx.desc] || '').trim().toLowerCase() : '';
-    if (skuValue && skuCell === skuValue) return i + 1;
-    if (mpnValue && mpnCell === mpnValue) return i + 1;
+    if (skuValue && mpnValue && skuCell === skuValue && mpnCell === mpnValue) return i + 1;
+    if (!skuValue && mpnValue && mpnCell === mpnValue) return i + 1;
+    if (skuValue && !mpnValue && skuCell === skuValue) return i + 1;
     if (!skuValue && descValue && descCell === descValue) return i + 1;
   }
   return -1;
@@ -1055,8 +1056,9 @@ const syncProductosFromSheet = async (options = {}) => {
          FROM productos
          WHERE origen = $1
            AND (
-             ($2 <> '' AND sku = $2)
-             OR ($3 <> '' AND mpn = $3)
+             ($2 <> '' AND $3 <> '' AND sku = $2 AND mpn = $3)
+             OR ($2 = '' AND $3 <> '' AND mpn = $3)
+             OR ($2 <> '' AND $3 = '' AND sku = $2)
              OR ($2 = '' AND $3 = '' AND $4 <> '' AND descripcion = $4)
            )
          ORDER BY id DESC
