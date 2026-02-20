@@ -177,6 +177,12 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat('es-CL', { month: 'short', year: 'numeric' });
+const formatInvoiceMonthLabel = (monthKey) => {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return monthKey || 'Sin mes';
+  const [year, month] = String(monthKey).split('-').map(Number);
+  const d = new Date(year, month - 1, 1);
+  return MONTH_LABEL_FORMATTER.format(d).replace('.', '');
+};
 
 const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
@@ -365,6 +371,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [osoSort, setOsoSort] = useState(() => localStorage.getItem('osoSort') || 'eta');
   const [osoQuickFilter, setOsoQuickFilter] = useState(() => localStorage.getItem('osoQuickFilter') || 'all');
   const [osoInvoiceMonth, setOsoInvoiceMonth] = useState(() => localStorage.getItem('osoInvoiceMonth') || '');
+  const [dashboardInvoiceMonth, setDashboardInvoiceMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -2986,6 +2996,92 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     { label: 'Usuarios', value: usuarios.length, hint: 'Usuarios registrados' }
   ]), [historial.length, productos.length, osoOrders.length, usuarios.length]);
 
+  const dashboardBilling = useMemo(() => {
+    const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sin sem'];
+    const initRows = () => weeks.map(week => ({ week, axis: 0, intcomex: 0, total: 0 }));
+    const remainingRows = initRows();
+    const invoicedRows = initRows();
+    const rowIndexByWeek = weeks.reduce((acc, week, idx) => {
+      acc[week] = idx;
+      return acc;
+    }, {});
+
+    const getWeekLabel = (weekValue) => {
+      const week = String(weekValue || '').trim();
+      if (['1', '2', '3', '4'].includes(week)) return `Sem ${week}`;
+      return 'Sin sem';
+    };
+
+    const addRowAmount = (rows, week, axis, intcomex) => {
+      const idx = rowIndexByWeek[week] ?? rowIndexByWeek['Sin sem'];
+      rows[idx].axis += axis;
+      rows[idx].intcomex += intcomex;
+      rows[idx].total += axis + intcomex;
+    };
+
+    const computeBoAmounts = (order) => {
+      return (order?.lines || []).reduce((acc, line) => {
+        const qty = Number(line?.orderQty) || 0;
+        const axis = getAxisMontoNumber(order?.bo, line) * qty;
+        const intcomex = getIntcomexMontoNumber(order?.bo, line) * qty;
+        acc.axis += axis;
+        acc.intcomex += intcomex;
+        return acc;
+      }, { axis: 0, intcomex: 0 });
+    };
+
+    const ordersByBo = new Map((osoOrders || []).map(order => [order.bo, order]));
+    const boList = Array.from(new Set([
+      ...(osoOrders || []).map(order => order.bo),
+      ...Object.keys(boMeta || {})
+    ]));
+
+    const summary = {
+      remainingAxis: 0,
+      remainingIntcomex: 0,
+      invoicedAxis: 0,
+      invoicedIntcomex: 0,
+      remainingBos: 0,
+      invoicedBos: 0,
+      remainingWithAmounts: 0,
+      invoicedWithAmounts: 0
+    };
+
+    boList.forEach((bo) => {
+      const month = getBoInvoiceMonth(bo);
+      if (!month || month !== dashboardInvoiceMonth) return;
+      const order = ordersByBo.get(bo);
+      const { axis, intcomex } = computeBoAmounts(order);
+      const hasAmounts = (axis + intcomex) > 0;
+      const week = getWeekLabel(getBoInvoiceWeek(bo));
+      const isInvoiced = Boolean(getOsoMeta(bo)?.invoiced);
+
+      if (isInvoiced) {
+        summary.invoicedBos += 1;
+        if (hasAmounts) summary.invoicedWithAmounts += 1;
+        summary.invoicedAxis += axis;
+        summary.invoicedIntcomex += intcomex;
+        addRowAmount(invoicedRows, week, axis, intcomex);
+      } else {
+        summary.remainingBos += 1;
+        if (hasAmounts) summary.remainingWithAmounts += 1;
+        summary.remainingAxis += axis;
+        summary.remainingIntcomex += intcomex;
+        addRowAmount(remainingRows, week, axis, intcomex);
+      }
+    });
+
+    return {
+      month: dashboardInvoiceMonth,
+      monthLabel: formatInvoiceMonthLabel(dashboardInvoiceMonth),
+      remainingRows,
+      invoicedRows,
+      maxRemaining: Math.max(...remainingRows.map(row => row.total), 0),
+      maxInvoiced: Math.max(...invoicedRows.map(row => row.total), 0),
+      ...summary
+    };
+  }, [osoOrders, boMeta, boDraft, axisDraft, intcomexDraft, dashboardInvoiceMonth]);
+
   const funnelStages = useMemo(() => {
     const stageMap = new Map();
     (funnelData?.stages || []).forEach(stage => {
@@ -4606,6 +4702,96 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               ))}
             </div>
+            {isAdmin && (
+              <div className="glass-card rounded-2xl border border-white/70 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-800">Facturación estimada y reportada</h2>
+                    <p className="text-xs text-slate-500">Fuente: BO + mes/semana facturación + montos Axis/Intcomex.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">Mes:</span>
+                    <select
+                      value={dashboardInvoiceMonth}
+                      onChange={(e) => setDashboardInvoiceMonth(e.target.value)}
+                      className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 bg-white"
+                    >
+                      {invoiceMonthOptions.map(option => (
+                        <option key={`dashboard-month-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+                    <div className="text-sm font-semibold text-emerald-800">Estimado restante ({dashboardBilling.monthLabel})</div>
+                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+                      {formatCurrency(dashboardBilling.remainingAxis + dashboardBilling.remainingIntcomex)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      Axis: {formatCurrency(dashboardBilling.remainingAxis)} · Intcomex: {formatCurrency(dashboardBilling.remainingIntcomex)}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      BO: {dashboardBilling.remainingBos} (con monto: {dashboardBilling.remainingWithAmounts})
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {dashboardBilling.remainingRows.map(row => {
+                        const max = dashboardBilling.maxRemaining || 1;
+                        const totalPct = row.total > 0 ? Math.max(6, Math.round((row.total / max) * 100)) : 0;
+                        const axisPct = row.total > 0 ? Math.round((row.axis / row.total) * totalPct) : 0;
+                        const intcomexPct = row.total > 0 ? Math.max(totalPct - axisPct, 1) : 0;
+                        return (
+                          <div key={`remaining-${row.week}`}>
+                            <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1">
+                              <span>{row.week}</span>
+                              <span>{formatCurrency(row.total)}</span>
+                            </div>
+                            <div className="h-2.5 w-full bg-white rounded-full overflow-hidden border border-emerald-100">
+                              <div className="h-full bg-emerald-500 inline-block align-top" style={{ width: `${axisPct}%` }} />
+                              <div className="h-full bg-sky-500 inline-block align-top" style={{ width: `${intcomexPct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+                    <div className="text-sm font-semibold text-blue-800">Ya facturado reportado ({dashboardBilling.monthLabel})</div>
+                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+                      {formatCurrency(dashboardBilling.invoicedAxis + dashboardBilling.invoicedIntcomex)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      Axis: {formatCurrency(dashboardBilling.invoicedAxis)} · Intcomex: {formatCurrency(dashboardBilling.invoicedIntcomex)}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      BO: {dashboardBilling.invoicedBos} (con monto: {dashboardBilling.invoicedWithAmounts})
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {dashboardBilling.invoicedRows.map(row => {
+                        const max = dashboardBilling.maxInvoiced || 1;
+                        const totalPct = row.total > 0 ? Math.max(6, Math.round((row.total / max) * 100)) : 0;
+                        const axisPct = row.total > 0 ? Math.round((row.axis / row.total) * totalPct) : 0;
+                        const intcomexPct = row.total > 0 ? Math.max(totalPct - axisPct, 1) : 0;
+                        return (
+                          <div key={`invoiced-${row.week}`}>
+                            <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1">
+                              <span>{row.week}</span>
+                              <span>{formatCurrency(row.total)}</span>
+                            </div>
+                            <div className="h-2.5 w-full bg-white rounded-full overflow-hidden border border-blue-100">
+                              <div className="h-full bg-blue-500 inline-block align-top" style={{ width: `${axisPct}%` }} />
+                              <div className="h-full bg-cyan-500 inline-block align-top" style={{ width: `${intcomexPct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="glass-card rounded-2xl border border-white/70 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
               <h2 className="text-lg font-semibold text-gray-800">Accesos rápidos</h2>
               <p className="text-xs text-slate-500 mt-1">Atajos de teclado: Alt+1 Dashboard, Alt+2 Cotizador, Alt+3 Historial.</p>
