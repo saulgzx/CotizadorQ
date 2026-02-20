@@ -1162,6 +1162,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const totals = getOsoOrderTotals(order);
       const amountTotals = getOsoOrderAmountTotals(order);
       const meta = getOsoMeta(order.bo);
+      const invoiceMonth = getBoInvoiceMonth(order.bo) || '';
+      const invoiceWeek = getBoInvoiceWeek(order.bo) || '';
+      const invoiceMonthWeek = invoiceMonth
+        ? `${invoiceMonth}${invoiceWeek ? ` (Sem ${invoiceWeek})` : ''}`
+        : '';
       return {
         BO: order.bo || '',
         Cliente: getOsoCustomerName(order),
@@ -1169,8 +1174,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         Estado: getOrderStatus(order),
         'ETA Estimada': order.etaEstimated || '',
         'Planned Ship Date': order.plannedShipDate || '',
-        'Mes Facturación': getBoInvoiceMonth(order.bo) || '',
-        'Semana Facturación': getBoInvoiceWeek(order.bo) || '',
+        'Mes Facturación': invoiceMonth,
+        'Semana Facturación': invoiceWeek,
+        'Mes/Semana Facturación': invoiceMonthWeek,
         Proyecto: meta.projectName || '',
         'PO Axis': meta.poAxis || '',
         'Orden Cliente': order.customerPO || meta.customerPO || '',
@@ -1197,6 +1203,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const allocPct = getOsoAllocPct(order, totals);
       const etaMonth = toMonthKey(order.etaEstimated);
       const invoiceMonth = getBoInvoiceMonth(order.bo) || 'Sin fecha';
+      const invoiceWeek = getBoInvoiceWeek(order.bo) || '';
+      const invoiceMonthWeek = invoiceMonth === 'Sin fecha'
+        ? invoiceMonth
+        : `${invoiceMonth}${invoiceWeek ? ` (Sem ${invoiceWeek})` : ''}`;
       const bucket = getAllocBucket(allocPct);
 
       const update = (map, key) => {
@@ -1228,7 +1238,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
       update(customerMap, customer);
       update(etaMonthMap, etaMonth);
-      update(invoiceMonthMap, invoiceMonth);
+      update(invoiceMonthMap, invoiceMonthWeek);
       update(allocBucketMap, bucket);
     });
 
@@ -1294,7 +1304,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Resumen');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(customerMap, 'Cliente')), 'Por Cliente');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(etaMonthMap, 'Mes ETA')), 'Por Mes ETA');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(invoiceMonthMap, 'Mes Fact')), 'Por Mes Fact');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(invoiceMonthMap, 'Mes/Sem Fact')), 'Por Mes Fact');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(allocBucketMap, '% Alocado')), 'Por % Alocado');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), 'Detalle');
 
