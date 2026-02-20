@@ -2998,7 +2998,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const dashboardBilling = useMemo(() => {
     const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sin sem'];
-    const initRows = () => weeks.map(week => ({ week, axis: 0, intcomex: 0, total: 0 }));
+    const initRows = () => weeks.map(week => ({ week, axis: 0, intcomex: 0 }));
     const remainingRows = initRows();
     const invoicedRows = initRows();
     const rowIndexByWeek = weeks.reduce((acc, week, idx) => {
@@ -3016,7 +3016,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const idx = rowIndexByWeek[week] ?? rowIndexByWeek['Sin sem'];
       rows[idx].axis += axis;
       rows[idx].intcomex += intcomex;
-      rows[idx].total += axis + intcomex;
     };
 
     const computeBoAmounts = (order) => {
@@ -3076,8 +3075,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       monthLabel: formatInvoiceMonthLabel(dashboardInvoiceMonth),
       remainingRows,
       invoicedRows,
-      maxRemaining: Math.max(...remainingRows.map(row => row.total), 0),
-      maxInvoiced: Math.max(...invoicedRows.map(row => row.total), 0),
+      maxRemainingAxis: Math.max(...remainingRows.map(row => row.axis), 0),
+      maxRemainingIntcomex: Math.max(...remainingRows.map(row => row.intcomex), 0),
+      maxInvoicedAxis: Math.max(...invoicedRows.map(row => row.axis), 0),
+      maxInvoicedIntcomex: Math.max(...invoicedRows.map(row => row.intcomex), 0),
       ...summary
     };
   }, [osoOrders, boMeta, boDraft, axisDraft, intcomexDraft, dashboardInvoiceMonth]);
@@ -4727,30 +4728,36 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
                     <div className="text-sm font-semibold text-emerald-800">Estimado restante ({dashboardBilling.monthLabel})</div>
-                    <div className="text-2xl font-semibold text-slate-900 mt-1">
-                      {formatCurrency(dashboardBilling.remainingAxis + dashboardBilling.remainingIntcomex)}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      Axis: {formatCurrency(dashboardBilling.remainingAxis)} · Intcomex: {formatCurrency(dashboardBilling.remainingIntcomex)}
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="rounded-lg border border-emerald-200 bg-white/80 p-2">
+                        <div className="text-[11px] text-slate-500">Axis</div>
+                        <div className="text-lg font-semibold text-slate-900">{formatCurrency(dashboardBilling.remainingAxis)}</div>
+                      </div>
+                      <div className="rounded-lg border border-sky-200 bg-white/80 p-2">
+                        <div className="text-[11px] text-slate-500">Intcomex</div>
+                        <div className="text-lg font-semibold text-slate-900">{formatCurrency(dashboardBilling.remainingIntcomex)}</div>
+                      </div>
                     </div>
                     <div className="text-[11px] text-slate-500 mt-1">
                       BO: {dashboardBilling.remainingBos} (con monto: {dashboardBilling.remainingWithAmounts})
                     </div>
                     <div className="mt-3 space-y-2">
                       {dashboardBilling.remainingRows.map(row => {
-                        const max = dashboardBilling.maxRemaining || 1;
-                        const totalPct = row.total > 0 ? Math.max(6, Math.round((row.total / max) * 100)) : 0;
-                        const axisPct = row.total > 0 ? Math.round((row.axis / row.total) * totalPct) : 0;
-                        const intcomexPct = row.total > 0 ? Math.max(totalPct - axisPct, 1) : 0;
+                        const maxAxis = dashboardBilling.maxRemainingAxis || 1;
+                        const maxIntcomex = dashboardBilling.maxRemainingIntcomex || 1;
+                        const axisPct = row.axis > 0 ? Math.max(4, Math.round((row.axis / maxAxis) * 100)) : 0;
+                        const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
                         return (
                           <div key={`remaining-${row.week}`}>
                             <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1">
                               <span>{row.week}</span>
-                              <span>{formatCurrency(row.total)}</span>
+                              <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
                             </div>
-                            <div className="h-2.5 w-full bg-white rounded-full overflow-hidden border border-emerald-100">
-                              <div className="h-full bg-emerald-500 inline-block align-top" style={{ width: `${axisPct}%` }} />
-                              <div className="h-full bg-sky-500 inline-block align-top" style={{ width: `${intcomexPct}%` }} />
+                            <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-emerald-100">
+                              <div className="h-full bg-emerald-500" style={{ width: `${axisPct}%` }} />
+                            </div>
+                            <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-sky-100 mt-1">
+                              <div className="h-full bg-sky-500" style={{ width: `${intcomexPct}%` }} />
                             </div>
                           </div>
                         );
@@ -4759,30 +4766,36 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                   <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
                     <div className="text-sm font-semibold text-blue-800">Ya facturado reportado ({dashboardBilling.monthLabel})</div>
-                    <div className="text-2xl font-semibold text-slate-900 mt-1">
-                      {formatCurrency(dashboardBilling.invoicedAxis + dashboardBilling.invoicedIntcomex)}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      Axis: {formatCurrency(dashboardBilling.invoicedAxis)} · Intcomex: {formatCurrency(dashboardBilling.invoicedIntcomex)}
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="rounded-lg border border-blue-200 bg-white/80 p-2">
+                        <div className="text-[11px] text-slate-500">Axis</div>
+                        <div className="text-lg font-semibold text-slate-900">{formatCurrency(dashboardBilling.invoicedAxis)}</div>
+                      </div>
+                      <div className="rounded-lg border border-cyan-200 bg-white/80 p-2">
+                        <div className="text-[11px] text-slate-500">Intcomex</div>
+                        <div className="text-lg font-semibold text-slate-900">{formatCurrency(dashboardBilling.invoicedIntcomex)}</div>
+                      </div>
                     </div>
                     <div className="text-[11px] text-slate-500 mt-1">
                       BO: {dashboardBilling.invoicedBos} (con monto: {dashboardBilling.invoicedWithAmounts})
                     </div>
                     <div className="mt-3 space-y-2">
                       {dashboardBilling.invoicedRows.map(row => {
-                        const max = dashboardBilling.maxInvoiced || 1;
-                        const totalPct = row.total > 0 ? Math.max(6, Math.round((row.total / max) * 100)) : 0;
-                        const axisPct = row.total > 0 ? Math.round((row.axis / row.total) * totalPct) : 0;
-                        const intcomexPct = row.total > 0 ? Math.max(totalPct - axisPct, 1) : 0;
+                        const maxAxis = dashboardBilling.maxInvoicedAxis || 1;
+                        const maxIntcomex = dashboardBilling.maxInvoicedIntcomex || 1;
+                        const axisPct = row.axis > 0 ? Math.max(4, Math.round((row.axis / maxAxis) * 100)) : 0;
+                        const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
                         return (
                           <div key={`invoiced-${row.week}`}>
                             <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1">
                               <span>{row.week}</span>
-                              <span>{formatCurrency(row.total)}</span>
+                              <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
                             </div>
-                            <div className="h-2.5 w-full bg-white rounded-full overflow-hidden border border-blue-100">
-                              <div className="h-full bg-blue-500 inline-block align-top" style={{ width: `${axisPct}%` }} />
-                              <div className="h-full bg-cyan-500 inline-block align-top" style={{ width: `${intcomexPct}%` }} />
+                            <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-blue-100">
+                              <div className="h-full bg-blue-500" style={{ width: `${axisPct}%` }} />
+                            </div>
+                            <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-cyan-100 mt-1">
+                              <div className="h-full bg-cyan-500" style={{ width: `${intcomexPct}%` }} />
                             </div>
                           </div>
                         );
