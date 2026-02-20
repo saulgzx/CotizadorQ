@@ -1140,8 +1140,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return;
     }
 
+    const getOsoOrderAmountTotals = (order) => {
+      return (order?.lines || []).reduce((acc, line) => {
+        const qty = Number(line?.orderQty) || 0;
+        const montoAxis = getAxisMontoNumber(order?.bo, line);
+        const montoIntcomex = getIntcomexMontoNumber(order?.bo, line);
+        acc.montoAxis += montoAxis;
+        acc.montoIntcomex += montoIntcomex;
+        acc.montoFacturarAxis += (montoAxis * qty);
+        acc.montoFacturarIntcomex += (montoIntcomex * qty);
+        return acc;
+      }, {
+        montoAxis: 0,
+        montoIntcomex: 0,
+        montoFacturarAxis: 0,
+        montoFacturarIntcomex: 0
+      });
+    };
+
     const detailRows = orders.map(order => {
       const totals = getOsoOrderTotals(order);
+      const amountTotals = getOsoOrderAmountTotals(order);
       const meta = getOsoMeta(order.bo);
       return {
         BO: order.bo || '',
@@ -1158,7 +1177,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         'S&D': getSAndDStatus(order.bo),
         'Cant. Orden': totals.orderQty,
         'Cant. Alocada': totals.allocQty,
-        'Cant. Despachada': totals.shippedQty
+        'Cant. Despachada': totals.shippedQty,
+        'Monto Axis': amountTotals.montoAxis,
+        'Monto Intcomex': amountTotals.montoIntcomex,
+        'Monto a facturar (Axis)': amountTotals.montoFacturarAxis,
+        'Monto a facturar (Intcomex)': amountTotals.montoFacturarIntcomex
       };
     });
 
@@ -1169,6 +1192,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
     orders.forEach(order => {
       const totals = getOsoOrderTotals(order);
+      const amountTotals = getOsoOrderAmountTotals(order);
       const customer = getOsoCustomerName(order);
       const allocPct = getOsoAllocPct(order, totals);
       const etaMonth = toMonthKey(order.etaEstimated);
@@ -1183,6 +1207,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             totalOrderQty: 0,
             totalAllocQty: 0,
             totalShippedQty: 0,
+            totalMontoAxis: 0,
+            totalMontoIntcomex: 0,
+            totalMontoFacturarAxis: 0,
+            totalMontoFacturarIntcomex: 0,
             allocPctSum: 0
           });
         }
@@ -1191,6 +1219,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         item.totalOrderQty += totals.orderQty;
         item.totalAllocQty += totals.allocQty;
         item.totalShippedQty += totals.shippedQty;
+        item.totalMontoAxis += amountTotals.montoAxis;
+        item.totalMontoIntcomex += amountTotals.montoIntcomex;
+        item.totalMontoFacturarAxis += amountTotals.montoFacturarAxis;
+        item.totalMontoFacturarIntcomex += amountTotals.montoFacturarIntcomex;
         item.allocPctSum += allocPct;
       };
 
@@ -1208,11 +1240,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           'Cant. Orden': item.totalOrderQty,
           'Cant. Alocada': item.totalAllocQty,
           'Cant. Despachada': item.totalShippedQty,
+          'Monto Axis': item.totalMontoAxis,
+          'Monto Intcomex': item.totalMontoIntcomex,
+          'Monto a facturar (Axis)': item.totalMontoFacturarAxis,
+          'Monto a facturar (Intcomex)': item.totalMontoFacturarIntcomex,
           '% Alocado Prom.': item.orders ? Math.round((item.allocPctSum / item.orders) * 10) / 10 : 0
         }))
         .sort((a, b) => (b['Órdenes'] || 0) - (a['Órdenes'] || 0));
 
     const stats = computeOsoStats(orders);
+    const amountStats = detailRows.reduce((acc, row) => {
+      acc.montoAxis += Number(row['Monto Axis']) || 0;
+      acc.montoIntcomex += Number(row['Monto Intcomex']) || 0;
+      acc.montoFacturarAxis += Number(row['Monto a facturar (Axis)']) || 0;
+      acc.montoFacturarIntcomex += Number(row['Monto a facturar (Intcomex)']) || 0;
+      return acc;
+    }, {
+      montoAxis: 0,
+      montoIntcomex: 0,
+      montoFacturarAxis: 0,
+      montoFacturarIntcomex: 0
+    });
     const uniqueCustomers = customerMap.size;
     const topCustomers = mapToRows(customerMap, 'Cliente')
       .slice(0, 5)
@@ -1225,6 +1273,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       { Métrica: 'Cant. Orden', Valor: stats.totalOrderQty },
       { Métrica: 'Cant. Alocada', Valor: stats.totalAllocQty },
       { Métrica: 'Cant. Despachada', Valor: stats.totalShippedQty },
+      { Métrica: 'Monto Axis', Valor: amountStats.montoAxis },
+      { Métrica: 'Monto Intcomex', Valor: amountStats.montoIntcomex },
+      { Métrica: 'Monto a facturar (Axis)', Valor: amountStats.montoFacturarAxis },
+      { Métrica: 'Monto a facturar (Intcomex)', Valor: amountStats.montoFacturarIntcomex },
       { Métrica: '% Alocado Promedio', Valor: `${stats.avgAllocPct}%` },
       { Métrica: 'Activas', Valor: stats.activa },
       { Métrica: 'Parciales', Valor: stats.parcial },
