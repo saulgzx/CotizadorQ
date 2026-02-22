@@ -2998,7 +2998,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const dashboardBilling = useMemo(() => {
     const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sin sem'];
-    const initRows = () => weeks.map(week => ({ week, axis: 0, intcomex: 0 }));
+    const initRows = () => weeks.map(week => ({ week, axis: 0, intcomex: 0, boSummaries: [] }));
     const remainingRows = initRows();
     const invoicedRows = initRows();
     const rowIndexByWeek = weeks.reduce((acc, week, idx) => {
@@ -3016,6 +3016,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const idx = rowIndexByWeek[week] ?? rowIndexByWeek['Sin sem'];
       rows[idx].axis += axis;
       rows[idx].intcomex += intcomex;
+    };
+
+    const addBoSummary = (rows, week, summary) => {
+      const idx = rowIndexByWeek[week] ?? rowIndexByWeek['Sin sem'];
+      rows[idx].boSummaries.push(summary);
     };
 
     const computeBoAmounts = (order) => {
@@ -3051,9 +3056,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (!month || month !== dashboardInvoiceMonth) return;
       const order = ordersByBo.get(bo);
       const { axis, intcomex } = computeBoAmounts(order);
+      const total = axis + intcomex;
       const hasAmounts = (axis + intcomex) > 0;
       const week = getWeekLabel(getBoInvoiceWeek(bo));
       const isInvoiced = Boolean(getOsoMeta(bo)?.invoiced);
+      const customerName = (order?.customerName || getOsoMeta(bo)?.customerName || 'Sin cliente').toString().trim() || 'Sin cliente';
+      const boSummary = { bo, customerName, total, axis, intcomex };
 
       if (isInvoiced) {
         summary.invoicedBos += 1;
@@ -3061,20 +3069,30 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         summary.invoicedAxis += axis;
         summary.invoicedIntcomex += intcomex;
         addRowAmount(invoicedRows, week, axis, intcomex);
+        addBoSummary(invoicedRows, week, boSummary);
       } else {
         summary.remainingBos += 1;
         if (hasAmounts) summary.remainingWithAmounts += 1;
         summary.remainingAxis += axis;
         summary.remainingIntcomex += intcomex;
         addRowAmount(remainingRows, week, axis, intcomex);
+        addBoSummary(remainingRows, week, boSummary);
       }
     });
+
+    const sortBoSummaries = (rows) => rows.map((row) => ({
+      ...row,
+      boSummaries: [...row.boSummaries].sort((a, b) => {
+        if (b.total !== a.total) return b.total - a.total;
+        return String(a.bo || '').localeCompare(String(b.bo || ''));
+      })
+    }));
 
     return {
       month: dashboardInvoiceMonth,
       monthLabel: formatInvoiceMonthLabel(dashboardInvoiceMonth),
-      remainingRows,
-      invoicedRows,
+      remainingRows: sortBoSummaries(remainingRows),
+      invoicedRows: sortBoSummaries(invoicedRows),
       maxRemainingAxis: Math.max(...remainingRows.map(row => row.axis), 0),
       maxRemainingIntcomex: Math.max(...remainingRows.map(row => row.intcomex), 0),
       maxInvoicedAxis: Math.max(...invoicedRows.map(row => row.axis), 0),
@@ -4759,6 +4777,24 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-sky-100 mt-1">
                               <div className="h-full bg-sky-500" style={{ width: `${intcomexPct}%` }} />
                             </div>
+                            {row.boSummaries.length > 0 && (
+                              <details className="mt-1.5 rounded-md border border-emerald-100 bg-white/80 px-2 py-1">
+                                <summary className="cursor-pointer text-[11px] text-emerald-800 font-medium select-none">
+                                  Ver resumen BO ({row.boSummaries.length})
+                                </summary>
+                                <div className="mt-1 max-h-40 overflow-auto divide-y divide-emerald-50">
+                                  {row.boSummaries.map((item) => (
+                                    <div key={`remaining-week-detail-${row.week}-${item.bo}`} className="py-1 text-[11px] text-slate-700">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-medium">BO {item.bo || 'N/A'}</span>
+                                        <span className="font-semibold text-slate-900">{formatCurrency(item.total)}</span>
+                                      </div>
+                                      <div className="text-slate-500 truncate">{item.customerName}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         );
                       })}
@@ -4797,6 +4833,24 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-cyan-100 mt-1">
                               <div className="h-full bg-cyan-500" style={{ width: `${intcomexPct}%` }} />
                             </div>
+                            {row.boSummaries.length > 0 && (
+                              <details className="mt-1.5 rounded-md border border-blue-100 bg-white/80 px-2 py-1">
+                                <summary className="cursor-pointer text-[11px] text-blue-800 font-medium select-none">
+                                  Ver resumen BO ({row.boSummaries.length})
+                                </summary>
+                                <div className="mt-1 max-h-40 overflow-auto divide-y divide-blue-50">
+                                  {row.boSummaries.map((item) => (
+                                    <div key={`invoiced-week-detail-${row.week}-${item.bo}`} className="py-1 text-[11px] text-slate-700">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-medium">BO {item.bo || 'N/A'}</span>
+                                        <span className="font-semibold text-slate-900">{formatCurrency(item.total)}</span>
+                                      </div>
+                                      <div className="text-slate-500 truncate">{item.customerName}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         );
                       })}
