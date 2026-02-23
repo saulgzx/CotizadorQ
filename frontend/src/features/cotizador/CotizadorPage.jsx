@@ -3258,15 +3258,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const createUsuario = async () => {
-    const formData = nuevoUsuarioFormRef.current ? new FormData(nuevoUsuarioFormRef.current) : null;
+  const createUsuario = async (formElement = null) => {
+    const sourceForm = formElement || nuevoUsuarioFormRef.current;
+    const formData = sourceForm ? new FormData(sourceForm) : null;
     const usuarioFromForm = (formData?.get('nuevo_usuario') || '').toString();
     const nombreFromForm = (formData?.get('nuevo_nombre') || '').toString();
     const passwordFromForm = (formData?.get('nuevo_password') || '').toString();
 
-    const usuarioValue = (nuevoUsuario.usuario || usuarioFromForm).trim();
-    const nombreValue = (nuevoUsuario.nombre || nombreFromForm).trim();
-    const passwordValue = (nuevoUsuario.password || passwordFromForm).toString();
+    const usuarioValue = (usuarioFromForm || nuevoUsuario.usuario || '').trim();
+    const nombreValue = (nombreFromForm || nuevoUsuario.nombre || '').trim();
+    const passwordValue = (passwordFromForm || nuevoUsuario.password || '').toString();
 
     if (!usuarioValue || !passwordValue.trim()) {
       alert('Usuario y contraseña son requeridos');
@@ -5460,7 +5461,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     ref={nuevoUsuarioFormRef}
                     onSubmit={(e) => {
                       e.preventDefault();
-                      createUsuario();
+                      createUsuario(e.currentTarget);
                     }}
                     className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3"
                   >
