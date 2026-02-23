@@ -51,6 +51,24 @@ const getUserKey = (user) => {
 };
 
 const normalizeRole = (role) => (role || '').toString().toLowerCase();
+const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
+const normalizeIntcomexProfile = (value) => {
+  const profile = normalizeText(value);
+  return profile === 'ventas' || profile === 'compras' ? profile : '';
+};
+const isIntcomexUser = (user) => normalizeText(user?.empresa) === 'intcomex';
+const getIntcomexProfile = (user) => normalizeIntcomexProfile(user?.intcomex_profile);
+const canAccessComprasView = (user) => {
+  const role = normalizeRole(user?.role);
+  if (role === 'admin') return true;
+  return isIntcomexUser(user) && getIntcomexProfile(user) === 'compras';
+};
+const isIntcomexVentas = (user) => isIntcomexUser(user) && getIntcomexProfile(user) === 'ventas';
+const canChangeOwnPartnerCategory = (user) => {
+  const role = normalizeRole(user?.role);
+  if (role === 'admin') return true;
+  return isIntcomexVentas(user);
+};
 
 const readSessionsByUser = () => safeJsonParse(localStorage.getItem(SESSION_STORAGE_KEY), {});
 
@@ -279,6 +297,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
   const isAdmin = user?.role ? user.role === 'admin' : true;
+  const isComprasOnlyUser = !isAdmin && getIntcomexProfile(user) === 'compras' && isIntcomexUser(user);
+  const canViewCompras = canAccessComprasView(user);
+  const canViewCotizador = !isComprasOnlyUser;
+  const canViewStock = !isComprasOnlyUser;
+  const canViewHistorial = !isComprasOnlyUser;
+  const canViewAccount = !isAdmin && !isComprasOnlyUser;
+  const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
   const [loading, setLoading] = useState(true);
   const [usuario, setUsuario] = useState('');
@@ -422,6 +447,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     role: 'client',
     gp_qnap: '15',
     gp_axis: '15',
+    intcomex_profile: '',
     partner_category: DEFAULT_AXIS_PARTNER,
     logo_url: ''
   });
@@ -1388,6 +1414,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [usuarioPasswordById, setUsuarioPasswordById] = useState({});
   const [accountPassword, setAccountPassword] = useState('');
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState('');
+  const [ownPartnerCategory, setOwnPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
+  const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
   const [historialFilters, setHistorialFilters] = useState({
     fecha: '',
     cliente: '',
@@ -1686,6 +1714,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       registerSessionForUser(parsedUser);
       setUser(parsedUser);
       applyUserDefaults(parsedUser);
+      if (isIntcomexUser(parsedUser) && getIntcomexProfile(parsedUser) === 'compras') {
+        setCurrentView('compras');
+      }
       setCliente(prev => ({
         ...prev,
         nombre: parsedUser?.nombre || parsedUser?.usuario || prev.nombre || '',
@@ -1790,6 +1821,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         empresa: data.user?.empresa || ''
       }));
       setIsLoggedIn(true);
+      if (isIntcomexUser(data.user) && getIntcomexProfile(data.user) === 'compras') {
+        setCurrentView('compras');
+      }
       loadProductos(data.user?.role);
       loadStock();
     } catch (error) {
@@ -1889,9 +1923,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, isAdmin, currentView]);
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'ordenes') return;
+    if (!isLoggedIn || (!isAdmin && !canViewCompras) || (currentView !== 'ordenes' && currentView !== 'compras')) return;
     loadOsoOrders();
-  }, [isLoggedIn, isAdmin, currentView]);
+  }, [isLoggedIn, isAdmin, canViewCompras, currentView]);
 
 
   useEffect(() => {
@@ -1925,10 +1959,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, isAdmin, currentView, selectedSessionUserId]);
 
   useEffect(() => {
-    if (!isAdmin && (currentView === 'admin' || currentView === 'usuarios' || currentView === 'ordenes' || currentView === 'compras')) {
-      setCurrentView('cotizador');
+    if (isAdmin) return;
+    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes']);
+    if (blockedForClient.has(currentView)) {
+      setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
+      return;
     }
-  }, [isAdmin, currentView]);
+    if (currentView === 'compras' && !canViewCompras) {
+      setCurrentView('cotizador');
+      return;
+    }
+    if (isComprasOnlyUser && (currentView === 'cotizador' || currentView === 'stock' || currentView === 'historial' || currentView === 'cuenta' || currentView === 'dashboard')) {
+      setCurrentView('compras');
+    }
+  }, [isAdmin, currentView, canViewCompras, isComprasOnlyUser]);
 
   useEffect(() => {
     if (isLoggedIn && location.pathname === '/login') {
@@ -1937,36 +1981,55 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     const nextView = ROUTE_TO_VIEW[location.pathname];
     if (!nextView) return;
-    if (!isAdmin && ADMIN_VIEWS.has(nextView)) {
+    if (!isAdmin && nextView === 'compras' && !canViewCompras) {
+      if (location.pathname !== '/cotizador') {
+        navigate('/cotizador', { replace: true });
+      }
+      return;
+    }
+    if (!isAdmin && ADMIN_VIEWS.has(nextView) && !(nextView === 'compras' && canViewCompras)) {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
       }
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       return;
     }
+    if (isComprasOnlyUser && nextView !== 'dashboard') {
+      if (location.pathname !== '/dashboard') {
+        navigate('/dashboard', { replace: true });
+      }
+      if (currentView !== 'compras') setCurrentView('compras');
+      return;
+    }
     if (nextView !== currentView) {
       setCurrentView(nextView);
     }
-  }, [location.pathname, isLoggedIn, isAdmin, navigate]);
+  }, [location.pathname, isLoggedIn, isAdmin, canViewCompras, isComprasOnlyUser, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
     if (!VIEW_TO_ROUTE[currentView]) return;
-    if (!isAdmin && ADMIN_VIEWS.has(currentView)) return;
+    if (!isAdmin && ADMIN_VIEWS.has(currentView)) {
+      if (currentView === 'compras' && canViewCompras) {
+        return;
+      }
+      return;
+    }
+    if (isComprasOnlyUser && currentView !== 'dashboard') return;
     const targetRoute = VIEW_TO_ROUTE[currentView];
     if (location.pathname !== targetRoute) {
       navigate(targetRoute, { replace: true });
     }
-  }, [currentView, isLoggedIn, isAdmin, hasRouteSync, location.pathname, navigate]);
+  }, [currentView, isLoggedIn, isAdmin, canViewCompras, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
     const onKeyDown = (event) => {
       if (!event.altKey) return;
       const keyMap = {
-        '1': 'dashboard',
-        '2': 'cotizador',
-        '3': 'historial',
+        '1': isComprasOnlyUser ? 'compras' : 'dashboard',
+        '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
+        '3': canViewHistorial ? 'historial' : null,
         '4': isAdmin ? 'usuarios' : null,
         '5': isAdmin ? 'ordenes' : null
       };
@@ -1977,7 +2040,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoggedIn, isAdmin]);
+  }, [isLoggedIn, isAdmin, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
 
   useEffect(() => {
     if (!user || isAdmin) return;
@@ -1987,6 +2050,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       empresa: prev.empresa && prev.empresa !== 'N/A' ? prev.empresa : (user.empresa || '')
     }));
   }, [user, isAdmin]);
+
+  useEffect(() => {
+    setOwnPartnerCategory(user?.partner_category || DEFAULT_AXIS_PARTNER);
+  }, [user]);
 
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleLogin(); };
 
@@ -3217,6 +3284,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         gp_qnap: 0.15,
         gp_axis: 0.15,
         partner_category: DEFAULT_AXIS_PARTNER,
+        intcomex_profile: null,
         empresa: '',
         logo_url: ''
       };
@@ -3322,6 +3390,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
+  const updateOwnPartnerCategory = async () => {
+    if (!canEditPartnerCategory) return;
+    try {
+      setUpdatingOwnPartnerCategory(true);
+      const updated = await usuariosAPI.updateOwnPartnerCategory(ownPartnerCategory);
+      const nextPartnerCategory = updated?.partner_category || ownPartnerCategory;
+      setUser(prev => {
+        if (!prev) return prev;
+        const next = { ...prev, partner_category: nextPartnerCategory };
+        localStorage.setItem('user', JSON.stringify(next));
+        return next;
+      });
+      setCotizacionPartnerCategory(nextPartnerCategory);
+      alert('Nivel de partner actualizado');
+    } catch (error) {
+      alert(error.message || 'Error actualizando nivel de partner');
+    } finally {
+      setUpdatingOwnPartnerCategory(false);
+    }
+  };
+
   const deleteUsuario = async (userId) => {
     if (!confirm('Eliminar este usuario?')) return;
     try {
@@ -3356,6 +3445,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           role: u.role || 'client',
           gp_qnap: Math.round(gpQnap),
           gp_axis: Math.round(gpAxis),
+          intcomex_profile: normalizeIntcomexProfile(u.intcomex_profile),
           partner_category: u.partner_category || DEFAULT_AXIS_PARTNER,
           logo_url: u.logo_url || ''
         };
@@ -3380,6 +3470,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         role: empresaForm.role || 'client',
         gp_qnap: Number.isNaN(gpQnap) ? 15 : gpQnap,
         gp_axis: Number.isNaN(gpAxis) ? 15 : gpAxis,
+        intcomex_profile: normalizeIntcomexProfile(empresaForm.intcomex_profile),
         partner_category: empresaForm.partner_category || DEFAULT_AXIS_PARTNER,
         logo_url: empresaForm.logo_url || ''
       }
@@ -3389,6 +3480,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       role: 'client',
       gp_qnap: '15',
       gp_axis: '15',
+      intcomex_profile: '',
       partner_category: DEFAULT_AXIS_PARTNER,
       logo_url: ''
     });
@@ -3402,24 +3494,31 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       role: empresa.role || 'client',
       gp_qnap: empresa.gp_qnap?.toString?.() || '15',
       gp_axis: empresa.gp_axis?.toString?.() || '15',
+      intcomex_profile: normalizeIntcomexProfile(empresa.intcomex_profile),
       partner_category: empresa.partner_category || DEFAULT_AXIS_PARTNER,
       logo_url: empresa.logo_url || ''
     });
   };
 
-  const assignUserToEmpresa = async (userId, empresaName) => {
+  const assignUserToEmpresa = async (userId, empresaName, intcomexProfileOverride = '') => {
     if (!empresaName) {
-      await updateUsuario(userId, { empresa: '', logo_url: '' });
+      await updateUsuario(userId, { empresa: '', logo_url: '', intcomex_profile: null });
       return;
     }
     const config = empresaConfigs[empresaName];
     if (!config) return;
+    const isIntcomexEmpresa = normalizeText(empresaName) === 'intcomex';
+    const intcomexProfile = isIntcomexEmpresa
+      ? normalizeIntcomexProfile(intcomexProfileOverride || config.intcomex_profile)
+      : '';
+    const isVentasProfile = isIntcomexEmpresa && intcomexProfile === 'ventas';
     await updateUsuario(userId, {
       empresa: empresaName,
-      role: config.role || 'client',
-      gp_qnap: config.gp_qnap ?? 15,
-      gp_axis: config.gp_axis ?? 15,
-      gp: config.gp_qnap ?? 15,
+      role: isVentasProfile ? 'client' : (config.role || 'client'),
+      gp_qnap: isVentasProfile ? 15 : (config.gp_qnap ?? 15),
+      gp_axis: isVentasProfile ? 13 : (config.gp_axis ?? 15),
+      gp: isVentasProfile ? 15 : (config.gp_qnap ?? 15),
+      intcomex_profile: intcomexProfile || null,
       partner_category: config.partner_category || DEFAULT_AXIS_PARTNER,
       logo_url: config.logo_url || ''
     });
@@ -3433,7 +3532,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     try {
       setUsuariosLoading(true);
       await Promise.allSettled(
-        usuariosEmpresa.map(u => updateUsuario(u.id, { empresa: '', logo_url: '' }))
+        usuariosEmpresa.map(u => updateUsuario(u.id, { empresa: '', logo_url: '', intcomex_profile: null }))
       );
       setEmpresaConfigs(prev => {
         const next = { ...prev };
@@ -4632,13 +4731,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </div>
             <nav className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setCurrentView('dashboard')}
-                className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
-                aria-label="Ir al dashboard"
-              >
-                Dashboard
-              </button>
+              {(!isComprasOnlyUser) && (
+                <button
+                  onClick={() => setCurrentView('dashboard')}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  aria-label="Ir al dashboard"
+                >
+                  Dashboard
+                </button>
+              )}
               {isAdmin && (
                 <>
                   <button
@@ -4654,6 +4755,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     Vista Compras
                   </button>
                 </>
+              )}
+              {!isAdmin && canViewCompras && (
+                <button
+                  onClick={() => setCurrentView('compras')}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                >
+                  Vista Compras
+                </button>
               )}
               {isAdmin && (
                 <button
@@ -4671,21 +4780,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Gestión de usuarios
                 </button>
               )}
-            <button onClick={() => setCurrentView('cotizador')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
-              Cotizador {cotizacion.length > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">{cotizacion.length}</span>}
-            </button>
-            <button onClick={() => setCurrentView('stock')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
-              Stock disponible
-            </button>
-            <button onClick={() => setCurrentView('historial')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
-              {isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
-              {isAdmin && historialCounts.registroPendientes > 0 && (
-                <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
-                  {historialCounts.registroPendientes}
-                </span>
-              )}
-            </button>
-            {!isAdmin && (
+            {canViewCotizador && (
+              <button onClick={() => setCurrentView('cotizador')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+                Cotizador {cotizacion.length > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">{cotizacion.length}</span>}
+              </button>
+            )}
+            {canViewStock && (
+              <button onClick={() => setCurrentView('stock')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+                Stock disponible
+              </button>
+            )}
+            {canViewHistorial && (
+              <button onClick={() => setCurrentView('historial')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+                {isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
+                {isAdmin && historialCounts.registroPendientes > 0 && (
+                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
+                    {historialCounts.registroPendientes}
+                  </span>
+                )}
+              </button>
+            )}
+            {canViewAccount && (
               <button onClick={() => setCurrentView('cuenta')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cuenta' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
                 Mi cuenta
               </button>
@@ -5087,12 +5202,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         onDrop={async (e) => {
                           e.preventDefault();
                           const userId = e.dataTransfer.getData('text/plain');
-                          if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre);
+                          const isIntcomexEmpresa = normalizeText(empresa.nombre) === 'intcomex';
+                          if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, isIntcomexEmpresa ? 'ventas' : '');
                         }}
                         className="border-2 border-dashed border-slate-200 rounded-xl p-3 bg-white/70"
                       >
                         {(() => {
                           const usersInEmpresa = usuarios.filter(u => (u.empresa || '').trim() === empresa.nombre);
+                          const isIntcomexEmpresa = normalizeText(empresa.nombre) === 'intcomex';
+                          const usersVentas = usersInEmpresa.filter(u => normalizeIntcomexProfile(u.intcomex_profile) === 'ventas');
+                          const usersCompras = usersInEmpresa.filter(u => normalizeIntcomexProfile(u.intcomex_profile) === 'compras');
                           const handleUserClick = (userId) => {
                             setSelectedUsuarioId(userId);
                             const target = userCardRefs.current[userId];
@@ -5117,6 +5236,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 Rol: {empresa.role === 'admin' ? 'Administrador' : 'Cliente'} • GP QNAP {empresa.gp_qnap}% • GP AXIS {empresa.gp_axis}%
                               </div>
                               <div className="text-[11px] text-slate-500">Partner: {empresa.partner_category}</div>
+                              {isIntcomexEmpresa && (
+                                <div className="text-[11px] text-sky-700">Perfiles disponibles: Ventas y Compras</div>
+                              )}
                             </div>
                           </div>
                           <button
@@ -5132,6 +5254,64 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             Eliminar
                           </button>
                         </div>
+                        {isIntcomexEmpresa && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                const userId = e.dataTransfer.getData('text/plain');
+                                if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, 'ventas');
+                              }}
+                              className="rounded-lg border border-sky-200 bg-sky-50 p-2"
+                            >
+                              <div className="text-[11px] font-semibold text-sky-800">Perfil Ventas</div>
+                              <div className="text-[11px] text-sky-700">Cotizador + Historial + Stock. QNAP 15% y AXIS 13% fijos.</div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                                {usersVentas.length === 0 ? (
+                                  <span className="text-slate-400">Arrastra usuarios aquí.</span>
+                                ) : (
+                                  usersVentas.map(u => (
+                                    <button
+                                      key={`ventas-${u.id}`}
+                                      onClick={() => handleUserClick(u.id)}
+                                      className="px-2 py-1 rounded-full border border-sky-200 bg-white hover:bg-sky-100"
+                                    >
+                                      {u.nombre || u.usuario}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                            <div
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                const userId = e.dataTransfer.getData('text/plain');
+                                if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, 'compras');
+                              }}
+                              className="rounded-lg border border-amber-200 bg-amber-50 p-2"
+                            >
+                              <div className="text-[11px] font-semibold text-amber-800">Perfil Compras</div>
+                              <div className="text-[11px] text-amber-700">Acceso exclusivo a Vista Compras.</div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                                {usersCompras.length === 0 ? (
+                                  <span className="text-slate-400">Arrastra usuarios aquí.</span>
+                                ) : (
+                                  usersCompras.map(u => (
+                                    <button
+                                      key={`compras-${u.id}`}
+                                      onClick={() => handleUserClick(u.id)}
+                                      className="px-2 py-1 rounded-full border border-amber-200 bg-white hover:bg-amber-100"
+                                    >
+                                      {u.nombre || u.usuario}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                           {usersInEmpresa.length === 0 ? (
                             <span className="text-slate-400">Arrastra usuarios aquí para asignar y aplicar márgenes.</span>
@@ -5155,6 +5335,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       {initials || 'U'}
                                     </span>
                                     <span className="text-[11px] text-slate-700">{u.nombre || u.usuario}</span>
+                                    {isIntcomexEmpresa && normalizeIntcomexProfile(u.intcomex_profile) && (
+                                      <span className="text-[10px] uppercase text-slate-500">({normalizeIntcomexProfile(u.intcomex_profile)})</span>
+                                    )}
                                   </button>
                                 );
                               })}
@@ -5191,6 +5374,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   const selectedUser = usuarios.find(u => u.id === selectedUsuarioId);
                   if (!selectedUser) return null;
                   const isFixedAdmin = (selectedUser.usuario || '').toLowerCase() === 'agonz';
+                  const isSelectedIntcomex = normalizeText(selectedUser.empresa) === 'intcomex';
+                  const selectedProfile = normalizeIntcomexProfile(selectedUser.intcomex_profile);
                   return (
                     <div className="mb-3 border rounded-xl p-3 bg-white/80">
                       <div className="flex items-start justify-between gap-2">
@@ -5200,6 +5385,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <div className="text-[11px] text-slate-400">
                             {selectedUser.empresa ? `Empresa: ${selectedUser.empresa}` : 'Sin empresa'}
                           </div>
+                          {isSelectedIntcomex && (
+                            <div className="text-[11px] text-slate-400">
+                              Perfil Intcomex: {selectedProfile || 'Sin perfil'}
+                            </div>
+                          )}
                         </div>
                         <button
                           onClick={() => setSelectedUsuarioId(null)}
@@ -5211,7 +5401,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <div className="mt-3 grid grid-cols-1 gap-2">
                         <select
                           value={selectedUser.empresa || ''}
-                          onChange={e => assignUserToEmpresa(selectedUser.id, e.target.value)}
+                          onChange={e => assignUserToEmpresa(selectedUser.id, e.target.value, normalizeText(e.target.value) === 'intcomex' ? 'ventas' : '')}
                           className="px-2 py-1 border rounded text-xs"
                           disabled={Object.keys(empresaConfigs).length === 0}
                         >
@@ -5220,6 +5410,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <option key={emp.nombre} value={emp.nombre}>{emp.nombre}</option>
                           ))}
                         </select>
+                        {isSelectedIntcomex && (
+                          <select
+                            value={selectedProfile || ''}
+                            onChange={e => assignUserToEmpresa(selectedUser.id, selectedUser.empresa, e.target.value)}
+                            className="px-2 py-1 border rounded text-xs"
+                          >
+                            <option value="">Selecciona perfil Intcomex</option>
+                            <option value="ventas">Ventas</option>
+                            <option value="compras">Compras</option>
+                          </select>
+                        )}
                         <div className="flex items-center gap-2">
                           <input
                             placeholder="Nueva contraseña"
@@ -5327,6 +5528,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <div className="text-[11px] text-slate-400">
                                 {u.empresa ? `Empresa: ${u.empresa}` : 'Sin empresa'}
                               </div>
+                              {normalizeText(u.empresa) === 'intcomex' && normalizeIntcomexProfile(u.intcomex_profile) && (
+                                <div className="text-[11px] text-slate-400">
+                                  Perfil: {normalizeIntcomexProfile(u.intcomex_profile)}
+                                </div>
+                              )}
                             </div>
                             <div className="text-[10px] uppercase tracking-wide text-slate-400">
                               {u.role === 'admin' ? 'Administrador' : 'Cliente'}
@@ -6518,7 +6724,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
 
-        {currentView === 'compras' && isAdmin && (
+        {currentView === 'compras' && canViewCompras && (
           <div className="space-y-4">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -7772,7 +7978,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </>
         )}
 
-        {currentView === 'cuenta' && !isAdmin && (
+        {currentView === 'cuenta' && canViewAccount && (
           <div className="space-y-4">
             <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
               <div className="p-4 border-b bg-gray-50">
@@ -7797,11 +8003,33 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-gray-500">
                   Nivel de partner
-                  <input
-                    value={user?.partner_category || 'Partner Autorizado'}
-                    readOnly
-                    className="px-3 py-2 border rounded text-sm text-gray-800 bg-gray-50"
-                  />
+                  {canEditPartnerCategory ? (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={ownPartnerCategory}
+                        onChange={e => setOwnPartnerCategory(e.target.value)}
+                        className="px-3 py-2 border rounded text-sm text-gray-800 bg-white flex-1"
+                      >
+                        <option>Partner Autorizado</option>
+                        <option>Partner Silver</option>
+                        <option>Partner Gold</option>
+                        <option>Partner Multiregional</option>
+                      </select>
+                      <button
+                        onClick={updateOwnPartnerCategory}
+                        disabled={updatingOwnPartnerCategory}
+                        className="px-3 py-2 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      value={user?.partner_category || 'Partner Autorizado'}
+                      readOnly
+                      className="px-3 py-2 border rounded text-sm text-gray-800 bg-gray-50"
+                    />
+                  )}
                 </label>
               </div>
             </div>

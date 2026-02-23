@@ -415,6 +415,17 @@ export const usuariosAPI = {
     }
     return response.json();
   },
+  updateOwnPartnerCategory: async (partnerCategory) => {
+    const response = await fetchWithAuth('/api/usuarios/me/partner-category', {
+      method: 'PATCH',
+      body: JSON.stringify({ partner_category: partnerCategory }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Error actualizando categoria de partner');
+    }
+    return response.json();
+  },
 
   delete: async (id) => {
     const response = await fetchWithAuth(`/api/usuarios/${encodeURIComponent(id)}`, {

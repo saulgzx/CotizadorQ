@@ -681,6 +681,45 @@ const parseGpValue = (value, fallback = 0.15) => {
   return parsed > 1 ? parsed / 100 : parsed;
 };
 
+const normalizeIntcomexProfile = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'ventas' || normalized === 'compras') return normalized;
+  return null;
+};
+
+const normalizeEmpresaName = (value) => String(value || '').trim().toLowerCase();
+
+const applyIntcomexProfilePolicy = ({
+  empresa,
+  intcomexProfile,
+  role,
+  gp,
+  gpQnap,
+  gpAxis,
+  partnerCategory
+}) => {
+  const isIntcomex = normalizeEmpresaName(empresa) === 'intcomex';
+  const profile = isIntcomex ? normalizeIntcomexProfile(intcomexProfile) : null;
+  if (profile === 'ventas') {
+    return {
+      intcomexProfile: profile,
+      role: 'client',
+      gp: parseGpValue(gp ?? 0.15, 0.15),
+      gpQnap: 0.15,
+      gpAxis: 0.13,
+      partnerCategory: partnerCategory || 'Partner Autorizado'
+    };
+  }
+  return {
+    intcomexProfile: profile,
+    role: role || 'client',
+    gp: parseGpValue(gp ?? 0.15, 0.15),
+    gpQnap: parseGpValue(gpQnap ?? gp ?? 0.15, parseGpValue(gp ?? 0.15, 0.15)),
+    gpAxis: parseGpValue(gpAxis ?? gp ?? 0.15, parseGpValue(gp ?? 0.15, 0.15)),
+    partnerCategory: partnerCategory || 'Partner Autorizado'
+  };
+};
+
 const parseNumber = (value, fallback = 0) => {
   const parsed = parseFloat(value);
   return Number.isNaN(parsed) ? fallback : parsed;
@@ -1129,6 +1168,7 @@ const initDB = async () => {
         gp_qnap DECIMAL(5,4) DEFAULT 0.15,
         gp_axis DECIMAL(5,4) DEFAULT 0.15,
         partner_category VARCHAR(50) DEFAULT 'Partner Autorizado',
+        intcomex_profile VARCHAR(20),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -1303,6 +1343,7 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_qnap DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
 
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sesiones_user_session_idx ON sesiones(user_id, session_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS sesiones_active_idx ON sesiones(user_id, revoked, last_seen);`);
@@ -1434,7 +1475,7 @@ const validateSession = async (userId, sessionId, req, role) => {
   return { ok: true };
 };
 
-const { requireAuth, requireAdmin, requireOwnerOrAdmin } = buildAuthMiddlewares({
+const { requireAuth, requireAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({
   pool,
   jwtSecret: JWT_SECRET,
   getSessionHeaders,
@@ -1516,7 +1557,8 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
         usuario: user.usuario,
         empresa: user.empresa || '',
         role: user.role,
-        partner_category: user.partner_category
+        partner_category: user.partner_category,
+        intcomex_profile: user.intcomex_profile || null
       },
       JWT_SECRET,
       { expiresIn: (user.role === 'admin' ? ADMIN_JWT_EXPIRES_IN : '24h') }
@@ -1531,7 +1573,8 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
         empresa: user.empresa || '',
         logo_url: user.logo_url || '',
         role: user.role,
-        partner_category: user.partner_category
+        partner_category: user.partner_category,
+        intcomex_profile: user.intcomex_profile || null
       },
       session: {
         session_id: sessionInfo.sessionId,
@@ -1649,7 +1692,7 @@ app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, asy
 // USUARIOS - Listar
 app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, created_at FROM usuarios ORDER BY id DESC');
+    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at FROM usuarios ORDER BY id DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Error obteniendo usuarios:', error);
@@ -1660,7 +1703,7 @@ app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {
 // USUARIOS - Crear
 app.post('/api/usuarios', authenticateToken, requireAdmin, validatePasswordInput, async (req, res) => {
   try {
-    const { usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category } = req.body;
+    const { usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile } = req.body;
     if (!usuario || !password) {
       return res.status(400).json({ error: 'Usuario y contrasena son requeridos' });
     }
@@ -1669,12 +1712,18 @@ app.post('/api/usuarios', authenticateToken, requireAdmin, validatePasswordInput
       return res.status(400).json({ error: 'Usuario ya existe' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const gpValue = parseGpValue(gp ?? 0.15, 0.15);
-    const gpQnapValue = parseGpValue(gp_qnap ?? gpValue, gpValue);
-    const gpAxisValue = parseGpValue(gp_axis ?? gpValue, gpValue);
+    const policy = applyIntcomexProfilePolicy({
+      empresa,
+      intcomexProfile: intcomex_profile,
+      role,
+      gp,
+      gpQnap: gp_qnap,
+      gpAxis: gp_axis,
+      partnerCategory: partner_category
+    });
     const result = await pool.query(
-      'INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, created_at',
-      [usuario, hashedPassword, nombre || '', empresa || '', logo_url || '', role || 'client', gpValue, gpQnapValue, gpAxisValue, partner_category || 'Partner Autorizado']
+      'INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at',
+      [usuario, hashedPassword, nombre || '', empresa || '', logo_url || '', policy.role, policy.gp, policy.gpQnap, policy.gpAxis, policy.partnerCategory, policy.intcomexProfile]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -1687,32 +1736,103 @@ app.post('/api/usuarios', authenticateToken, requireAdmin, validatePasswordInput
 app.put('/api/usuarios/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category } = req.body;
-    const gpValue = parseGpValue(gp ?? 0.15, 0.15);
-    const gpQnapValue = parseGpValue(gp_qnap ?? gpValue, gpValue);
-    const gpAxisValue = parseGpValue(gp_axis ?? gpValue, gpValue);
+    const currentResult = await pool.query(
+      'SELECT empresa, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile FROM usuarios WHERE id = $1',
+      [id]
+    );
+    if (currentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    const current = currentResult.rows[0];
+    const payload = req.body || {};
+    const nextEmpresa = payload.empresa ?? current.empresa;
+    const policy = applyIntcomexProfilePolicy({
+      empresa: nextEmpresa,
+      intcomexProfile: payload.intcomex_profile ?? current.intcomex_profile,
+      role: payload.role ?? current.role,
+      gp: payload.gp ?? current.gp,
+      gpQnap: payload.gp_qnap ?? current.gp_qnap,
+      gpAxis: payload.gp_axis ?? current.gp_axis,
+      partnerCategory: payload.partner_category ?? current.partner_category
+    });
     const result = await pool.query(
       `UPDATE usuarios
        SET usuario = COALESCE($1, usuario),
            nombre = COALESCE($2, nombre),
            empresa = COALESCE($3, empresa),
            logo_url = COALESCE($4, logo_url),
-           role = COALESCE($5, role),
-           gp = COALESCE($6, gp),
-           gp_qnap = COALESCE($7, gp_qnap),
-           gp_axis = COALESCE($8, gp_axis),
-           partner_category = COALESCE($9, partner_category)
-       WHERE id = $10
-       RETURNING id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, created_at`,
-      [usuario, nombre, empresa, logo_url, role, gpValue, gpQnapValue, gpAxisValue, partner_category, id]
+           role = $5,
+           gp = $6,
+           gp_qnap = $7,
+           gp_axis = $8,
+           partner_category = $9,
+           intcomex_profile = $10
+       WHERE id = $11
+       RETURNING id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at`,
+      [
+        payload.usuario ?? null,
+        payload.nombre ?? null,
+        payload.empresa ?? null,
+        payload.logo_url ?? null,
+        policy.role,
+        policy.gp,
+        policy.gpQnap,
+        policy.gpAxis,
+        policy.partnerCategory,
+        policy.intcomexProfile,
+        id
+      ]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error actualizando usuario:', error);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// USUARIOS - Actualizar partner para perfil Ventas Intcomex
+app.patch('/api/usuarios/me/partner-category', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const partnerCategory = String(req.body?.partner_category || '').trim();
+    const allowedCategories = new Set([
+      'Partner Autorizado',
+      'Partner Silver',
+      'Partner Gold',
+      'Partner Multiregional'
+    ]);
+    if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
+    if (!allowedCategories.has(partnerCategory)) {
+      return res.status(400).json({ error: 'Categoria de partner invalida' });
+    }
+    const accessResult = await pool.query(
+      'SELECT empresa, role, intcomex_profile FROM usuarios WHERE id = $1',
+      [userId]
+    );
+    if (accessResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    const access = accessResult.rows[0];
+    const role = String(access.role || '').toLowerCase();
+    const empresa = String(access.empresa || '').trim().toLowerCase();
+    const profile = String(access.intcomex_profile || '').trim().toLowerCase();
+    const canUpdate = role === 'admin' || (empresa === 'intcomex' && profile === 'ventas');
+    if (!canUpdate) return res.status(403).json({ error: 'Permiso denegado' });
+
+    const result = await pool.query(
+      `UPDATE usuarios
+       SET partner_category = $1
+       WHERE id = $2
+       RETURNING id, usuario, partner_category, intcomex_profile`,
+      [partnerCategory, userId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error actualizando categoria partner:', error);
+    return res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -1953,7 +2073,7 @@ app.get('/api/sheets/analyze', authenticateToken, requireAdmin, async (req, res)
 
 
 // OSO - Ordenes activas (admin)
-app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => {
+app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
   try {
     const cached = cacheGet(CACHE_KEY_OSO_ORDERS);
     if (cached) {
@@ -2165,7 +2285,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
 });
 
 // BO Meta - Obtener todos (admin)
-app.get('/api/bo-meta', authenticateToken, requireAdmin, async (req, res) => {
+app.get('/api/bo-meta', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM bo_meta ORDER BY bo ASC');
     res.json(result.rows);
@@ -2185,7 +2305,7 @@ const ensureBoMetaSchema = async () => {
   boMetaSchemaReady = true;
 };
 
-app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) => {
+app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
   try {
     await ensureBoMetaSchema();
     const bo = String(req.params.bo || '').trim();
@@ -2263,7 +2383,7 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // BO Line Meta - Guardar montos axis por linea (admin)
-  app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) => {
+  app.put('/api/bo-lines/:bo', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
   try {
     const bo = String(req.params.bo || '').trim();
     if (!bo) return res.status(400).json({ error: 'BO requerido' });
@@ -2413,7 +2533,7 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
 });
 
 // BO Meta - Eliminar (admin) con comentario
-app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdmin, async (req, res) => {
+app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
   const client = await pool.connect();
   try {
     const bo = String(req.params.bo || '').trim();

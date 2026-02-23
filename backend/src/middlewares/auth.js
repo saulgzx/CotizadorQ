@@ -30,6 +30,19 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
     return String(result.rows[0].role || '').toLowerCase();
   };
 
+  const getUserAccess = async (userId) => {
+    const result = await pool.query(
+      'SELECT role, empresa, intcomex_profile FROM usuarios WHERE id = $1',
+      [userId]
+    );
+    if (result.rows.length === 0) return null;
+    return {
+      role: String(result.rows[0].role || '').toLowerCase(),
+      empresa: String(result.rows[0].empresa || '').trim().toLowerCase(),
+      intcomexProfile: String(result.rows[0].intcomex_profile || '').trim().toLowerCase()
+    };
+  };
+
   const requireAdmin = async (req, res, next) => {
     try {
       const userId = req.user?.id;
@@ -42,12 +55,26 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
     }
   };
 
+  const requireAdminOrIntcomexCompras = async (req, res, next) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
+      const access = await getUserAccess(userId);
+      if (!access) return res.status(403).json({ error: 'Permiso denegado' });
+      if (access.role === 'admin') return next();
+      if (access.empresa === 'intcomex' && access.intcomexProfile === 'compras') return next();
+      return res.status(403).json({ error: 'Permiso denegado' });
+    } catch (error) {
+      return res.status(500).json({ error: 'Error del servidor' });
+    }
+  };
+
   const requireOwnerOrAdmin = (resolveOwnerId, notFoundMessage = 'Recurso no encontrado') => async (req, res, next) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
-      const role = await getUserRole(userId);
-      if (role === 'admin') return next();
+      const access = await getUserAccess(userId);
+      if (access?.role === 'admin') return next();
       const ownerId = await resolveOwnerId(req);
       if (ownerId === null || ownerId === undefined) {
         return res.status(404).json({ error: notFoundMessage });
@@ -64,6 +91,7 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
   return {
     requireAuth,
     requireAdmin,
+    requireAdminOrIntcomexCompras,
     requireOwnerOrAdmin
   };
 };
