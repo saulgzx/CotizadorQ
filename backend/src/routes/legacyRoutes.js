@@ -18,6 +18,7 @@ const {
   validateProductoInput,
   validateBulkProductosInput,
   validatePasswordInput,
+  validateCreateUserInput,
   validateCotizacionInput
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
@@ -1701,7 +1702,7 @@ app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // USUARIOS - Crear
-app.post('/api/usuarios', authenticateToken, requireAdmin, validatePasswordInput, async (req, res) => {
+app.post('/api/usuarios', authenticateToken, requireAdmin, validateCreateUserInput, async (req, res) => {
   try {
     const { usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile } = req.body;
     if (!usuario || !password) {

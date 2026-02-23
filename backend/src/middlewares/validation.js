@@ -24,6 +24,11 @@ const passwordSchema = z.object({
   password: z.string().min(8).max(128)
 });
 
+const createUserSchema = z.object({
+  usuario: z.string().trim().min(1).max(50),
+  password: z.string().min(8).max(128)
+}).passthrough();
+
 const cotizacionSchema = z.object({
   cliente: z.object({
     nombre: z.string().optional(),
@@ -55,6 +60,7 @@ const validateLoginInput = validate(loginSchema);
 const validateProductoInput = validate(productoSchema);
 const validateBulkProductosInput = validate(bulkProductosSchema);
 const validatePasswordInput = validate(passwordSchema);
+const validateCreateUserInput = validate(createUserSchema);
 const validateCotizacionInput = validate(cotizacionSchema);
 
 module.exports = {
@@ -62,5 +68,6 @@ module.exports = {
   validateProductoInput,
   validateBulkProductosInput,
   validatePasswordInput,
+  validateCreateUserInput,
   validateCotizacionInput
 };
