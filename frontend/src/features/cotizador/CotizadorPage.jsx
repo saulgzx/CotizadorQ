@@ -306,7 +306,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canViewHistorial = !isComprasOnlyUser;
   const canViewAccount = !isAdmin && !isComprasOnlyUser;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
-  const canEditAxisPartnerInQuote = isAdmin || isVentasUser;
   const isClient = !isAdmin;
   const [loading, setLoading] = useState(true);
   const [usuario, setUsuario] = useState('');
@@ -1419,6 +1418,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState('');
   const [ownPartnerCategory, setOwnPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
+  const [updatingCotizacionPartner, setUpdatingCotizacionPartner] = useState(false);
   const [historialFilters, setHistorialFilters] = useState({
     fecha: '',
     cliente: '',
@@ -1537,7 +1537,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if ((item.origen || 'QNAP') !== 'AXIS') {
       return calcularPrecioClienteLocal(item.precio, gpEffective);
     }
-    const partnerRebate = getAxisPartnerRebate(item, item.partnerCategory || cotizacionPartnerCategory);
+    const effectivePartnerCategory = isAdmin
+      ? (item.partnerCategory || cotizacionPartnerCategory)
+      : cotizacionPartnerCategory;
+    const partnerRebate = getAxisPartnerRebate(item, effectivePartnerCategory);
     const projectRebate = parseFloat(item.rebateProject) || 0;
     return calcularPrecioClienteAxis(item.precio, gpEffective, partnerRebate, projectRebate);
   };
@@ -1740,7 +1743,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         queryFn: () => productosAPI.getAll(),
         staleTime: 0
       });
-      setProductos(data.map(p => ({
+      const mapped = data.map(p => ({
         id: p.id,
         origen: p.origen || 'QNAP',
         marca: p.marca || '',
@@ -1755,9 +1758,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         rebate_partner_gold: isAdminForLoad ? (parseFloat(p.rebate_partner_gold) || 0) : undefined,
         rebate_partner_multiregional: isAdminForLoad ? (parseFloat(p.rebate_partner_multiregional) || 0) : undefined,
         tiempo: p.tiempo_entrega || 'ETA por confirmar'
-      })));
+      }));
+      setProductos(mapped);
+      return mapped;
     } catch (error) {
       console.error('Error cargando productos:', error);
+      return [];
     }
   };
 
@@ -2279,6 +2285,44 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     setCotizacion(items => items.map(item => (
       (item.origen || 'QNAP') === 'AXIS' ? { ...item, partnerCategory: category } : item
     )));
+  };
+
+  const syncCotizacionWithCatalogPrices = (catalogItems) => {
+    if (!Array.isArray(catalogItems) || catalogItems.length === 0) return;
+    const byId = new Map(catalogItems.map(item => [Number(item.id), item]));
+    setCotizacion(prev => prev.map(item => {
+      const match = byId.get(Number(item.id));
+      if (!match) return item;
+      return {
+        ...item,
+        precio: Number.isFinite(Number(match.precio)) ? Number(match.precio) : item.precio,
+        precio_cliente: Number.isFinite(Number(match.precio_cliente)) ? Number(match.precio_cliente) : item.precio_cliente
+      };
+    }));
+  };
+
+  const handleCotizacionPartnerCategoryChange = async (category) => {
+    const previousCategory = cotizacionPartnerCategory;
+    applyPartnerCategoryToAxis(category);
+    if (!isVentasUser) return;
+    try {
+      setUpdatingCotizacionPartner(true);
+      const updated = await usuariosAPI.updateOwnPartnerCategory(category);
+      const nextPartnerCategory = updated?.partner_category || category;
+      setUser(prev => {
+        if (!prev) return prev;
+        const next = { ...prev, partner_category: nextPartnerCategory };
+        localStorage.setItem('user', JSON.stringify(next));
+        return next;
+      });
+      const refreshedCatalog = await loadProductos(user?.role);
+      syncCotizacionWithCatalogPrices(refreshedCatalog);
+    } catch (error) {
+      applyPartnerCategoryToAxis(previousCategory);
+      alert(error.message || 'No se pudo actualizar la categoria de partner');
+    } finally {
+      setUpdatingCotizacionPartner(false);
+    }
   };
 
   const normalizeEstado = (estado) => {
@@ -7772,7 +7816,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           Partner
                           <select
                             value={cotizacionPartnerCategory}
-                            onChange={e => setCotizacionPartnerCategory(e.target.value)}
+                            onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
+                            className="px-2 py-0.5 border rounded text-[11px]"
+                          >
+                            <option>Partner Autorizado</option>
+                            <option>Partner Silver</option>
+                            <option>Partner Gold</option>
+                            <option>Partner Multiregional</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                    {isVentasUser && (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                          Partner AXIS
+                          <select
+                            value={cotizacionPartnerCategory}
+                            onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
+                            disabled={updatingCotizacionPartner}
                             className="px-2 py-0.5 border rounded text-[11px]"
                           >
                             <option>Partner Autorizado</option>
@@ -7894,7 +7956,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             />
                           </>
                         )}
-                        {canEditAxisPartnerInQuote && isAxis && (
+                        {isAdmin && isAxis && (
                           <>
                             <label className="text-[11px] text-gray-500">Partner</label>
                             <select
