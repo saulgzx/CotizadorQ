@@ -298,12 +298,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [user, setUser] = useState(null);
   const isAdmin = user?.role ? user.role === 'admin' : true;
   const isComprasOnlyUser = !isAdmin && getIntcomexProfile(user) === 'compras' && isIntcomexUser(user);
+  const isVentasUser = !isAdmin && isIntcomexVentas(user);
   const canViewCompras = canAccessComprasView(user);
+  const canViewDashboard = !isVentasUser && !isComprasOnlyUser;
   const canViewCotizador = !isComprasOnlyUser;
   const canViewStock = !isComprasOnlyUser;
   const canViewHistorial = !isComprasOnlyUser;
   const canViewAccount = !isAdmin && !isComprasOnlyUser;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
+  const canEditAxisPartnerInQuote = isAdmin || isVentasUser;
   const isClient = !isAdmin;
   const [loading, setLoading] = useState(true);
   const [usuario, setUsuario] = useState('');
@@ -1960,6 +1963,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   useEffect(() => {
     if (isAdmin) return;
+    if (!canViewDashboard && currentView === 'dashboard') {
+      setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
+      return;
+    }
     const blockedForClient = new Set(['admin', 'usuarios', 'ordenes']);
     if (blockedForClient.has(currentView)) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
@@ -1972,7 +1979,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (isComprasOnlyUser && (currentView === 'cotizador' || currentView === 'stock' || currentView === 'historial' || currentView === 'cuenta' || currentView === 'dashboard')) {
       setCurrentView('compras');
     }
-  }, [isAdmin, currentView, canViewCompras, isComprasOnlyUser]);
+  }, [isAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser]);
 
   useEffect(() => {
     if (isLoggedIn && location.pathname === '/login') {
@@ -1981,6 +1988,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     const nextView = ROUTE_TO_VIEW[location.pathname];
     if (!nextView) return;
+    if (!isAdmin && nextView === 'dashboard' && !canViewDashboard) {
+      if (location.pathname !== '/cotizador') {
+        navigate('/cotizador', { replace: true });
+      }
+      if (currentView !== 'cotizador') setCurrentView('cotizador');
+      return;
+    }
     if (!isAdmin && nextView === 'compras' && !canViewCompras) {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
@@ -2004,7 +2018,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (nextView !== currentView) {
       setCurrentView(nextView);
     }
-  }, [location.pathname, isLoggedIn, isAdmin, canViewCompras, isComprasOnlyUser, navigate]);
+  }, [location.pathname, isLoggedIn, isAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
@@ -2015,19 +2029,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }
       return;
     }
+    if (!canViewDashboard && currentView === 'dashboard') return;
     if (isComprasOnlyUser && currentView !== 'dashboard') return;
     const targetRoute = VIEW_TO_ROUTE[currentView];
     if (location.pathname !== targetRoute) {
       navigate(targetRoute, { replace: true });
     }
-  }, [currentView, isLoggedIn, isAdmin, canViewCompras, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
+  }, [currentView, isLoggedIn, isAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
     const onKeyDown = (event) => {
       if (!event.altKey) return;
       const keyMap = {
-        '1': isComprasOnlyUser ? 'compras' : 'dashboard',
+        '1': canViewDashboard ? 'dashboard' : (isComprasOnlyUser ? 'compras' : 'cotizador'),
         '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
         '3': canViewHistorial ? 'historial' : null,
         '4': isAdmin ? 'usuarios' : null,
@@ -2040,7 +2055,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoggedIn, isAdmin, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
+  }, [isLoggedIn, isAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
 
   useEffect(() => {
     if (!user || isAdmin) return;
@@ -4732,7 +4747,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </div>
             <nav className="flex items-center gap-2 flex-wrap">
-              {(!isComprasOnlyUser) && (
+              {canViewDashboard && (
                 <button
                   onClick={() => setCurrentView('dashboard')}
                   className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
@@ -7879,7 +7894,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             />
                           </>
                         )}
-                        {isAdmin && isAxis && (
+                        {canEditAxisPartnerInQuote && isAxis && (
                           <>
                             <label className="text-[11px] text-gray-500">Partner</label>
                             <select
@@ -7892,6 +7907,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <option>Partner Gold</option>
                               <option>Partner Multiregional</option>
                             </select>
+                          </>
+                        )}
+                        {isAdmin && isAxis && (
+                          <>
                             <label className="text-[11px] text-gray-500">Rebate</label>
                             <input
                               type="number"
