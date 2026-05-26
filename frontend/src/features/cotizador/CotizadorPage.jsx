@@ -51,6 +51,11 @@ const getUserKey = (user) => {
 };
 
 const normalizeRole = (role) => (role || '').toString().toLowerCase();
+const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
+const canManageCotizadorStock = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === 'admin' || normalized === COTIZADOR_STOCK_ADMIN_ROLE;
+};
 const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
 const normalizeIntcomexProfile = (value) => {
   const profile = normalizeText(value);
@@ -296,15 +301,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const DEFAULT_PAGE_SIZE = 15;
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
-  const isAdmin = user?.role ? user.role === 'admin' : true;
-  const isComprasOnlyUser = !isAdmin && getIntcomexProfile(user) === 'compras' && isIntcomexUser(user);
-  const isVentasUser = !isAdmin && isIntcomexVentas(user);
+  const userRole = normalizeRole(user?.role);
+  const isFullAdmin = user?.role ? userRole === 'admin' : true;
+  const isCotizadorStockAdmin = userRole === COTIZADOR_STOCK_ADMIN_ROLE;
+  const isAdmin = user?.role ? canManageCotizadorStock(userRole) : true;
+  const isComprasOnlyUser = !isFullAdmin && getIntcomexProfile(user) === 'compras' && isIntcomexUser(user);
+  const isVentasUser = !isFullAdmin && isIntcomexVentas(user);
   const canViewCompras = canAccessComprasView(user);
-  const canViewDashboard = !isVentasUser && !isComprasOnlyUser;
+  const canViewDashboard = !isVentasUser && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewCotizador = !isComprasOnlyUser;
   const canViewStock = !isComprasOnlyUser;
-  const canViewHistorial = !isComprasOnlyUser;
-  const canViewAccount = !isAdmin && !isComprasOnlyUser;
+  const canViewHistorial = !isComprasOnlyUser && !isCotizadorStockAdmin;
+  const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
   const [loading, setLoading] = useState(true);
@@ -1737,7 +1745,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // Cargar productos del backend
   const loadProductos = async (roleOverride) => {
     try {
-      const isAdminForLoad = roleOverride ? roleOverride === 'admin' : isAdmin;
+      const isAdminForLoad = roleOverride ? canManageCotizadorStock(roleOverride) : isAdmin;
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.productos,
         queryFn: () => productosAPI.getAll(),
@@ -1927,23 +1935,23 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, currentView]);
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'usuarios') return;
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'usuarios') return;
     loadUsuarios();
-  }, [isLoggedIn, isAdmin, currentView]);
+  }, [isLoggedIn, isFullAdmin, currentView]);
 
   useEffect(() => {
-    if (!isLoggedIn || (!isAdmin && !canViewCompras) || (currentView !== 'ordenes' && currentView !== 'compras')) return;
+    if (!isLoggedIn || (!isFullAdmin && !canViewCompras) || (currentView !== 'ordenes' && currentView !== 'compras')) return;
     loadOsoOrders();
-  }, [isLoggedIn, isAdmin, canViewCompras, currentView]);
+  }, [isLoggedIn, isFullAdmin, canViewCompras, currentView]);
 
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'historial') return;
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'historial') return;
     loadFunnel();
-  }, [isLoggedIn, isAdmin, currentView, funnelDays, funnelEmpresa, funnelFrom, funnelTo]);
+  }, [isLoggedIn, isFullAdmin, currentView, funnelDays, funnelEmpresa, funnelFrom, funnelTo]);
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'usuarios') return;
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'usuarios') return;
     let active = true;
     const fetchNow = async (silent) => {
       if (!active) return;
@@ -1960,15 +1968,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       active = false;
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isLoggedIn, isAdmin, currentView, sessionAutoRefresh]);
+  }, [isLoggedIn, isFullAdmin, currentView, sessionAutoRefresh]);
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'usuarios' || !selectedSessionUserId) return;
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'usuarios' || !selectedSessionUserId) return;
     loadUserActivity(selectedSessionUserId);
-  }, [isLoggedIn, isAdmin, currentView, selectedSessionUserId]);
+  }, [isLoggedIn, isFullAdmin, currentView, selectedSessionUserId]);
 
   useEffect(() => {
-    if (isAdmin) return;
+    if (isCotizadorStockAdmin && currentView !== 'cotizador' && currentView !== 'stock' && currentView !== 'cliente') {
+      setCurrentView('cotizador');
+      return;
+    }
+    if (isFullAdmin) return;
     if (!canViewDashboard && currentView === 'dashboard') {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
@@ -1985,7 +1997,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (isComprasOnlyUser && (currentView === 'cotizador' || currentView === 'stock' || currentView === 'historial' || currentView === 'cuenta' || currentView === 'dashboard')) {
       setCurrentView('compras');
     }
-  }, [isAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser]);
+  }, [isFullAdmin, isCotizadorStockAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser]);
 
   useEffect(() => {
     if (isLoggedIn && location.pathname === '/login') {
@@ -1994,20 +2006,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     const nextView = ROUTE_TO_VIEW[location.pathname];
     if (!nextView) return;
-    if (!isAdmin && nextView === 'dashboard' && !canViewDashboard) {
+    if (isCotizadorStockAdmin && nextView !== 'cotizador') {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
       }
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       return;
     }
-    if (!isAdmin && nextView === 'compras' && !canViewCompras) {
+    if (!isFullAdmin && nextView === 'dashboard' && !canViewDashboard) {
+      if (location.pathname !== '/cotizador') {
+        navigate('/cotizador', { replace: true });
+      }
+      if (currentView !== 'cotizador') setCurrentView('cotizador');
+      return;
+    }
+    if (!isFullAdmin && nextView === 'compras' && !canViewCompras) {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
       }
       return;
     }
-    if (!isAdmin && ADMIN_VIEWS.has(nextView) && !(nextView === 'compras' && canViewCompras)) {
+    if (!isFullAdmin && ADMIN_VIEWS.has(nextView) && !(nextView === 'compras' && canViewCompras)) {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
       }
@@ -2024,12 +2043,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (nextView !== currentView) {
       setCurrentView(nextView);
     }
-  }, [location.pathname, isLoggedIn, isAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, navigate]);
+  }, [location.pathname, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
     if (!VIEW_TO_ROUTE[currentView]) return;
-    if (!isAdmin && ADMIN_VIEWS.has(currentView)) {
+    if (isCotizadorStockAdmin && currentView !== 'cotizador' && currentView !== 'stock' && currentView !== 'cliente') return;
+    if (!isFullAdmin && ADMIN_VIEWS.has(currentView)) {
       if (currentView === 'compras' && canViewCompras) {
         return;
       }
@@ -2041,7 +2061,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (location.pathname !== targetRoute) {
       navigate(targetRoute, { replace: true });
     }
-  }, [currentView, isLoggedIn, isAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
+  }, [currentView, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -2051,8 +2071,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         '1': canViewDashboard ? 'dashboard' : (isComprasOnlyUser ? 'compras' : 'cotizador'),
         '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
         '3': canViewHistorial ? 'historial' : null,
-        '4': isAdmin ? 'usuarios' : null,
-        '5': isAdmin ? 'ordenes' : null
+        '4': isFullAdmin ? 'usuarios' : null,
+        '5': isFullAdmin ? 'ordenes' : null
       };
       const target = keyMap[event.key];
       if (!target) return;
@@ -2061,7 +2081,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoggedIn, isAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
+  }, [isLoggedIn, isFullAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
 
   useEffect(() => {
     if (!user || isAdmin) return;
@@ -2503,7 +2523,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   useEffect(() => {
-    if (!isLoggedIn || !isAdmin || currentView !== 'dashboard') return;
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'dashboard') return;
     let cancelled = false;
     const loadDashboardMetrics = async () => {
       try {
@@ -2523,7 +2543,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, isAdmin, currentView]);
+  }, [isLoggedIn, isFullAdmin, currentView]);
 
   const markBoInvoiced = (bo) => {
     if (!bo) return;
@@ -4800,7 +4820,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Dashboard
                 </button>
               )}
-              {isAdmin && (
+              {isFullAdmin && (
                 <>
                   <button
                     onClick={() => setCurrentView('ordenes')}
@@ -4824,7 +4844,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Vista Compras
                 </button>
               )}
-              {isAdmin && (
+              {isFullAdmin && (
                 <button
                   onClick={() => setCurrentView('admin')}
                   className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'admin' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
@@ -4832,7 +4852,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Listas de precio
                 </button>
               )}
-              {isAdmin && (
+              {isFullAdmin && (
                 <button
                   onClick={() => setCurrentView('usuarios')}
                   className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'usuarios' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
@@ -4852,8 +4872,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             )}
             {canViewHistorial && (
               <button onClick={() => setCurrentView('historial')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
-                {isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
-                {isAdmin && historialCounts.registroPendientes > 0 && (
+                {isFullAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
+                {isFullAdmin && historialCounts.registroPendientes > 0 && (
                   <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
                     {historialCounts.registroPendientes}
                   </span>
@@ -5162,7 +5182,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
           </div>
         )}
-        {currentView === 'usuarios' && isAdmin && (
+        {currentView === 'usuarios' && isFullAdmin && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
               <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
@@ -5780,7 +5800,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
           </div>
         )}
-        {currentView === 'admin' && (
+        {currentView === 'admin' && isFullAdmin && (
           <div className="space-y-4">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <h2 className="text-lg font-semibold text-gray-800 mb-3">Listas de precio</h2>
@@ -6506,7 +6526,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
 
-        {currentView === 'ordenes' && isAdmin && (
+        {currentView === 'ordenes' && isFullAdmin && (
           <div className="space-y-4">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">

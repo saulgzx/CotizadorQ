@@ -102,6 +102,29 @@ describe('API security and critical endpoints', () => {
     expect(response.status).toBe(403);
   });
 
+  test('GET /api/usuarios returns 403 for cotizador-stock admin', async () => {
+    const token = makeToken({ id: 3, usuario: 'nsteck', role: 'cot_stock_admin' });
+    mockQuery.mockImplementation((sql) => {
+      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
+        return Promise.resolve({ rows: [activeSessionRow] });
+      }
+      if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes('SELECT role FROM usuarios WHERE id = $1')) {
+        return Promise.resolve({ rows: [{ role: 'cot_stock_admin' }] });
+      }
+      throw new Error(`Unhandled SQL in limited permissions test: ${sql}`);
+    });
+
+    const response = await request(app)
+      .get('/api/usuarios')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-session-id', 'session-limited-1');
+
+    expect(response.status).toBe(403);
+  });
+
   test('GET /api/usuarios returns 200 for admin', async () => {
     const token = makeToken({ id: 1, usuario: 'admin', role: 'admin' });
     mockQuery.mockImplementation((sql) => {
@@ -153,6 +176,32 @@ describe('API security and critical endpoints', () => {
     expect(response.status).toBe(200);
     expect(Array.isArray(response.body)).toBe(true);
     expect(response.body[0]?.sku).toBe('SKU-1');
+  });
+
+  test('GET /api/productos returns critical data for cotizador-stock admin', async () => {
+    const token = makeToken({ id: 3, usuario: 'nsteck', role: 'cot_stock_admin' });
+    mockQuery.mockImplementation((sql) => {
+      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
+        return Promise.resolve({ rows: [activeSessionRow] });
+      }
+      if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes('SELECT * FROM productos')) {
+        return Promise.resolve({ rows: [{ id: 11, sku: 'SKU-LIMITED', descripcion: 'Producto limitado', activo: true }] });
+      }
+      throw new Error(`Unhandled SQL in limited productos test: ${sql}`);
+    });
+
+    const response = await request(app)
+      .get('/api/productos')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-session-id', 'session-limited-2');
+
+    expect(response.status).toBe(200);
+    expect(Array.isArray(response.body)).toBe(true);
+    expect(response.body[0]?.sku).toBe('SKU-LIMITED');
+    expect(response.body[0]?.precio_cliente).toBeUndefined();
   });
 
   test('GET /api/cotizaciones returns critical data for authenticated admin', async () => {

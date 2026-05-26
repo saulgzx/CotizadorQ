@@ -89,6 +89,13 @@ const OSO_ORDERS_CACHE_TTL_SEC = parseInt(process.env.OSO_ORDERS_CACHE_TTL_SEC |
 const GOOGLE_API_TIMEOUT_MS = parseInt(process.env.GOOGLE_API_TIMEOUT_MS || '30000', 10);
 const GOOGLE_API_RETRIES = parseInt(process.env.GOOGLE_API_RETRIES || '3', 10);
 const GOOGLE_API_RETRY_DELAY_MS = parseInt(process.env.GOOGLE_API_RETRY_DELAY_MS || '300', 10);
+const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
+const COTIZADOR_STOCK_ADMIN_PASSWORD_HASH = '$2a$10$c3obvEDFA/wNqtH3y8rlGe0WSU6hS3MiRRepw0AzJtozhqpNvSrAa';
+
+const canManageCotizadorStock = (role) => {
+  const normalized = String(role || '').toLowerCase();
+  return normalized === 'admin' || normalized === COTIZADOR_STOCK_ADMIN_ROLE;
+};
 
 const responseCache = new Map();
 
@@ -1345,6 +1352,20 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
+    await pool.query(
+      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (usuario) DO UPDATE
+       SET password = EXCLUDED.password,
+           nombre = EXCLUDED.nombre,
+           role = EXCLUDED.role,
+           gp = EXCLUDED.gp,
+           gp_qnap = EXCLUDED.gp_qnap,
+           gp_axis = EXCLUDED.gp_axis,
+           partner_category = EXCLUDED.partner_category,
+           intcomex_profile = EXCLUDED.intcomex_profile`,
+      ['nsteck', COTIZADOR_STOCK_ADMIN_PASSWORD_HASH, 'Nsteck', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
+    );
 
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sesiones_user_session_idx ON sesiones(user_id, session_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS sesiones_active_idx ON sesiones(user_id, revoked, last_seen);`);
@@ -1476,7 +1497,7 @@ const validateSession = async (userId, sessionId, req, role) => {
   return { ok: true };
 };
 
-const { requireAuth, requireAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({
+const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({
   pool,
   jwtSecret: JWT_SECRET,
   getSessionHeaders,
@@ -2596,7 +2617,7 @@ app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdminOrIntcomexCom
 app.get('/api/productos', authenticateToken, async (req, res) => {
   try {
     const origen = req.query.origen;
-    const isAdmin = !req.user?.role || req.user.role === 'admin';
+    const isAdmin = !req.user?.role || canManageCotizadorStock(req.user.role);
     const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const pageRaw = parseInt(req.query.page || '1', 10);
     const pageSizeRaw = parseInt(req.query.pageSize || '50', 10);
@@ -2674,7 +2695,7 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
 });
 
 // PRODUCTOS - Crear uno
-app.post('/api/productos', authenticateToken, requireAdmin, validateProductoInput, async (req, res) => {
+app.post('/api/productos', authenticateToken, requireCotizadorStockAdmin, validateProductoInput, async (req, res) => {
   const client = await pool.connect();
   try {
     const { marca, sku, mpn, descripcion, precio_disty, gp, tiempo_entrega, origen } = req.body;
@@ -2704,7 +2725,7 @@ app.post('/api/productos', authenticateToken, requireAdmin, validateProductoInpu
 });
 
 // PRODUCTOS - Crear muchos (bulk import desde Excel)
-app.post('/api/productos/bulk', authenticateToken, requireAdmin, validateBulkProductosInput, async (req, res) => {
+app.post('/api/productos/bulk', authenticateToken, requireCotizadorStockAdmin, validateBulkProductosInput, async (req, res) => {
   const client = await pool.connect();
   try {
     const { productos, origen } = req.body;
@@ -2747,7 +2768,7 @@ app.post('/api/productos/bulk', authenticateToken, requireAdmin, validateBulkPro
 });
 
 // PRODUCTOS - Sync desde Google Sheets (manual)
-app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res) => {
+app.post('/api/productos/sync', authenticateToken, requireCotizadorStockAdmin, async (req, res) => {
   try {
     const buildSkippedDetail = async (origenNormalized, fallbackReason) => {
       if (fallbackReason) return fallbackReason;
@@ -2817,7 +2838,7 @@ app.post('/api/productos/sync', authenticateToken, requireAdmin, async (req, res
 });
 
 // PRODUCTOS - Actualizar
-app.put('/api/productos/:id', authenticateToken, requireAdmin, validateProductoInput, async (req, res) => {
+app.put('/api/productos/:id', authenticateToken, requireCotizadorStockAdmin, validateProductoInput, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -2854,7 +2875,7 @@ app.put('/api/productos/:id', authenticateToken, requireAdmin, validateProductoI
 });
 
 // PRODUCTOS - Eliminar
-app.delete('/api/productos/:id', authenticateToken, requireAdmin, async (req, res) => {
+app.delete('/api/productos/:id', authenticateToken, requireCotizadorStockAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -2890,7 +2911,7 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     const { cliente, items, total } = req.body;
     const usuarioId = req.user?.id || null;
     const usuarioName = req.user?.usuario || null;
-    const isAdmin = !req.user?.role || req.user.role === 'admin';
+    const isAdmin = !req.user?.role || canManageCotizadorStock(req.user.role);
     let totalFinal = total;
     let itemsFinal = items;
 

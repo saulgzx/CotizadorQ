@@ -1,4 +1,10 @@
 const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSession, onMissingSession }) => {
+  const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
+  const canManageCotizadorStock = (role) => {
+    const normalized = String(role || '').toLowerCase();
+    return normalized === 'admin' || normalized === COTIZADOR_STOCK_ADMIN_ROLE;
+  };
+
   const requireAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
@@ -55,6 +61,19 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
     }
   };
 
+  const requireCotizadorStockAdmin = async (req, res, next) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
+      const role = await getUserRole(userId);
+      if (!canManageCotizadorStock(role)) return res.status(403).json({ error: 'Permiso denegado' });
+      return next();
+    } catch (error) {
+      return res.status(500).json({ error: 'Error del servidor' });
+    }
+  };
+
+
   const requireAdminOrIntcomexCompras = async (req, res, next) => {
     try {
       const userId = req.user?.id;
@@ -91,6 +110,7 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
   return {
     requireAuth,
     requireAdmin,
+    requireCotizadorStockAdmin,
     requireAdminOrIntcomexCompras,
     requireOwnerOrAdmin
   };
