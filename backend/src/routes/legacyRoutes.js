@@ -92,6 +92,7 @@ const GOOGLE_API_RETRY_DELAY_MS = parseInt(process.env.GOOGLE_API_RETRY_DELAY_MS
 const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
 const COTIZADOR_STOCK_ADMIN_PASSWORD_HASH = '$2a$10$c3obvEDFA/wNqtH3y8rlGe0WSU6hS3MiRRepw0AzJtozhqpNvSrAa';
 const OSUESCUN_PASSWORD_HASH = '$2a$10$v2iFGiJ25E2aHusiLocOQOY83L306bIWigoGgvfh7cgB6ADgeCJkS';
+const ESTIV_PASSWORD_HASH = '$2a$10$nZ2HBE.Lire3a.6/u9s27uQ7Tnd.PHQvbbeoZmcvYknSSHZ37uI4G';
 
 const canManageCotizadorStock = (role) => {
   const normalized = String(role || '').toLowerCase();
@@ -1381,6 +1382,21 @@ const initDB = async () => {
            partner_category = EXCLUDED.partner_category,
            intcomex_profile = EXCLUDED.intcomex_profile`,
       ['Osuescun', OSUESCUN_PASSWORD_HASH, 'Osuescun', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
+    );
+
+    await pool.query(
+      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (usuario) DO UPDATE
+       SET password = EXCLUDED.password,
+           nombre = EXCLUDED.nombre,
+           role = EXCLUDED.role,
+           gp = EXCLUDED.gp,
+           gp_qnap = EXCLUDED.gp_qnap,
+           gp_axis = EXCLUDED.gp_axis,
+           partner_category = EXCLUDED.partner_category,
+           intcomex_profile = EXCLUDED.intcomex_profile`,
+      ['Estiv', ESTIV_PASSWORD_HASH, 'Estiv', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
     );
 
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sesiones_user_session_idx ON sesiones(user_id, session_id);`);
