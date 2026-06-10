@@ -187,8 +187,9 @@ const getExternalErrorMessage = (error, fallback = 'Error consultando servicio e
   return fallback;
 };
 
-const shouldBypassLoginRateLimit = (usuario) =>
-  LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
+// Bloqueo por "demasiados intentos" desactivado: el login no se limita por intentos.
+// Para reactivarlo, restaurar: return LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
+const shouldBypassLoginRateLimit = () => true;
 
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
