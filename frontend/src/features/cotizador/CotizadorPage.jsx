@@ -2797,7 +2797,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     });
     return {
       created_at: new Date().toISOString(),
-      usuario_role: isAdmin ? 'admin' : 'client',
+      usuario_role: isCotizadorStockAdmin ? COTIZADOR_STOCK_ADMIN_ROLE : (isAdmin ? 'admin' : 'client'),
       cliente: {
         nombre: cliente.nombre || '',
         empresa: cliente.empresa || '',
@@ -2813,7 +2813,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const items = Array.isArray(cot?.items) ? cot.items : [];
     return {
       created_at: cot?.created_at || new Date().toISOString(),
-      usuario_role: cot?.usuario_role || (isAdmin ? 'admin' : 'client'),
+      usuario_role: cot?.usuario_role || (isCotizadorStockAdmin ? COTIZADOR_STOCK_ADMIN_ROLE : (isAdmin ? 'admin' : 'client')),
       cliente: {
         nombre: cot?.cliente_nombre || '',
         empresa: cot?.cliente_empresa || '',

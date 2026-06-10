@@ -392,7 +392,7 @@ const resolvePdfLogoPath = () => {
   return null;
 };
 
-const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => new Promise((resolve, reject) => {
+const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient, isAxisProfile }) => new Promise((resolve, reject) => {
   try {
     const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: 'Cotizacion' } });
     const chunks = [];
@@ -539,6 +539,7 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient }) => 
       'La persona que autoriza la OC es responsable del cumplimiento del pago.'
     ];
     if (isClient) notes.push('La presente cotizacion no constituye oferta formal ni vinculante hasta su validacion por Product Manager (Alexis Gonzalez).');
+    if (isAxisProfile) notes.push('Esta cotizacion debe ser revisada por Alexis Gonzalez.');
     doc.font('Helvetica').fontSize(9);
     notes.forEach((note, idx) => {
       addNewPageIfNeeded(14);
@@ -3412,14 +3413,17 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
       proyecto: cliente?.proyecto || cliente?.telefono || 'N/A',
       fecha: payload?.created_at || payload?.fecha || new Date().toISOString()
     };
-    const isClient = String(payload?.usuario_role || req.user?.role || '').toLowerCase() === 'client';
+    const pdfRole = String(payload?.usuario_role || req.user?.role || '').toLowerCase();
+    const isClient = pdfRole === 'client';
+    const isAxisProfile = pdfRole === COTIZADOR_STOCK_ADMIN_ROLE;
     const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa);
 
     const pdfBuffer = await generateCotizacionPdfBuffer({
       cotizacion,
       items: normalizedItems,
       total,
-      isClient
+      isClient,
+      isAxisProfile
     });
 
     res.setHeader('Content-Type', 'application/pdf');
