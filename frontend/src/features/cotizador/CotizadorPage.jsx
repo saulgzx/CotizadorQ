@@ -1780,7 +1780,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.stock,
         queryFn: () => stockAPI.getAll(),
-        staleTime: 0
+        staleTime: 60 * 1000
       });
       const items = Array.isArray(data?.items) ? data.items : [];
       const map = {};
@@ -1808,7 +1808,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.stockCatalog,
         queryFn: () => stockAPI.getCatalog(),
-        staleTime: 0
+        staleTime: 150 * 1000
       });
       const items = Array.isArray(data?.items) ? data.items : [];
       setStockCatalog(items);
