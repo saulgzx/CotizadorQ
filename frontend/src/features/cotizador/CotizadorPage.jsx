@@ -4427,7 +4427,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const filteredCatalogo = useMemo(() => {
     const t = catalogSearch.toLowerCase();
     return productos.filter(p =>
-      (
+      (!isCotizadorStockAdmin || (p.origen || 'QNAP') === 'AXIS') && (
         p.marca.toLowerCase().includes(t) ||
         p.sku.toLowerCase().includes(t) ||
         (p.mpn || '').toLowerCase().includes(t) ||
@@ -4437,11 +4437,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         [p.sku, p.mpn, p.desc, p.marca].some(v => (v || '').toLowerCase().includes(globalQuery))
       )
     );
-  }, [productos, catalogSearch, globalQuery]);
+  }, [productos, catalogSearch, globalQuery, isCotizadorStockAdmin]);
 
   const filteredStockCatalog = useMemo(() => {
     const tokens = buildSearchTokens(stockCatalogQuery);
-    const originFilter = stockCatalogOrigin;
+    const originFilter = isCotizadorStockAdmin ? 'AXIS' : stockCatalogOrigin;
     return stockCatalog.filter(item => {
       if (originFilter !== 'all' && (item.origin || '').toUpperCase() !== originFilter) return false;
       if (tokens.length === 0) return true;
@@ -4456,7 +4456,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (!globalQuery) return true;
       return [item.sku, item.mpn, item.name, item.brand].some(v => (v || '').toLowerCase().includes(globalQuery));
     });
-  }, [stockCatalog, stockCatalogQuery, stockCatalogOrigin, globalQuery]);
+  }, [stockCatalog, stockCatalogQuery, stockCatalogOrigin, globalQuery, isCotizadorStockAdmin]);
 
   const unassignedUsuarios = useMemo(
     () => usuarios.filter(u => !(u.empresa || '').trim()).filter(u => (
@@ -5104,12 +5104,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     className="flex-1 px-3 py-2 border rounded-lg text-sm"
                   />
                   <div className="flex items-center gap-2">
-                    {['all', 'AXIS', 'QNAP'].map(origin => (
+                    {(isCotizadorStockAdmin ? ['AXIS'] : ['all', 'AXIS', 'QNAP']).map(origin => (
                       <button
                         key={origin}
                         onClick={() => setStockCatalogOrigin(origin)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                          stockCatalogOrigin === origin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          (isCotizadorStockAdmin ? 'AXIS' : stockCatalogOrigin) === origin ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
                         {origin === 'all' ? 'Todos' : origin}
@@ -7812,16 +7812,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="flex items-center gap-2 flex-wrap">
                     {isAdmin && (
                       <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1 text-[11px] text-gray-500">
-                          GP QNAP
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={formatGpPercent(cotizacionGpGlobalQnap)}
-                            onChange={e => updateGlobalMargin('QNAP', e.target.value)}
-                            className="w-14 px-2 py-0.5 border rounded text-[11px]"
-                          />
-                        </label>
+                        {!isCotizadorStockAdmin && (
+                          <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                            GP QNAP
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={formatGpPercent(cotizacionGpGlobalQnap)}
+                              onChange={e => updateGlobalMargin('QNAP', e.target.value)}
+                              className="w-14 px-2 py-0.5 border rounded text-[11px]"
+                            />
+                          </label>
+                        )}
                         <label className="flex items-center gap-1 text-[11px] text-gray-500">
                           GP AXIS
                           <input
