@@ -110,6 +110,12 @@ function CollapsibleFilters({ label = 'Filtros', children, className = '' }) {
   );
 }
 
+// Usuarios con navegación restringida: solo ven estas vistas (clave = usuario en minúsculas).
+// Nota: restringe la UI, no los permisos de API (el rol sigue mandando en el backend).
+const RESTRICTED_NAV_BY_USER = {
+  jleon: ['cotizador', 'stock', 'historial']
+};
+
 // Buscador rápido (Ctrl+K): navegar vistas, buscar productos y ejecutar acciones.
 function CommandPalette({ open, onClose, navItems, currentView, onNavigate, productos, onPickProducto, theme, onToggleTheme, onLogout }) {
   const [query, setQuery] = useState('');
@@ -230,6 +236,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
+  const navRestriction = RESTRICTED_NAV_BY_USER[normalizeText(user?.usuario)] || null;
   const [loading, setLoading] = useState(true);
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
@@ -2512,6 +2519,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentView]);
+
+  // Navegación restringida por usuario: si cae en una vista fuera de su lista
+  // (p. ej. dashboard al loguearse), lo llevamos al cotizador. 'cliente' es la
+  // vista interna del flujo de cotización y se permite siempre.
+  useEffect(() => {
+    if (!isLoggedIn || !navRestriction) return;
+    if (currentView === 'cliente') return;
+    if (!navRestriction.includes(currentView)) {
+      setCurrentView('cotizador');
+    }
+  }, [isLoggedIn, navRestriction, currentView]);
 
   // Command palette: Ctrl+K / Cmd+K alterna el buscador rápido.
   useEffect(() => {
@@ -4798,7 +4816,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       badgeTone: 'amber'
     },
     canViewAccount && { key: 'cuenta', label: 'Mi cuenta', short: 'Cuenta', icon: 'user' }
-  ].filter(Boolean);
+  ].filter(Boolean).filter(item => !navRestriction || navRestriction.includes(item.key));
   const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
   const bottomNavItems = BOTTOM_NAV_PRIORITY
     .map(key => navItems.find(item => item.key === key))
