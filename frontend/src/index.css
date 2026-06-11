@@ -336,6 +336,11 @@ button:active:not(:disabled) {
   background-size: 200% 100%;
 }
 
+/* ---------- k) Filas de tabla con hover suave ---------- */
+tbody tr {
+  transition: background-color 0.15s ease;
+}
+
 /* ---------- j) Drawer móvil ---------- */
 @keyframes drawer-in {
   from { transform: translateX(100%); }

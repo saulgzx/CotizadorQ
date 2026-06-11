@@ -74,6 +74,8 @@ const NAV_ICON_PATHS = {
   clock: 'M12 6v6l4 2m6-2a10 10 0 1 1-20 0 10 10 0 0 1 20 0z',
   user: 'M17.98 19.4a8.25 8.25 0 0 0-11.96 0M15.75 9.75a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0zM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   menu: 'M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5',
+  search: 'M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z',
+  sun: 'M12 3v2M12 19v2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M3 12h2M19 12h2M5.2 18.8l1.4-1.4M17.4 6.6l1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
   close: 'M6 18 18 6M6 6l12 12',
   logout: 'M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M18.75 15.75 21.75 12l-3-3.75M9 12h12.75'
 };
@@ -103,6 +105,105 @@ function CollapsibleFilters({ label = 'Filtros', children, className = '' }) {
       </button>
       <div className={`${open ? 'flex mt-2' : 'hidden'} lg:flex lg:mt-0 flex-wrap items-center gap-2`}>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// Buscador rápido (Ctrl+K): navegar vistas, buscar productos y ejecutar acciones.
+function CommandPalette({ open, onClose, navItems, currentView, onNavigate, productos, onPickProducto, theme, onToggleTheme, onLogout }) {
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActiveIndex(0);
+    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  if (!open) return null;
+
+  const tokens = buildSearchTokens(query);
+  const matches = (text) => !tokens.length || tokens.every(t => normalizeSearchText(text).includes(t));
+
+  const viewResults = navItems
+    .filter(item => item.key !== currentView && matches(item.label))
+    .map(item => ({ id: `view-${item.key}`, icon: item.icon, label: item.label, hint: 'Vista', run: () => onNavigate(item.key) }));
+  const productResults = tokens.length
+    ? (productos || [])
+        .filter(p => matches(`${p.marca || ''} ${p.sku || ''} ${p.mpn || ''} ${p.desc || ''}`))
+        .slice(0, 8)
+        .map(p => ({
+          id: `prod-${p.id}`,
+          icon: 'box',
+          label: `${p.sku || p.mpn || 'S/C'} · ${(p.desc || '').slice(0, 70)}`,
+          hint: p.origen || 'Producto',
+          run: () => onPickProducto(p)
+        }))
+    : [];
+  const actionResults = [
+    { id: 'accion-tema', icon: 'sun', label: theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro', hint: 'Acción', run: onToggleTheme },
+    { id: 'accion-salir', icon: 'logout', label: 'Cerrar sesión', hint: 'Acción', run: onLogout }
+  ].filter(a => matches(a.label));
+  const results = [...viewResults, ...productResults, ...actionResults];
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (results.length ? (i + 1) % results.length : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (results.length ? (i - 1 + results.length) % results.length : 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const selected = results[activeIndex];
+      if (selected) {
+        selected.run();
+        onClose();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Buscador rápido">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={onClose} />
+      <div className="relative mx-auto mt-[12vh] w-[640px] max-w-[92vw] rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/70 dark:border-slate-700/60 overflow-hidden animate-scale-in">
+        <div className="flex items-center gap-2 px-4 border-b border-slate-100 dark:border-slate-800">
+          <NavIcon name="search" className="w-4 h-4 text-slate-400 shrink-0" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => { setQuery(e.target.value); setActiveIndex(0); }}
+            onKeyDown={handleKeyDown}
+            placeholder="Buscar vistas, productos o acciones…"
+            className="flex-1 py-3.5 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 border-0"
+          />
+          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-400 shrink-0">Esc</kbd>
+        </div>
+        <div className="max-h-[50vh] overflow-y-auto p-2">
+          {results.length === 0 ? (
+            <div className="px-3 py-8 text-center text-sm text-slate-500">Sin resultados para “{query}”</div>
+          ) : (
+            results.map((r, i) => (
+              <button
+                key={r.id}
+                onMouseEnter={() => setActiveIndex(i)}
+                onClick={() => { r.run(); onClose(); }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-left transition ${i === activeIndex ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-700 dark:text-slate-300'}`}
+              >
+                <NavIcon name={r.icon} className="w-4 h-4 shrink-0" />
+                <span className="flex-1 truncate">{r.label}</span>
+                <span className={`text-[10px] uppercase tracking-wide shrink-0 ${i === activeIndex ? 'opacity-70' : 'text-slate-400'}`}>{r.hint}</span>
+              </button>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
@@ -226,6 +327,23 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   });
   const [syncStatus, setSyncStatus] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sidebarCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = () => setSidebarCollapsed(prev => {
+    const next = !prev;
+    try {
+      localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
+    } catch {
+      // localStorage no disponible
+    }
+    return next;
+  });
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -2394,6 +2512,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentView]);
+
+  // Command palette: Ctrl+K / Cmd+K alterna el buscador rápido.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(open => !open);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isLoggedIn]);
 
   const markBoInvoiced = (bo) => {
     if (!bo) return;
@@ -4676,7 +4807,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
-    <div className="min-h-screen flex flex-col app-bg">
+    <div className="min-h-screen app-bg lg:flex">
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
@@ -4688,8 +4819,111 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <span className="text-sm font-semibold">¿Necesitas Ayuda?</span>
         </a>
       )}
-      <div className="flex-1 flex flex-col">
-        <header className="bg-white/80 backdrop-blur-xl border-b border-white/60 dark:border-slate-800/60 sticky top-0 z-40">
+      <aside
+        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-white/60 dark:border-slate-800/60 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl transition-[width] duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-64'}`}
+        aria-label="Barra lateral de navegación"
+      >
+        <div className={`flex items-center gap-3 py-5 border-b border-slate-100/80 dark:border-slate-800 ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'}`}>
+          {user?.logo_url ? (
+            <img src={user.logo_url} alt="Logo" className="w-9 h-9 rounded-xl object-contain bg-white shadow-sm shrink-0" />
+          ) : (
+            <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-bold shrink-0">M</div>
+          )}
+          {!sidebarCollapsed && (
+            <div className="min-w-0">
+              <div className="text-sm font-display font-semibold text-slate-900 leading-tight">myquote</div>
+              <div className="text-[10px] text-slate-500 truncate">Cotización Axis / Qnap</div>
+            </div>
+          )}
+        </div>
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Secciones">
+          {navItems.map(item => (
+            <button
+              key={item.key}
+              onClick={() => setCurrentView(item.key)}
+              title={sidebarCollapsed ? item.label : undefined}
+              className={`w-full flex items-center gap-3 rounded-xl text-sm font-medium transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5 text-left'} ${currentView === item.key ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10'}`}
+            >
+              <span className="relative shrink-0">
+                <NavIcon name={item.icon} />
+                {sidebarCollapsed && item.badge ? (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center">
+                    {item.badge}
+                  </span>
+                ) : null}
+              </span>
+              {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
+              {!sidebarCollapsed && item.badge ? (
+                <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                  {item.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-slate-100/80 dark:border-slate-800 space-y-1">
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title={sidebarCollapsed ? 'Buscar (Ctrl+K)' : undefined}
+            className={`w-full flex items-center gap-3 rounded-xl text-sm font-medium transition text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10 ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5 text-left'}`}
+          >
+            <NavIcon name="search" className="w-5 h-5 shrink-0" />
+            {!sidebarCollapsed && (
+              <>
+                <span className="flex-1 truncate">Buscar</span>
+                <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 text-slate-400">Ctrl K</kbd>
+              </>
+            )}
+          </button>
+          <div className={`flex items-center py-1 ${sidebarCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
+            {!sidebarCollapsed && <span className="text-xs text-slate-500">Tema</span>}
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
+          <div className={`flex items-center gap-3 py-2 ${sidebarCollapsed ? 'justify-center' : 'px-3'}`}>
+            <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-semibold uppercase shrink-0">
+              {(user?.nombre || user?.usuario || '?').slice(0, 1)}
+            </div>
+            {!sidebarCollapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
+                <div className="text-[10px] text-slate-500 truncate">{user?.empresa || ''}</div>
+              </div>
+            )}
+            {!sidebarCollapsed && (
+              <button
+                onClick={handleLogout}
+                aria-label="Cerrar sesión"
+                title="Cerrar sesión"
+                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0"
+              >
+                <NavIcon name="logout" className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          {sidebarCollapsed && (
+            <button
+              onClick={handleLogout}
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+              className="w-full flex justify-center py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+            >
+              <NavIcon name="logout" />
+            </button>
+          )}
+          <button
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:bg-white/70 dark:hover:bg-white/10 text-xs"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} aria-hidden="true">
+              <path d="m15 6-6 6 6 6" />
+            </svg>
+            {!sidebarCollapsed && 'Colapsar'}
+          </button>
+        </div>
+      </aside>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="lg:hidden bg-white/80 backdrop-blur-xl border-b border-white/60 dark:border-slate-800/60 sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3 gap-y-2">
             <div className="flex items-center gap-3 min-w-0">
               {user?.logo_url ? (
@@ -4707,27 +4941,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <p className="text-xs text-slate-500 truncate">Bienvenido, {user?.nombre || user?.usuario}</p>
               </div>
             </div>
-            <nav className="hidden lg:flex items-center gap-1 max-w-full overflow-x-auto scrollbar-none">
-              {navItems.map(item => (
-                <button
-                  key={item.key}
-                  onClick={() => setCurrentView(item.key)}
-                  className={`whitespace-nowrap shrink-0 px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === item.key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                >
-                  {item.label}
-                  {item.badge ? (
-                    <span className={`ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-              <ThemeToggle theme={theme} onToggle={toggleTheme} />
-              <button onClick={handleLogout} className="whitespace-nowrap shrink-0 px-3 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl text-sm font-medium">
-                Salir
-              </button>
-            </nav>
-            <div className="flex lg:hidden items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <button
                 type="button"
@@ -4793,6 +5007,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
           </div>
         )}
+
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          navItems={navItems}
+          currentView={currentView}
+          onNavigate={(key) => setCurrentView(key)}
+          productos={productos}
+          onPickProducto={(p) => { setCurrentView('cotizador'); setCatalogSearch(p.sku || p.mpn || p.desc || ''); }}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onLogout={handleLogout}
+        />
 
         <nav
           aria-label="Navegación principal móvil"
@@ -7804,7 +8031,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
             </div>
             <div className="lg:col-span-4 space-y-4">
-              <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden lg:sticky lg:top-24">
+              <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden lg:sticky lg:top-4">
                 <div className="p-4 border-b bg-gray-50">
                   <h3 className="font-semibold">Resumen</h3>
                 </div>
