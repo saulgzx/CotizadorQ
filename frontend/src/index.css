@@ -336,6 +336,16 @@ button:active:not(:disabled) {
   background-size: 200% 100%;
 }
 
+/* ---------- j) Drawer móvil ---------- */
+@keyframes drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.drawer-enter {
+  animation: drawer-in 0.25s ease-out both;
+}
+
 /* ---------- g) Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   *,

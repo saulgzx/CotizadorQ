@@ -63,6 +63,51 @@ import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 
+const NAV_ICON_PATHS = {
+  home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
+  truck: 'M3 7.5h10.5V17H3zM13.5 10.5H18l3 3V17h-7.5M6 17a1.9 1.9 0 1 0 0 3.8A1.9 1.9 0 0 0 6 17zm10.5 0a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8z',
+  cart: 'M2.5 4h2l2.3 11.5h11l2.2-8.5H6M9.5 19.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm8 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+  tag: 'M3 11.25V4.5A1.5 1.5 0 0 1 4.5 3h6.75L21 12.75 12.75 21zM7.5 7.5h.008',
+  users: 'M15 19.5a4.5 4.5 0 0 0-9 0M16.5 7.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM18.4 12.6a4.5 4.5 0 0 1 3.1 4.4M16 4.7a3 3 0 0 1 0 5.6',
+  calc: 'M7.5 3h9A1.5 1.5 0 0 1 18 4.5v15A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5v-15A1.5 1.5 0 0 1 7.5 3zM9 6.75h6M9 11h.01M12 11h.01M15 11h.01M9 14h.01M12 14h.01M15 14h.01M9 17h.01M12 17h.01M15 17h.01',
+  box: 'M21 7.5 12 3 3 7.5m18 0L12 12m9-4.5V16.5L12 21m0-9L3 7.5m9 4.5v9m-9-13.5V16.5L12 21',
+  clock: 'M12 6v6l4 2m6-2a10 10 0 1 1-20 0 10 10 0 0 1 20 0z',
+  user: 'M17.98 19.4a8.25 8.25 0 0 0-11.96 0M15.75 9.75a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0zM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+  menu: 'M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5',
+  close: 'M6 18 18 6M6 6l12 12',
+  logout: 'M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M18.75 15.75 21.75 12l-3-3.75M9 12h12.75'
+};
+
+const NavIcon = ({ name, className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <path d={NAV_ICON_PATHS[name] || NAV_ICON_PATHS.menu} />
+  </svg>
+);
+
+// Agrupa controles de filtro: en desktop siempre visibles, en móvil colapsados
+// tras un botón "Filtros" para despejar la pantalla.
+function CollapsibleFilters({ label = 'Filtros', children, className = '' }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`w-full lg:w-auto ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className="lg:hidden inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 hover:bg-slate-50"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+        {label}
+      </button>
+      <div className={`${open ? 'flex mt-2' : 'hidden'} lg:flex lg:mt-0 flex-wrap items-center gap-2`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function CotizadorPage({ routeView = 'cotizador' }) {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -180,6 +225,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [syncStatus, setSyncStatus] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -2329,6 +2375,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       cancelled = true;
     };
   }, [isLoggedIn, isFullAdmin, currentView]);
+
+  // Drawer móvil: cerrar con Escape y bloquear el scroll del fondo mientras está abierto.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [currentView]);
 
   const markBoInvoiced = (bo) => {
     if (!bo) return;
@@ -4583,6 +4648,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     setCurrentView,
     syncStatus
   };
+
+  // Modelo único de navegación: alimenta los pills de desktop, el drawer y la barra inferior móvil.
+  const navItems = [
+    canViewDashboard && { key: 'dashboard', label: 'Dashboard', short: 'Inicio', icon: 'home' },
+    isFullAdmin && { key: 'ordenes', label: 'Ordenes Activas', short: 'Órdenes', icon: 'truck' },
+    (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', label: 'Vista Compras', short: 'Compras', icon: 'cart' },
+    isFullAdmin && { key: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
+    isFullAdmin && { key: 'usuarios', label: 'Gestión de usuarios', short: 'Usuarios', icon: 'users' },
+    canViewCotizador && { key: 'cotizador', label: 'Cotizador', short: 'Cotizar', icon: 'calc', badge: cotizacion.length > 0 ? cotizacion.length : null, badgeTone: 'blue' },
+    canViewStock && { key: 'stock', label: 'Stock disponible', short: 'Stock', icon: 'box' },
+    canViewHistorial && {
+      key: 'historial',
+      label: isFullAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones',
+      short: 'Historial',
+      icon: 'clock',
+      badge: isFullAdmin && historialCounts.registroPendientes > 0 ? historialCounts.registroPendientes : null,
+      badgeTone: 'amber'
+    },
+    canViewAccount && { key: 'cuenta', label: 'Mi cuenta', short: 'Cuenta', icon: 'user' }
+  ].filter(Boolean);
+  const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
+  const bottomNavItems = BOTTOM_NAV_PRIORITY
+    .map(key => navItems.find(item => item.key === key))
+    .filter(Boolean)
+    .slice(0, 4);
+
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
     <div className="min-h-screen flex flex-col app-bg">
@@ -4591,7 +4682,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           href="https://wa.me/56935134131"
           target="_blank"
           rel="noreferrer"
-          className="fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg bg-green-500 text-white hover:bg-green-600"
+          className="fixed bottom-24 lg:bottom-5 right-4 lg:right-5 z-40 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg bg-green-500 text-white hover:bg-green-600"
           aria-label="Necesitas Ayuda? WhatsApp"
         >
           <span className="text-sm font-semibold">¿Necesitas Ayuda?</span>
@@ -4616,90 +4707,128 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <p className="text-xs text-slate-500 truncate">Bienvenido, {user?.nombre || user?.usuario}</p>
               </div>
             </div>
-            <nav className="flex items-center gap-1 max-w-full overflow-x-auto scrollbar-none">
-              {canViewDashboard && (
+            <nav className="hidden lg:flex items-center gap-1 max-w-full overflow-x-auto scrollbar-none">
+              {navItems.map(item => (
                 <button
-                  onClick={() => setCurrentView('dashboard')}
-                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                  aria-label="Ir al dashboard"
+                  key={item.key}
+                  onClick={() => setCurrentView(item.key)}
+                  className={`whitespace-nowrap shrink-0 px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === item.key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                 >
-                  Dashboard
+                  {item.label}
+                  {item.badge ? (
+                    <span className={`ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                      {item.badge}
+                    </span>
+                  ) : null}
                 </button>
-              )}
-              {isFullAdmin && (
-                <>
-                  <button
-                    onClick={() => setCurrentView('ordenes')}
-                    className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                  >
-                    Ordenes Activas
-                  </button>
-                  <button
-                    onClick={() => setCurrentView('compras')}
-                    className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                  >
-                    Vista Compras
-                  </button>
-                </>
-              )}
-              {!isAdmin && canViewCompras && (
-                <button
-                  onClick={() => setCurrentView('compras')}
-                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                >
-                  Vista Compras
-                </button>
-              )}
-              {isFullAdmin && (
-                <button
-                  onClick={() => setCurrentView('admin')}
-                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'admin' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                >
-                  Listas de precio
-                </button>
-              )}
-              {isFullAdmin && (
-                <button
-                  onClick={() => setCurrentView('usuarios')}
-                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'usuarios' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
-                >
-                  Gestión de usuarios
-                </button>
-              )}
-            {canViewCotizador && (
-              <button onClick={() => setCurrentView('cotizador')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
-                Cotizador {cotizacion.length > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">{cotizacion.length}</span>}
+              ))}
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
+              <button onClick={handleLogout} className="whitespace-nowrap shrink-0 px-3 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl text-sm font-medium">
+                Salir
               </button>
-            )}
-            {canViewStock && (
-              <button onClick={() => setCurrentView('stock')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
-                Stock disponible
-              </button>
-            )}
-            {canViewHistorial && (
-              <button onClick={() => setCurrentView('historial')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
-                {isFullAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
-                {isFullAdmin && historialCounts.registroPendientes > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
-                    {historialCounts.registroPendientes}
-                  </span>
-                )}
-              </button>
-            )}
-            {canViewAccount && (
-              <button onClick={() => setCurrentView('cuenta')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'cuenta' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
-                Mi cuenta
-              </button>
-            )}
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <button onClick={handleLogout} className="whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl text-xs sm:text-sm font-medium">
-              Salir
-            </button>
             </nav>
+            <div className="flex lg:hidden items-center gap-1 shrink-0">
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                aria-label="Abrir menú"
+                className="p-2 rounded-xl text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+              >
+                <NavIcon name="menu" className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </header>
 
-        <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto px-4 pt-6 ${!isAdmin ? 'pb-24' : 'pb-6'}`}>
+        {mobileMenuOpen && (
+          <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menú de navegación">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setMobileMenuOpen(false)} />
+            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-2xl flex flex-col">
+              <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-semibold uppercase shrink-0">
+                    {(user?.nombre || user?.usuario || '?').slice(0, 1)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
+                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'myquote'}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Cerrar menú"
+                  className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0"
+                >
+                  <NavIcon name="close" className="w-5 h-5" />
+                </button>
+              </div>
+              <nav className="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Secciones">
+                {navItems.map(item => (
+                  <button
+                    key={item.key}
+                    onClick={() => { setCurrentView(item.key); setMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left transition ${currentView === item.key ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10'}`}
+                  >
+                    <NavIcon name={item.icon} />
+                    <span className="flex-1 truncate">{item.label}</span>
+                    {item.badge ? (
+                      <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </nav>
+              <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                >
+                  <NavIcon name="logout" />
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <nav
+          aria-label="Navegación principal móvil"
+          className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]"
+        >
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${bottomNavItems.length + 1}, minmax(0, 1fr))` }}>
+            {bottomNavItems.map(item => (
+              <button
+                key={item.key}
+                onClick={() => setCurrentView(item.key)}
+                aria-label={item.label}
+                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-medium transition ${currentView === item.key ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+              >
+                <span className="relative">
+                  <NavIcon name={item.icon} className="w-5 h-5" />
+                  {item.badge ? (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center">
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </span>
+                {item.short}
+              </button>
+            ))}
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Abrir menú completo"
+              className="flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400"
+            >
+              <NavIcon name="menu" className="w-5 h-5" />
+              Menú
+            </button>
+          </div>
+        </nav>
+
+        <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
@@ -5674,7 +5803,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         : `Ultimos ${funnelDays} dias${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`}
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <CollapsibleFilters label="Filtros del funnel">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                       <input
                         type="date"
@@ -5722,7 +5851,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     >
                       Refrescar
                     </button>
-                  </div>
+                  </CollapsibleFilters>
                 </div>
                 {funnelError && <div className="mt-2 text-sm text-rose-600">{funnelError}</div>}
                 {funnelLoading ? (
@@ -7442,11 +7571,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
             <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
               <div className={`${isClient ? 'p-4' : 'p-3'} border-b bg-gray-50`}>
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="font-semibold">Cotización</h3>
                   <div className="flex items-center gap-2 flex-wrap">
+                    {(isAdmin || isVentasUser) && (
+                      <CollapsibleFilters label="Ajustes">
                     {isAdmin && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {!isCotizadorStockAdmin && (
                           <label className="flex items-center gap-1 text-[11px] text-gray-500">
                             GP QNAP
@@ -7501,6 +7632,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           </select>
                         </label>
                       </div>
+                    )}
+                      </CollapsibleFilters>
                     )}
                     <button
                       onClick={clearCotizacion}
