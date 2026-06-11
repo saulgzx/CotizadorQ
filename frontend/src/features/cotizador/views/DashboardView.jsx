@@ -12,8 +12,19 @@ export default function DashboardView() {
     setDashboardInvoiceMonth,
     invoiceMonthOptions,
     dashboardBilling,
-    setCurrentView
+    setCurrentView,
+    syncStatus
   } = useCotizador();
+
+  const formatSyncAge = (createdAt) => {
+    const ts = new Date(createdAt).getTime();
+    if (Number.isNaN(ts)) return '';
+    const minutes = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    if (minutes < 60) return `hace ${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `hace ${hours} h`;
+    return `hace ${Math.round(hours / 24)} días`;
+  };
 
   return (
     <div className="space-y-4">
@@ -38,6 +49,28 @@ export default function DashboardView() {
           </div>
         ))}
       </div>
+      {isAdmin && syncStatus?.syncs?.length > 0 && (
+        <div className="glass-card rounded-2xl border border-white/70 p-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span className="font-semibold text-slate-700">Catálogo (Google Sheets):</span>
+            {syncStatus.syncs.map((s) => {
+              const ok = s.status === 'ok';
+              const ageLabel = formatSyncAge(s.created_at);
+              return (
+                <span
+                  key={s.origen}
+                  title={s.warnings || s.error || ''}
+                  className={`px-2 py-1 rounded-full border ${ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+                >
+                  {s.origen}: {ok
+                    ? `sincronizado ${ageLabel} (${s.inserted} nuevos, ${s.updated} actualizados${s.rejected > 0 ? `, ${s.rejected} rechazados` : ''})`
+                    : `${s.status === 'aborted' ? 'ABORTADO' : s.status === 'error' ? 'ERROR' : s.status} ${ageLabel}`}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {isAdmin && (
         <div className="glass-card rounded-2xl border border-white/70 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
           <div className="flex flex-wrap items-center justify-between gap-3">

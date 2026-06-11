@@ -101,6 +101,12 @@ export const productosAPI = {
     return response.json();
   },
 
+  getSyncStatus: async () => {
+    const response = await fetchWithAuth('/api/sync/status');
+    if (!response.ok) throw new Error('Error obteniendo estado de sincronización');
+    return response.json();
+  },
+
   sync: async (origen) => {
     const query = origen ? `?origen=${encodeURIComponent(origen)}` : '';
     const response = await fetchWithAuth(`/api/productos/sync${query}`, {

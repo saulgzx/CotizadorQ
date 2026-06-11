@@ -60,9 +60,13 @@ app.use((err, req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 
 // ConexiÃ³n a PostgreSQL
+// DATABASE_SSL_REJECT_UNAUTHORIZED=true exige certificado válido del servidor de BD
+// (recomendado; requiere que el proveedor use un certificado verificable o configurar su CA).
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'true' }
+    : false
 });
 
 const SHEETS_TAB_QNAP = (process.env.GOOGLE_SHEETS_TAB_QNAP || 'Hoja 1').trim();
@@ -99,6 +103,10 @@ const canManageCotizadorStock = (role) => {
   const normalized = String(role || '').toLowerCase();
   return normalized === 'admin' || normalized === COTIZADOR_STOCK_ADMIN_ROLE;
 };
+
+// Columnas de cotizacion_items visibles para no-admin: excluye precio_disty (costo) y gp (margen).
+const COTIZACION_ITEM_PUBLIC_COLUMNS =
+  'id, cotizacion_id, producto_id, marca, sku, mpn, descripcion, cantidad, precio_unitario, precio_total, tiempo_entrega';
 
 const responseCache = new Map();
 
@@ -187,9 +195,13 @@ const getExternalErrorMessage = (error, fallback = 'Error consultando servicio e
   return fallback;
 };
 
-// Bloqueo por "demasiados intentos" desactivado: el login no se limita por intentos.
-// Para reactivarlo, restaurar: return LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
-const shouldBypassLoginRateLimit = () => true;
+// Rate limit de login: activo por defecto. Para desactivarlo (decisión de negocio)
+// setear LOGIN_RATE_LIMIT_ENABLED=false en el entorno.
+const LOGIN_RATE_LIMIT_ENABLED = String(process.env.LOGIN_RATE_LIMIT_ENABLED || 'true').toLowerCase() !== 'false';
+const shouldBypassLoginRateLimit = (usuario) => {
+  if (!LOGIN_RATE_LIMIT_ENABLED) return true;
+  return LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
+};
 
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -691,7 +703,10 @@ const detectHeaderRowIndex = (rows, origen) => {
 const parseGpValue = (value, fallback = 0.15) => {
   const parsed = parseFloat(value);
   if (Number.isNaN(parsed)) return fallback;
-  return parsed > 1 ? parsed / 100 : parsed;
+  const normalized = parsed > 1 ? parsed / 100 : parsed;
+  // GP >= 1 produce división por cero (precio Infinity); GP negativo no tiene sentido comercial.
+  if (normalized < 0 || normalized >= 1) return fallback;
+  return normalized;
 };
 
 const normalizeIntcomexProfile = (value) => {
@@ -839,7 +854,9 @@ const getSheetColumnIndexes = (origen, headers) => {
   }
 
   // Fallback a estructura estándar cuando faltan columnas claves.
-  if (idx.sku < 0 || idx.desc < 0) {
+  // Se marca para que el sync lo reporte como advertencia (visibilidad de layout inesperado).
+  idx.usedPositionalFallback = idx.sku < 0 || idx.desc < 0;
+  if (idx.usedPositionalFallback) {
     if (origen === 'AXIS') {
       idx.marca = idx.marca >= 0 ? idx.marca : 0;
       idx.sku = idx.sku >= 0 ? idx.sku : 1;
@@ -1039,7 +1056,47 @@ const writeProductoToSheet = async (origen, producto, action = 'upsert') => {
   }
 };
 
+const recordSyncLog = async ({ origen, trigger, status, result = {}, errorMessage = null, durationMs = 0 }) => {
+  const toCount = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  try {
+    await pool.query(
+      `INSERT INTO sync_logs (origen, trigger_source, status, inserted, updated, skipped, rejected, total, warnings, error, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        origen,
+        trigger,
+        status,
+        toCount(result.inserted),
+        toCount(result.updated),
+        toCount(result.skipped),
+        toCount(result.rejected),
+        toCount(result.total),
+        result.warnings || null,
+        errorMessage || result.reason || null,
+        toCount(durationMs)
+      ]
+    );
+  } catch (error) {
+    logger.error({ event: 'sync_log_failed', message: error.message }, 'No se pudo registrar el sync en sync_logs');
+  }
+};
+
 const syncProductosFromSheet = async (options = {}) => {
+  const startedAt = Date.now();
+  const origen = String(options.origen || DEFAULT_ORIGIN).toUpperCase();
+  const trigger = options.trigger || 'manual';
+  try {
+    const result = await runProductosSync(options);
+    const status = result.skipped === true ? 'skipped' : (result.aborted ? 'aborted' : 'ok');
+    await recordSyncLog({ origen, trigger, status, result, durationMs: Date.now() - startedAt });
+    return result;
+  } catch (error) {
+    await recordSyncLog({ origen, trigger, status: 'error', errorMessage: error.message, durationMs: Date.now() - startedAt });
+    throw error;
+  }
+};
+
+const runProductosSync = async (options = {}) => {
   const sheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
   if (!sheetId) {
     return { skipped: true, reason: 'GOOGLE_SHEETS_ID no configurado' };
@@ -1052,27 +1109,46 @@ const syncProductosFromSheet = async (options = {}) => {
     return { skipped: true, reason: `La pestana "${tabName}" no existe en la hoja` };
   }
   const { rows } = await getSheetData(sheets, sheetId, tabName);
+  // Guarda: una hoja vacía aborta el sync en vez de desactivar todo el catálogo
+  // (antes una lectura vacía/errónea apagaba silenciosamente todos los productos del origen).
   if (rows.length === 0) {
-    await pool.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
-    invalidateOperationalCaches();
-    return { inserted: 0, updated: 0, skipped: 0, total: 0 };
+    return { aborted: true, reason: 'La pestaña no tiene filas; se mantiene el catálogo actual', inserted: 0, updated: 0, skipped: 0, total: 0 };
   }
   const headerRowIndex = detectHeaderRowIndex(rows, origen);
   const headers = (rows[headerRowIndex] || []).map((h) => String(h || '').trim());
   const dataRows = rows.slice(headerRowIndex + 1);
 
   if (dataRows.length === 0) {
-    await pool.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
-    invalidateOperationalCaches();
-    return { inserted: 0, updated: 0, skipped: 0, total: 0 };
+    return { aborted: true, reason: 'La pestaña solo tiene encabezados; se mantiene el catálogo actual', inserted: 0, updated: 0, skipped: 0, total: 0 };
   }
 
   const idx = getSheetColumnIndexes(origen, headers);
+
+  // Guarda: si más de la mitad de las filas no son legibles con el mapeo de columnas
+  // actual, lo más probable es que el layout de la hoja cambió — abortar antes de corromper.
+  const readableRows = dataRows.filter((row) => {
+    const r = row || [];
+    const sku = idx.sku >= 0 ? String(r[idx.sku] || '').trim() : '';
+    const mpn = idx.mpn >= 0 ? String(r[idx.mpn] || '').trim() : '';
+    const descripcion = idx.desc >= 0 ? String(r[idx.desc] || '').trim() : '';
+    return Boolean(sku || mpn || descripcion);
+  }).length;
+  if (readableRows === 0 || readableRows < dataRows.length / 2) {
+    return {
+      aborted: true,
+      reason: `Solo ${readableRows} de ${dataRows.length} filas son legibles con el layout esperado; sync abortado`,
+      inserted: 0,
+      updated: 0,
+      skipped: 0,
+      total: dataRows.length
+    };
+  }
 
   const client = await pool.connect();
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
+  let rejected = 0;
   try {
     await client.query('BEGIN');
     await client.query('UPDATE productos SET activo = false WHERE origen = $1', [origen]);
@@ -1082,6 +1158,12 @@ const syncProductosFromSheet = async (options = {}) => {
       const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
       const descripcion = idx.desc >= 0 ? String(row[idx.desc] || '').trim() : '';
       if (!sku && !mpn && !descripcion) {
+        skipped += 1;
+        continue;
+      }
+      const precioDisty = parseNumber(idx.precio >= 0 ? row[idx.precio] : 0, 0);
+      if (precioDisty < 0) {
+        rejected += 1;
         skipped += 1;
         continue;
       }
@@ -1097,7 +1179,7 @@ const syncProductosFromSheet = async (options = {}) => {
         sku,
         mpn,
         descripcion,
-        precio_disty: parseNumber(idx.precio >= 0 ? row[idx.precio] : 0, 0),
+        precio_disty: precioDisty,
         gp: parseGpValue(idx.gp >= 0 ? row[idx.gp] : 0, 0.15),
         tiempo_entrega: axisTiempoEntrega || (idx.tiempo >= 0 ? String(row[idx.tiempo] || '').trim() : '') || 'ETA por confirmar',
         activo
@@ -1143,7 +1225,16 @@ const syncProductosFromSheet = async (options = {}) => {
   }
 
   invalidateOperationalCaches();
-  return { inserted, updated, skipped, total: dataRows.length };
+  return {
+    inserted,
+    updated,
+    skipped,
+    rejected,
+    total: dataRows.length,
+    warnings: idx.usedPositionalFallback
+      ? 'Encabezados no detectados: se usó mapeo posicional de columnas (verificar layout de la hoja)'
+      : null
+  };
 };
 
 const startSheetsSyncJob = () => {
@@ -1151,8 +1242,8 @@ const startSheetsSyncJob = () => {
   const intervalMs = SHEETS_SYNC_HOURS * 60 * 60 * 1000;
   setInterval(async () => {
     try {
-      const qnap = await syncProductosFromSheet({ origen: 'QNAP' });
-      const axis = await syncProductosFromSheet({ origen: 'AXIS' });
+      const qnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'auto' });
+      const axis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'auto' });
       if (!qnap?.skipped) {
         console.log(`Sync QNAP OK: ${qnap.inserted} nuevos, ${qnap.updated} actualizados, ${qnap.skipped} omitidos`);
       }
@@ -1309,7 +1400,24 @@ const initDB = async () => {
         snapshot JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS sync_logs (
+        id SERIAL PRIMARY KEY,
+        origen VARCHAR(50),
+        trigger_source VARCHAR(20),
+        status VARCHAR(20),
+        inserted INTEGER DEFAULT 0,
+        updated INTEGER DEFAULT 0,
+        skipped INTEGER DEFAULT 0,
+        rejected INTEGER DEFAULT 0,
+        total INTEGER DEFAULT 0,
+        warnings TEXT,
+        error TEXT,
+        duration_ms INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS sync_logs_origen_created_idx ON sync_logs(origen, created_at DESC);`);
 
     await pool.query(`ALTER TABLE productos ADD COLUMN IF NOT EXISTS origen VARCHAR(50) DEFAULT 'QNAP';`);
     await pool.query(`ALTER TABLE productos ADD COLUMN IF NOT EXISTS rebate_partner_autorizado DECIMAL(12,2) DEFAULT 0;`);
@@ -1360,60 +1468,28 @@ const initDB = async () => {
     await pool.query(
       `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO UPDATE
-       SET password = EXCLUDED.password,
-           nombre = EXCLUDED.nombre,
-           role = EXCLUDED.role,
-           gp = EXCLUDED.gp,
-           gp_qnap = EXCLUDED.gp_qnap,
-           gp_axis = EXCLUDED.gp_axis,
-           partner_category = EXCLUDED.partner_category,
-           intcomex_profile = EXCLUDED.intcomex_profile`,
+       ON CONFLICT (usuario) DO NOTHING`,
       ['nsteck', COTIZADOR_STOCK_ADMIN_PASSWORD_HASH, 'Nsteck', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
     );
 
     await pool.query(
       `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO UPDATE
-       SET password = EXCLUDED.password,
-           nombre = EXCLUDED.nombre,
-           role = EXCLUDED.role,
-           gp = EXCLUDED.gp,
-           gp_qnap = EXCLUDED.gp_qnap,
-           gp_axis = EXCLUDED.gp_axis,
-           partner_category = EXCLUDED.partner_category,
-           intcomex_profile = EXCLUDED.intcomex_profile`,
+       ON CONFLICT (usuario) DO NOTHING`,
       ['Osuescun', OSUESCUN_PASSWORD_HASH, 'Osuescun', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
     );
 
     await pool.query(
       `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO UPDATE
-       SET password = EXCLUDED.password,
-           nombre = EXCLUDED.nombre,
-           role = EXCLUDED.role,
-           gp = EXCLUDED.gp,
-           gp_qnap = EXCLUDED.gp_qnap,
-           gp_axis = EXCLUDED.gp_axis,
-           partner_category = EXCLUDED.partner_category,
-           intcomex_profile = EXCLUDED.intcomex_profile`,
+       ON CONFLICT (usuario) DO NOTHING`,
       ['Estiv', ESTIV_PASSWORD_HASH, 'Estiv', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
     );
 
     await pool.query(
       `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO UPDATE
-       SET password = EXCLUDED.password,
-           nombre = EXCLUDED.nombre,
-           role = EXCLUDED.role,
-           gp = EXCLUDED.gp,
-           gp_qnap = EXCLUDED.gp_qnap,
-           gp_axis = EXCLUDED.gp_axis,
-           partner_category = EXCLUDED.partner_category,
-           intcomex_profile = EXCLUDED.intcomex_profile`,
+       ON CONFLICT (usuario) DO NOTHING`,
       ['Jleon', JLEON_PASSWORD_HASH, 'Jleon', '', '', 'admin', 0.15, 0.15, 0.15, 'Partner Autorizado', null]
     );
 
@@ -1440,14 +1516,8 @@ const initDB = async () => {
 };
 
 
-const getRequestIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return req.ip;
-};
+// req.ip respeta 'trust proxy'; no leer X-Forwarded-For crudo (el primer valor lo controla el cliente).
+const getRequestIp = (req) => req.ip || '';
 
 const getSessionHeaders = (req) => ({
   sessionId: req.headers['x-session-id'] || req.headers['x-sessionid'],
@@ -2667,7 +2737,7 @@ app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdminOrIntcomexCom
 app.get('/api/productos', authenticateToken, async (req, res) => {
   try {
     const origen = req.query.origen;
-    const isAdmin = !req.user?.role || canManageCotizadorStock(req.user.role);
+    const isAdmin = canManageCotizadorStock(req.user?.role);
     const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const pageRaw = parseInt(req.query.page || '1', 10);
     const pageSizeRaw = parseInt(req.query.pageSize || '50', 10);
@@ -2852,11 +2922,20 @@ app.post('/api/productos/sync', authenticateToken, requireCotizadorStockAdmin, a
           detail: await buildSkippedDetail(origenNormalized, result.reason)
         });
       }
+      if (result?.aborted === true) {
+        return res.status(409).json({ error: 'Sync abortado por guardas de seguridad', detail: result.reason });
+      }
       invalidateOperationalCaches();
       return res.json({ message: 'Sync completado', ...result });
     }
     const qnap = await syncProductosFromSheet({ origen: 'QNAP' });
     const axis = await syncProductosFromSheet({ origen: 'AXIS' });
+    if (qnap?.aborted === true || axis?.aborted === true) {
+      return res.status(409).json({
+        error: 'Sync abortado por guardas de seguridad',
+        detail: { qnap: qnap?.reason || null, axis: axis?.reason || null }
+      });
+    }
     if (qnap?.skipped === true || axis?.skipped === true) {
       return res.status(400).json({
         error: 'Sync no configurado',
@@ -2884,6 +2963,21 @@ app.post('/api/productos/sync', authenticateToken, requireCotizadorStockAdmin, a
       detail: detail.reason || detail.message || null,
       debug: getSheetsRuntimeDebug()
     });
+  }
+});
+
+// SYNC - Estado de la última sincronización por origen (badge de frescura en el dashboard)
+app.get('/api/sync/status', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT ON (origen) origen, trigger_source, status, inserted, updated, skipped, rejected, total, warnings, error, duration_ms, created_at
+       FROM sync_logs
+       ORDER BY origen, created_at DESC`
+    );
+    res.json({ syncs: result.rows });
+  } catch (error) {
+    logError(req, error, 'sync_status_failed');
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -2961,7 +3055,7 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     const { cliente, items, total } = req.body;
     const usuarioId = req.user?.id || null;
     const usuarioName = req.user?.usuario || null;
-    const isAdmin = !req.user?.role || canManageCotizadorStock(req.user.role);
+    const isAdmin = canManageCotizadorStock(req.user?.role);
     let totalFinal = total;
     let itemsFinal = items;
 
@@ -3281,7 +3375,7 @@ app.get('/api/cotizaciones/funnel', authenticateToken, requireAdmin, async (req,
 app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
   try {
     const includeItems = req.query.includeItems === '1';
-    const isAdmin = !req.user?.role || req.user.role === 'admin';
+    const isAdmin = req.user?.role === 'admin';
     const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const pageRaw = parseInt(req.query.page || '1', 10);
     const pageSizeRaw = parseInt(req.query.pageSize || '50', 10);
@@ -3296,7 +3390,7 @@ app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
       const ids = rows.map(row => row.id);
       if (ids.length === 0) return rows;
       const itemsResult = await pool.query(
-        'SELECT * FROM cotizacion_items WHERE cotizacion_id = ANY($1::int[])',
+        `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items WHERE cotizacion_id = ANY($1::int[])`,
         [ids]
       );
       const itemsByCotizacion = itemsResult.rows.reduce((acc, item) => {
@@ -3458,7 +3552,7 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
 app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const isAdmin = !req.user?.role || req.user.role === 'admin';
+    const isAdmin = req.user?.role === 'admin';
     const cotizacion = isAdmin
       ? await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1', [id])
       : await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1 AND c.usuario_id = $2', [id, req.user.id]);
@@ -3466,7 +3560,10 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Cotizaci?n no encontrada' });
     }
     
-    const items = await pool.query('SELECT * FROM cotizacion_items WHERE cotizacion_id = $1', [id]);
+    const items = await pool.query(
+      `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items WHERE cotizacion_id = $1`,
+      [id]
+    );
     
     res.json({
       ...cotizacion.rows[0],
@@ -3483,8 +3580,8 @@ const startServer = async (port = PORT) => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
     try {
-      const initialQnap = await syncProductosFromSheet({ origen: 'QNAP' });
-      const initialAxis = await syncProductosFromSheet({ origen: 'AXIS' });
+      const initialQnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'boot' });
+      const initialAxis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'boot' });
       if (!initialQnap?.skipped) {
         console.log(`Sync inicial QNAP OK: ${initialQnap.inserted} nuevos, ${initialQnap.updated} actualizados, ${initialQnap.skipped} omitidos`);
       }
@@ -3494,7 +3591,8 @@ const startServer = async (port = PORT) => {
     } catch (error) {
       console.error('Error en sync inicial:', error);
     }
-    // Auto sync disabled; manual sync only.
+    // Sync periódico cada SHEETS_SYNC_HOURS horas (default 12; <=0 lo desactiva).
+    startSheetsSyncJob();
   });
   return server;
 };

@@ -211,7 +211,10 @@ export const findValue = (row, keys) => {
 export const parseGp = (value, fallback = CONSTANTS.DEFAULT_GP) => {
   const parsed = parseFloat(value);
   if (Number.isNaN(parsed)) return fallback;
-  return parsed > 1 ? parsed / 100 : parsed;
+  const normalized = parsed > 1 ? parsed / 100 : parsed;
+  // GP >= 1 produce división por cero (precio Infinity); GP negativo no tiene sentido comercial.
+  if (normalized < 0 || normalized >= 1) return fallback;
+  return normalized;
 };
 
 export const normalizeLookupKey = (value) => String(value || '').trim().toLowerCase();

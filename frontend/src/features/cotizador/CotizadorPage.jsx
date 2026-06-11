@@ -176,6 +176,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [syncStatus, setSyncStatus] = useState(null);
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -2310,6 +2311,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       await Promise.all([loadUsuarios(), loadOsoOrders()]);
     };
     loadDashboardMetrics();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, isFullAdmin, currentView]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'dashboard') return;
+    let cancelled = false;
+    productosAPI.getSyncStatus()
+      .then((data) => { if (!cancelled) setSyncStatus(data); })
+      .catch(() => { if (!cancelled) setSyncStatus(null); });
     return () => {
       cancelled = true;
     };
@@ -4561,7 +4573,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     setDashboardInvoiceMonth,
     invoiceMonthOptions,
     dashboardBilling,
-    setCurrentView
+    setCurrentView,
+    syncStatus
   };
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
