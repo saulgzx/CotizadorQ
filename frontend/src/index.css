@@ -81,3 +81,269 @@
     break-inside: avoid;
   }
 }
+
+/* ============================================================
+   SISTEMA DE TEMA Y ANIMACIONES (claro/oscuro)
+   ============================================================ */
+
+/* ---------- Keyframes base (disponibles sin utilidades animate-*) ---------- */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ---------- a) Fondo de la app ---------- */
+.app-bg {
+  background-color: #f7f4ef;
+  background-image:
+    radial-gradient(1200px circle at top left, #e0f2fe, transparent 55%),
+    radial-gradient(900px circle at bottom right, #fef3c7, transparent 60%);
+}
+
+.dark .app-bg {
+  background-color: #0b1220;
+  background-image:
+    radial-gradient(1200px circle at top left, rgba(30, 58, 138, 0.35), transparent 55%),
+    radial-gradient(900px circle at bottom right, rgba(180, 83, 9, 0.14), transparent 60%);
+}
+
+/* ---------- b) Modo oscuro retrofit ---------- */
+.dark {
+  color-scheme: dark;
+  background-color: #0b1220;
+}
+
+.dark body {
+  background-color: #0b1220;
+  color: #e2e8f0;
+}
+
+/* Superficies */
+.dark .bg-white { background-color: #0f172a; }
+.dark .bg-white\/70 { background-color: rgba(15, 23, 42, 0.7); }
+.dark .bg-white\/80 { background-color: rgba(15, 23, 42, 0.8); }
+.dark .bg-slate-50 { background-color: #1e293b; }
+.dark .bg-gray-50 { background-color: #1e293b; }
+.dark .bg-slate-100 { background-color: #1e293b; }
+.dark .bg-gray-100 { background-color: #1e293b; }
+.dark .bg-slate-200 { background-color: #334155; }
+.dark .bg-slate-900 { background-color: #1e293b; }
+.dark .bg-slate-800 { background-color: #334155; }
+.dark .bg-black\/40 { background-color: rgba(0, 0, 0, 0.65); }
+
+/* Hovers de superficie */
+.dark .hover\:bg-slate-50:hover { background-color: rgba(30, 41, 59, 0.7); }
+.dark .hover\:bg-gray-50:hover { background-color: rgba(30, 41, 59, 0.7); }
+.dark .hover\:bg-slate-800:hover { background-color: #475569; }
+.dark .hover\:bg-slate-100:hover { background-color: rgba(51, 65, 85, 0.6); }
+
+/* Textos */
+.dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-gray-800 { color: #e2e8f0; }
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-gray-700 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #94a3b8; }
+.dark .text-gray-600 { color: #94a3b8; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-gray-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #64748b; }
+.dark .text-gray-400 { color: #64748b; }
+.dark .text-blue-600 { color: #60a5fa; }
+.dark .text-blue-700 { color: #93c5fd; }
+.dark .text-amber-700 { color: #fcd34d; }
+.dark .text-rose-600 { color: #fb7185; }
+.dark .text-rose-700 { color: #fda4af; }
+
+/* Bordes y anillos */
+.dark .border-slate-200 { border-color: rgba(51, 65, 85, 0.6); }
+.dark .border-white\/70 { border-color: rgba(51, 65, 85, 0.6); }
+.dark .border-slate-900 { border-color: #cbd5e1; }
+.dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
+.dark .ring-blue-200 { --tw-ring-color: rgba(96, 165, 250, 0.35); }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(51, 65, 85, 0.5); }
+
+/* Chips de estado (acento translúcido) */
+.dark .bg-blue-50 { background-color: rgba(59, 130, 246, 0.12); }
+.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.12); }
+.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.12); }
+.dark .bg-amber-100 { background-color: rgba(245, 158, 11, 0.2); }
+.dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.12); }
+.dark .bg-red-50 { background-color: rgba(244, 63, 94, 0.12); }
+
+/* Glass card oscuro */
+.dark .glass-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(51, 65, 85, 0.5);
+}
+
+/* Inputs / selects / textareas */
+.dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']),
+.dark select,
+.dark textarea {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  border-color: rgba(51, 65, 85, 0.6);
+}
+
+.dark select option { background-color: #0f172a; color: #e2e8f0; }
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b;
+}
+
+/* Sombras más profundas en oscuro */
+.dark .shadow-sm,
+.dark .shadow,
+.dark .shadow-md,
+.dark .shadow-lg,
+.dark .shadow-xl,
+.dark .shadow-2xl {
+  --tw-shadow-color: rgba(2, 6, 23, 0.6);
+  --tw-shadow: var(--tw-shadow-colored);
+}
+
+/* Scrollbar fino (claro y oscuro) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.dark * {
+  scrollbar-color: #334155 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+.dark *::-webkit-scrollbar-thumb {
+  background-color: #334155;
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
+}
+
+/* ---------- c) Transición de tema suave (no universal) ---------- */
+body,
+.app-bg,
+input,
+select,
+textarea,
+button,
+a {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease, transform 0.15s ease;
+}
+
+/* ---------- d) Microinteracciones ---------- */
+.glass-card {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -16px rgba(15, 23, 42, 0.25);
+}
+
+.dark .glass-card:hover {
+  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* ---------- e) Entrada de vistas y stagger ---------- */
+.view-enter {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+.stagger-children > * {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+.stagger-children > *:nth-child(2) { animation-delay: 40ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 280ms; }
+
+/* ---------- f) Ocultar scrollbar (navs horizontales) ---------- */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- h) Focus visible accesible en ambos temas ---------- */
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.dark :focus-visible {
+  outline-color: #60a5fa;
+}
+
+/* ---------- i) Skeleton shimmer ---------- */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.dark .skeleton {
+  background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+  background-size: 200% 100%;
+}
+
+/* ---------- g) Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -58,10 +58,13 @@ import {
   loadPdfDeps
 } from './cotizadorHelpers';
 import { CotizadorContext } from './cotizadorContext';
+import useTheme from '../theme/useTheme';
+import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 
 export default function CotizadorPage({ routeView = 'cotizador' }) {
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const DEFAULT_PAGE_SIZE = 15;
@@ -4373,19 +4376,23 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // LOGIN
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-[#0b1220] relative overflow-hidden">
+      <div className="min-h-screen app-bg relative overflow-hidden">
         <div className="absolute -top-32 -left-32 h-[420px] w-[420px] rounded-full bg-cyan-400/20 blur-3xl" />
         <div className="absolute -bottom-40 right-0 h-[520px] w-[520px] rounded-full bg-amber-300/20 blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#1f2a44,transparent_55%)] opacity-60" />
-        <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
-          <div className="w-full max-w-5xl grid md:grid-cols-[1.1fr_0.9fr] rounded-[28px] overflow-hidden border border-white/15 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.9)]">
-            <div className="hidden md:flex flex-col justify-between p-10 text-white bg-white/5">
+        <div className="hidden dark:block absolute inset-0 bg-[radial-gradient(circle_at_top,#1f2a44,transparent_55%)] opacity-60" />
+        <div className="absolute top-4 right-4 z-20">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
+        <div className="relative z-10 min-h-screen flex items-center justify-center p-4 sm:p-6">
+          <div className="view-enter w-full max-w-5xl grid md:grid-cols-[1.1fr_0.9fr] rounded-[28px] overflow-hidden border border-slate-200/80 dark:border-white/15 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.9)]">
+            <div className="hidden md:flex flex-col justify-between p-10 text-slate-900 dark:text-white bg-white/40 dark:bg-white/5">
               <div>
-                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-28 w-28 object-contain" />
+                {/* Logo blanco-sobre-transparente: en claro se proyecta como silueta oscura */}
+                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-28 w-28 object-contain brightness-0 opacity-75 dark:brightness-100 dark:opacity-100" />
                 <p className="font-display text-2xl mt-4">myquote</p>
-                <p className="text-sm text-blue-200/70 mt-3">Cotización Axis / Qnap - Intcomex</p>
+                <p className="text-sm text-slate-500 dark:text-blue-200/70 mt-3">Cotización Axis / Qnap - Intcomex</p>
               </div>
-              <div className="space-y-3 text-sm text-blue-100/70">
+              <div className="space-y-3 text-sm text-slate-600 dark:text-blue-100/70">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
                   <span>Gestiona cotizaciones con trazabilidad y control comercial.</span>
@@ -4400,52 +4407,52 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               </div>
             </div>
-            <div className="p-8 sm:p-10 bg-white/10 backdrop-blur-2xl">
+            <div className="p-6 sm:p-10 bg-white/60 dark:bg-white/10 backdrop-blur-2xl">
               <div className="flex flex-col items-center gap-2 text-center mb-8">
-                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-24 w-24 object-contain md:hidden" />
-                <p className="text-blue-100/80 text-sm">Cotización Axis / Qnap - Intcomex</p>
-                <p className="text-blue-100/60 text-xs">Ingrese sus credenciales</p>
+                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-24 w-24 object-contain md:hidden brightness-0 opacity-75 dark:brightness-100 dark:opacity-100" />
+                <p className="text-slate-600 dark:text-blue-100/80 text-sm">Cotización Axis / Qnap - Intcomex</p>
+                <p className="text-slate-500 dark:text-blue-100/60 text-xs">Ingrese sus credenciales</p>
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-blue-100/80 mb-1">Usuario</label>
+                  <label className="block text-sm text-slate-600 dark:text-blue-100/80 mb-1">Usuario</label>
                   <input
                     type="text"
                     value={usuario}
                     onChange={e => setUsuario(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                    className="w-full px-4 py-3 bg-white/70 dark:bg-white/10 border border-slate-300/70 dark:border-white/20 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 dark:focus:ring-cyan-400/50 focus:border-cyan-500/50 transition"
                     placeholder="Usuario"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-blue-100/80 mb-1">Contraseña</label>
+                  <label className="block text-sm text-slate-600 dark:text-blue-100/80 mb-1">Contraseña</label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                      className="w-full px-4 py-3 bg-white/70 dark:bg-white/10 border border-slate-300/70 dark:border-white/20 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 dark:focus:ring-cyan-400/50 focus:border-cyan-500/50 transition"
                       placeholder="Contraseña"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-200/70 hover:text-white text-sm"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800 dark:text-blue-200/70 dark:hover:text-white text-sm"
                     >
                       {showPassword ? 'Ocultar' : 'Mostrar'}
                     </button>
                   </div>
                 </div>
                 {loginError && (
-                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-200 text-sm text-center">
+                  <div className="p-3 bg-red-500/10 dark:bg-red-500/20 border border-red-500/30 rounded-xl text-red-600 dark:text-red-200 text-sm text-center animate-fade-in">
                     {loginError}
                   </div>
                 )}
                 <button
                   onClick={handleLogin}
-                  className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-blue-600"
+                  className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-blue-600 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 transition"
                 >
                   Ingresar
                 </button>
@@ -4463,8 +4470,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return (
       <div className="min-h-screen bg-gray-100 p-4 print:bg-white">
         <div data-pdf-root="1" className="max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden print-area">
-          <div className="p-8 border-b bg-white">
-            <div className="flex items-center justify-between gap-4">
+          <div className="p-4 sm:p-8 border-b bg-white">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div style={{ width: '208px', height: '56px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
                 <img
                   src="/logo.png"
@@ -4479,7 +4486,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </div>
           </div>
-          <div className="p-4 bg-gray-50 border-b grid grid-cols-2 gap-2 text-sm">
+          <div className="p-4 bg-gray-50 border-b grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm break-words">
             <div><b>Nombre:</b> {cliente.nombre || 'N/A'}</div>
             <div><b>Empresa:</b> {cliente.empresa || 'N/A'}</div>
             <div><b>PID:</b> {cliente.pid || 'N/A'}</div>
@@ -4578,7 +4585,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
-    <div className="min-h-screen flex flex-col bg-[radial-gradient(1200px_circle_at_top_left,#e0f2fe,transparent_55%),radial-gradient(900px_circle_at_bottom_right,#fef3c7,transparent_60%)] bg-[#f7f4ef]">
+    <div className="min-h-screen flex flex-col app-bg">
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
@@ -4591,9 +4598,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </a>
       )}
       <div className="flex-1 flex flex-col">
-        <header className="bg-white/80 backdrop-blur-xl border-b border-white/60 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
+        <header className="bg-white/80 backdrop-blur-xl border-b border-white/60 dark:border-slate-800/60 sticky top-0 z-40">
+          <div className="max-w-7xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3 gap-y-2">
+            <div className="flex items-center gap-3 min-w-0">
               {user?.logo_url ? (
                 <img
                   src={user.logo_url}
@@ -4603,17 +4610,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               ) : (
                 <div className="w-12 h-12 rounded-xl bg-white/60 border border-white" />
               )}
-              <div>
+              <div className="min-w-0">
                 <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase">myquote</div>
-                <h1 className="text-lg md:text-xl font-display text-slate-900">Cotización Axis / Qnap - Intcomex</h1>
-                <p className="text-xs text-slate-500">Bienvenido, {user?.nombre || user?.usuario}</p>
+                <h1 className="text-base sm:text-lg md:text-xl font-display text-slate-900 truncate">Cotización Axis / Qnap - Intcomex</h1>
+                <p className="text-xs text-slate-500 truncate">Bienvenido, {user?.nombre || user?.usuario}</p>
               </div>
             </div>
-            <nav className="flex items-center gap-2 flex-wrap">
+            <nav className="flex items-center gap-1 max-w-full overflow-x-auto scrollbar-none">
               {canViewDashboard && (
                 <button
                   onClick={() => setCurrentView('dashboard')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                   aria-label="Ir al dashboard"
                 >
                   Dashboard
@@ -4623,13 +4630,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <>
                   <button
                     onClick={() => setCurrentView('ordenes')}
-                    className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                    className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'ordenes' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                   >
                     Ordenes Activas
                   </button>
                   <button
                     onClick={() => setCurrentView('compras')}
-                    className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                    className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                   >
                     Vista Compras
                   </button>
@@ -4638,7 +4645,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {!isAdmin && canViewCompras && (
                 <button
                   onClick={() => setCurrentView('compras')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'compras' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                 >
                   Vista Compras
                 </button>
@@ -4646,7 +4653,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {isFullAdmin && (
                 <button
                   onClick={() => setCurrentView('admin')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'admin' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'admin' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                 >
                   Listas de precio
                 </button>
@@ -4654,23 +4661,23 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {isFullAdmin && (
                 <button
                   onClick={() => setCurrentView('usuarios')}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'usuarios' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}
+                  className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'usuarios' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}
                 >
                   Gestión de usuarios
                 </button>
               )}
             {canViewCotizador && (
-              <button onClick={() => setCurrentView('cotizador')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+              <button onClick={() => setCurrentView('cotizador')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'cotizador' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
                 Cotizador {cotizacion.length > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded-full">{cotizacion.length}</span>}
               </button>
             )}
             {canViewStock && (
-              <button onClick={() => setCurrentView('stock')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+              <button onClick={() => setCurrentView('stock')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'stock' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
                 Stock disponible
               </button>
             )}
             {canViewHistorial && (
-              <button onClick={() => setCurrentView('historial')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+              <button onClick={() => setCurrentView('historial')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'historial' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
                 {isFullAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}
                 {isFullAdmin && historialCounts.registroPendientes > 0 && (
                   <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800">
@@ -4680,25 +4687,26 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </button>
             )}
             {canViewAccount && (
-              <button onClick={() => setCurrentView('cuenta')} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${currentView === 'cuenta' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70'}`}>
+              <button onClick={() => setCurrentView('cuenta')} className={`whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ${currentView === 'cuenta' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white/70 dark:hover:bg-white/10'}`}>
                 Mi cuenta
               </button>
             )}
-            <button onClick={handleLogout} className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-sm font-medium">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <button onClick={handleLogout} className="whitespace-nowrap shrink-0 px-2.5 sm:px-3 py-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl text-xs sm:text-sm font-medium">
               Salir
             </button>
             </nav>
           </div>
         </header>
 
-        <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto px-4 py-6`}>
+        <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto px-4 pt-6 ${!isAdmin ? 'pb-24' : 'pb-6'}`}>
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
           </Suspense>
         )}
         {currentView === 'stock' && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
               <div className="p-4 border-b bg-gray-50 flex items-center justify-between flex-wrap gap-2">
                 <div>
@@ -4748,7 +4756,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   Tip: puedes buscar por varias palabras, por ejemplo "Axis 03181".
                 </div>
               </div>
-              <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-6 py-6">
+              <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-3 py-4 sm:px-6 sm:py-6">
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                     <tr>
@@ -4810,7 +4818,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {currentView === 'usuarios' && isFullAdmin && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
               <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -4833,7 +4841,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={e => setEmpresaForm(f => ({ ...f, nombre: e.target.value }))}
                       className="px-3 py-2 border rounded-lg text-sm"
                     />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <label className="flex flex-col gap-1 text-[11px] text-gray-500">
                         Rol
                         <select
@@ -5428,7 +5436,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {currentView === 'admin' && isFullAdmin && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <h2 className="text-lg font-semibold text-gray-800 mb-3">Listas de precio</h2>
               <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -5470,7 +5478,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {showAddForm && (
                 <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
                   <h3 className="font-semibold mb-3">Nuevo Producto</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="px-3 py-2 border rounded-lg" />
                     <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="px-3 py-2 border rounded-lg" />
                     <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="px-3 py-2 border rounded-lg" />
@@ -5490,7 +5498,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Parametros de calculo</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div className="p-2 bg-slate-50 rounded-lg border">
                   <label className="text-xs text-gray-500">Inbound Freight</label>
                   <input
@@ -5654,7 +5662,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {currentView === 'historial' && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             {isAdmin && (
               <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
                 <div className="flex items-center justify-between flex-wrap gap-3">
@@ -5667,7 +5675,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                       <input
                         type="date"
                         value={funnelFrom}
@@ -5843,7 +5851,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="p-6 text-center text-gray-500">No hay cotizaciones guardadas.</div>
               ) : (
                 <div className="max-h-[60vh] overflow-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[860px] text-sm">
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="px-3 py-2 text-center">
@@ -6154,7 +6162,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {currentView === 'ordenes' && isFullAdmin && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-[220px]">
@@ -6432,7 +6440,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {currentView === 'compras' && canViewCompras && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-[220px]">
@@ -6610,8 +6618,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {showMissingBosModal && missingBos.length > 0 && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl overflow-hidden">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
                 <h3 className="font-semibold">BO no encontrados en OSO</h3>
                 <button
@@ -6675,8 +6683,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {deleteBoTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-md overflow-hidden">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
                 <h3 className="font-semibold">Eliminar BO {deleteBoTarget}</h3>
                 <button
@@ -6725,8 +6733,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {showOsoReportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
-            <div className="bg-white rounded-2xl shadow-lg w-[96vw] h-[90vh] overflow-hidden flex flex-col">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-lg w-[96vw] h-[90vh] overflow-hidden flex flex-col animate-scale-in">
               <div className="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-semibold">Informe de órdenes activas</h3>
@@ -7266,7 +7274,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </div>
 
         {currentView === 'cotizador' && (
-          <>
+          <div className="view-enter">
             <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
               <div>
                 <h2 className="text-2xl font-display text-slate-900">Cotización</h2>
@@ -7706,11 +7714,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </div>
           </div>
-          </>
+          </div>
         )}
 
         {currentView === 'cuenta' && canViewAccount && (
-          <div className="space-y-4">
+          <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
               <div className="p-4 border-b bg-gray-50">
                 <h3 className="font-semibold">Mi cuenta</h3>
@@ -7802,8 +7810,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {projectRegistroModal && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl overflow-hidden">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
                 <h3 className="font-semibold">Registro de proyecto</h3>
                 <button
@@ -7854,8 +7862,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {compraPreviewCot && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl overflow-hidden">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
                 <h3 className="font-semibold">Enviar a compras</h3>
                 <button onClick={() => setCompraPreviewCot(null)} className="text-gray-500 hover:text-gray-700">Cerrar</button>
