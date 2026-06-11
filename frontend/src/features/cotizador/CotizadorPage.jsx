@@ -12,293 +12,51 @@ import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAP
 import { queryClient } from '../../app/queryClient';
 import { queryKeys } from '../../app/queryKeys';
 
-const CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12, DEFAULT_GP: 0.15 };
-const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
-const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const STOCK_DELIVERY_SUFFIX = 'unidades disponible en entrega inmediata, salvo venta previa';
-
-const SESSION_STORAGE_KEY = 'activeSessionsByUser';
-const SESSION_ID_KEY = 'sessionId';
-const DEVICE_ID_KEY = 'deviceId';
-const SESSION_TTL_MS = 10 * 60 * 1000;
-const SESSION_HEARTBEAT_MS = 30 * 1000;
-
-const DEFAULT_AXIS_PARTNER = 'Partner Autorizado';
-const COTIZACION_ESTADOS = [
-  { value: 'enviada', label: 'Cotización Enviada', short: 'E' },
-  { value: 'revision', label: 'Cotización en Revisión', short: 'R' },
-  { value: 'rechazada', label: 'Cotización Rechazada', short: 'X' },
-  { value: 'aprobada', label: 'Cotización Aceptada', short: 'A' }
-];
-
-const safeJsonParse = (value, fallback) => {
-  try {
-    const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
-    return parsed;
-  } catch {
-    return fallback;
-  }
-};
-
-const safeJsonParseArray = (value, fallback = []) => {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const getUserKey = (user) => {
-  const raw = user?.id ?? user?.user_id ?? user?.usuario_id ?? user?.usuario ?? user?.username ?? user?.email ?? '';
-  return raw.toString().toLowerCase().trim();
-};
-
-const normalizeRole = (role) => (role || '').toString().toLowerCase();
-const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
-const canManageCotizadorStock = (role) => {
-  const normalized = normalizeRole(role);
-  return normalized === 'admin' || normalized === COTIZADOR_STOCK_ADMIN_ROLE;
-};
-const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
-const normalizeIntcomexProfile = (value) => {
-  const profile = normalizeText(value);
-  return profile === 'ventas' || profile === 'compras' ? profile : '';
-};
-const isIntcomexUser = (user) => normalizeText(user?.empresa) === 'intcomex';
-const getIntcomexProfile = (user) => normalizeIntcomexProfile(user?.intcomex_profile);
-const canAccessComprasView = (user) => {
-  const role = normalizeRole(user?.role);
-  if (role === 'admin') return true;
-  return isIntcomexUser(user) && getIntcomexProfile(user) === 'compras';
-};
-const isIntcomexVentas = (user) => isIntcomexUser(user) && getIntcomexProfile(user) === 'ventas';
-const canChangeOwnPartnerCategory = (user) => {
-  const role = normalizeRole(user?.role);
-  if (role === 'admin') return true;
-  return isIntcomexVentas(user);
-};
-
-const readSessionsByUser = () => safeJsonParse(localStorage.getItem(SESSION_STORAGE_KEY), {});
-
-const writeSessionsByUser = (data) => {
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
-};
-
-const getOrCreateDeviceId = () => {
-  const existing = localStorage.getItem(DEVICE_ID_KEY);
-  if (existing) return existing;
-  const generated = (crypto?.randomUUID?.() || `dev_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  localStorage.setItem(DEVICE_ID_KEY, generated);
-  return generated;
-};
-
-const getOrCreateSessionId = () => {
-  const existing = localStorage.getItem(SESSION_ID_KEY);
-  if (existing) return existing;
-  const generated = (crypto?.randomUUID?.() || `ses_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  localStorage.setItem(SESSION_ID_KEY, generated);
-  return generated;
-};
-
-const pruneSessions = (sessions, now = Date.now()) =>
-  (sessions || []).filter(s => s && s.id && s.lastSeen && (now - s.lastSeen) < SESSION_TTL_MS);
-
-const registerSessionForUser = (user) => {
-  const userKey = getUserKey(user);
-  if (!userKey) return { allowed: true };
-  const now = Date.now();
-  const sessionId = getOrCreateSessionId();
-  const deviceId = getOrCreateDeviceId();
-  const role = normalizeRole(user?.role);
-  const limit = role === 'admin' ? 2 : 1;
-
-  const allSessions = readSessionsByUser();
-  const currentList = pruneSessions(allSessions[userKey], now);
-  const existingIndex = currentList.findIndex(s => s.id === sessionId);
-
-  let nextList = [...currentList];
-  let kickedSessionId = null;
-
-  if (existingIndex >= 0) {
-    nextList[existingIndex] = {
-      ...nextList[existingIndex],
-      deviceId,
-      role,
-      lastSeen: now
-    };
-  } else {
-    if (nextList.length >= limit) {
-      nextList.sort((a, b) => (a.lastSeen || 0) - (b.lastSeen || 0));
-      const removed = nextList.shift();
-      kickedSessionId = removed?.id || null;
-    }
-    nextList.push({
-      id: sessionId,
-      deviceId,
-      role,
-      userAgent: navigator.userAgent,
-      startedAt: now,
-      lastSeen: now
-    });
-  }
-
-  allSessions[userKey] = nextList;
-  writeSessionsByUser(allSessions);
-
-  return { allowed: true, userKey, sessionId, kickedSessionId, limit };
-};
-
-const updateSessionHeartbeat = (user) => {
-  const userKey = getUserKey(user);
-  if (!userKey) return false;
-  const sessionId = localStorage.getItem(SESSION_ID_KEY);
-  if (!sessionId) return false;
-  const allSessions = readSessionsByUser();
-  const list = pruneSessions(allSessions[userKey]);
-  const index = list.findIndex(s => s.id === sessionId);
-  if (index === -1) return false;
-  list[index] = { ...list[index], lastSeen: Date.now() };
-  allSessions[userKey] = list;
-  writeSessionsByUser(allSessions);
-  return true;
-};
-
-const isSessionActive = (user) => {
-  const userKey = getUserKey(user);
-  if (!userKey) return true;
-  const sessionId = localStorage.getItem(SESSION_ID_KEY);
-  if (!sessionId) return false;
-  const allSessions = readSessionsByUser();
-  const list = pruneSessions(allSessions[userKey]);
-  return list.some(s => s.id === sessionId);
-};
-
-const clearSessionForUser = (user) => {
-  const userKey = getUserKey(user);
-  if (!userKey) return;
-  const sessionId = localStorage.getItem(SESSION_ID_KEY);
-  if (!sessionId) return;
-  const allSessions = readSessionsByUser();
-  const list = (allSessions[userKey] || []).filter(s => s.id !== sessionId);
-  if (list.length) {
-    allSessions[userKey] = list;
-  } else {
-    delete allSessions[userKey];
-  }
-  writeSessionsByUser(allSessions);
-};
-
-const calcularPrecioCliente = (precioDisty, gp = 0.15, params = CONSTANTS) => {
-  const costoXUS = precioDisty * params.INBOUND_FREIGHT;
-  const costoFinalXUS = costoXUS / params.IC;
-  const costoXCL = costoFinalXUS * (1 + params.INT);
-  return costoXCL / (1 - gp);
-};
-
-const formatCurrency = (v) => CURRENCY_FORMATTER.format(v);
-const formatDateTime = (value) => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString();
-};
-const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat('es-CL', { month: 'short', year: 'numeric' });
-const formatInvoiceMonthLabel = (monthKey) => {
-  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return monthKey || 'Sin mes';
-  const [year, month] = String(monthKey).split('-').map(Number);
-  const d = new Date(year, month - 1, 1);
-  return MONTH_LABEL_FORMATTER.format(d).replace('.', '');
-};
-
-const COLUMN_MAP = {
-  marca: ['marca', 'brand', 'fabricante'],
-  sku: ['sku', 'codigo', 'code', 'partnumber'],
-  mpn: ['mpn', 'model', 'modelo'],
-  desc: ['descripción', 'descripcion', 'description', 'producto', 'nombre'],
-  precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
-  gp: ['gp', 'margen', 'margin'],
-  tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
-};
-
-const findValue = (row, keys) => {
-  const rowKeys = Object.keys(row);
-  for (const key of keys) {
-    const found = rowKeys.find(k => k.toLowerCase().trim() === key.toLowerCase());
-    if (found && row[found] !== undefined && row[found] !== '') return row[found];
-  }
-  return null;
-};
-
-const parseGp = (value, fallback = CONSTANTS.DEFAULT_GP) => {
-  const parsed = parseFloat(value);
-  if (Number.isNaN(parsed)) return fallback;
-  return parsed > 1 ? parsed / 100 : parsed;
-};
-
-const normalizeLookupKey = (value) => String(value || '').trim().toLowerCase();
-
-const formatStockQuantity = (value) => {
-  if (value === undefined || value === null || value === '') return '';
-  const parsed = Number(value);
-  if (!Number.isNaN(parsed)) {
-    return Number.isInteger(parsed) ? String(parsed) : String(parsed);
-  }
-  return String(value).trim();
-};
-
-const normalizeSearchText = (value) => String(value || '').toLowerCase().trim();
-
-const buildSearchTokens = (value) =>
-  normalizeSearchText(value)
-    .split(/\s+/)
-    .filter(Boolean);
-
-let pdfDepsPromise = null;
-const loadPdfDeps = () => {
-  if (window?.html2canvas && window?.jspdf?.jsPDF) {
-    return Promise.resolve({ html2canvas: window.html2canvas, jsPDF: window.jspdf.jsPDF });
-  }
-  if (pdfDepsPromise) return pdfDepsPromise;
-  const loadScript = (src) => new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  pdfDepsPromise = (async () => {
-    await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
-    await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
-    if (!window?.html2canvas || !window?.jspdf?.jsPDF) {
-      throw new Error('No se pudo cargar el generador de PDF');
-    }
-    return { html2canvas: window.html2canvas, jsPDF: window.jspdf.jsPDF };
-  })();
-  return pdfDepsPromise;
-};
-
-const VIEW_TO_ROUTE = {
-  dashboard: '/dashboard',
-  cotizador: '/cotizador',
-  historial: '/historial',
-  usuarios: '/admin/usuarios',
-  ordenes: '/admin/ordenes',
-  login: '/login'
-};
-
-const ROUTE_TO_VIEW = {
-  '/dashboard': 'dashboard',
-  '/cotizador': 'cotizador',
-  '/historial': 'historial',
-  '/admin/usuarios': 'usuarios',
-  '/admin/ordenes': 'ordenes',
-  '/login': 'cotizador'
-};
-
-const ADMIN_VIEWS = new Set(['admin', 'usuarios', 'ordenes', 'compras']);
+import {
+  CONSTANTS,
+  AXIS_CONSTANTS,
+  STOCK_DELIVERY_SUFFIX,
+  SESSION_STORAGE_KEY,
+  SESSION_HEARTBEAT_MS,
+  MONTH_LABEL_FORMATTER,
+  DEFAULT_AXIS_PARTNER,
+  COTIZACION_ESTADOS,
+  COTIZADOR_STOCK_ADMIN_ROLE,
+  COLUMN_MAP,
+  VIEW_TO_ROUTE,
+  ROUTE_TO_VIEW,
+  ADMIN_VIEWS
+} from './cotizadorConstants';
+import {
+  safeJsonParse,
+  safeJsonParseArray,
+  normalizeRole,
+  canManageCotizadorStock,
+  normalizeText,
+  normalizeIntcomexProfile,
+  isIntcomexUser,
+  getIntcomexProfile,
+  canAccessComprasView,
+  isIntcomexVentas,
+  canChangeOwnPartnerCategory,
+  getOrCreateDeviceId,
+  getOrCreateSessionId,
+  registerSessionForUser,
+  updateSessionHeartbeat,
+  isSessionActive,
+  clearSessionForUser,
+  calcularPrecioCliente,
+  formatCurrency,
+  formatDateTime,
+  formatInvoiceMonthLabel,
+  findValue,
+  parseGp,
+  normalizeLookupKey,
+  formatStockQuantity,
+  normalizeSearchText,
+  buildSearchTokens,
+  loadPdfDeps
+} from './cotizadorHelpers';
 
 export default function CotizadorPage({ routeView = 'cotizador' }) {
   const navigate = useNavigate();
