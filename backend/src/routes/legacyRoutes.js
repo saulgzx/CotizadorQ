@@ -9,8 +9,6 @@ const PDFDocument = require('pdfkit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 require('dotenv').config();
 const { buildAuthMiddlewares } = require('../middlewares/auth');
 const {
@@ -571,42 +569,6 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient, isAxi
     reject(error);
   }
 });
-
-const resolvePdfExecutablePath = async () => {
-  const envCandidates = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.CHROME_BIN,
-    process.env.CHROMIUM_PATH
-  ]
-    .map(value => String(value || '').trim())
-    .filter(Boolean);
-  const systemCandidates = [
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome'
-  ];
-  const lambdaPath = await chromium.executablePath().catch(() => '');
-  const allCandidates = [...envCandidates, lambdaPath, ...systemCandidates]
-    .map(path => String(path || '').trim())
-    .filter(Boolean);
-
-  for (const path of allCandidates) {
-    if (fs.existsSync(path)) return path;
-  }
-  throw new Error('No Chrome executable found. Checked: ' + (allCandidates.join(', ') || 'none'));
-};
-
-const launchPdfBrowser = async () => {
-  chromium.setGraphicsMode = false;
-  const executablePath = await resolvePdfExecutablePath();
-  return puppeteer.launch({
-    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
-    defaultViewport: chromium.defaultViewport,
-    executablePath,
-    headless: true
-  });
-};
 
 const compactErrorForLog = (error) => ({
   message: error?.message || 'unknown error',
