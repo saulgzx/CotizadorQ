@@ -2,7 +2,12 @@
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
-import * as XLSX from 'xlsx';
+// xlsx (SheetJS) se carga bajo demanda para sacar ~400KB del bundle inicial.
+let _xlsxModulePromise = null;
+const getXLSX = () => {
+  if (!_xlsxModulePromise) _xlsxModulePromise = import('xlsx');
+  return _xlsxModulePromise;
+};
 import { authAPI, productosAPI, cotizacionesAPI, usuariosAPI, sesionesAPI, osoAPI, boMetaAPI, boLineMetaAPI, stockAPI } from '../../api';
 import { queryClient } from '../../app/queryClient';
 import { queryKeys } from '../../app/queryKeys';
@@ -1065,7 +1070,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     downloadPdfFromElement(element, `reporte-oso-${modeLabel}-${dateKey}`);
   };
 
-  const exportOsoReportExcel = () => {
+  const exportOsoReportExcel = async () => {
     const dateKey = getDateKey(new Date()) || 'export';
     const modeLabel = osoReportMode === 'proximas' ? 'proximas' : (osoReportMode === 'axis' ? 'axis' : 'empresa');
     let rows = [];
@@ -1169,6 +1174,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       alert('No hay datos para exportar.');
       return;
     }
+    const XLSX = await getXLSX();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Detalle');
     XLSX.writeFile(wb, `reporte-oso-${modeLabel}-${dateKey}.xlsx`);
@@ -1179,7 +1185,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     [filteredOsoOrders, axisDraft, intcomexDraft, boMeta, boDraft]
   );
 
-  const exportOsoReport = () => {
+  const exportOsoReport = async () => {
     const orders = filteredOsoOrders;
     if (!orders.length) {
       alert('No hay órdenes para exportar con los filtros actuales.');
@@ -1346,6 +1352,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }
     ];
 
+    const XLSX = await getXLSX();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Resumen');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mapToRows(customerMap, 'Cliente')), 'Por Cliente');
@@ -2107,6 +2114,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     reader.onload = async (evt) => {
       try {
         const data = evt.target.result;
+        const XLSX = await getXLSX();
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
@@ -2143,7 +2151,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     e.target.value = '';
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
     const headers = [{
       Marca: '',
       SKU: '',
@@ -2153,6 +2161,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       'GP (%)': '',
       'Tiempo Entrega': ''
     }];
+    const XLSX = await getXLSX();
     const worksheet = XLSX.utils.json_to_sheet(headers, { skipHeader: false });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Plantilla');
@@ -2696,7 +2705,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const exportCotizacionExcel = () => {
+  const exportCotizacionExcel = async () => {
     if (cotizacion.length === 0) {
       alert('No hay productos para exportar');
       return;
@@ -2724,6 +2733,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       ];
     });
     const totalRow = ['', '', '', '', 'TOTAL', '', totalCotizacion, ''];
+    const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([...headerRows, tableHeader, ...tableRows, [], totalRow]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Cotizacion');
@@ -2871,7 +2881,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const exportHistorialExcel = (cot) => {
+  const exportHistorialExcel = async (cot) => {
     const fechaKey = getDateKey(cot.created_at || new Date());
     const filenameBase = buildExportFilename(cot.created_at || new Date(), cot.cliente_telefono, cot.cliente_empresa);
     const headerRows = [
@@ -2893,13 +2903,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       item.tiempo_entrega
     ]));
     const totalRow = ['', '', '', '', 'TOTAL', '', cot.total || 0, ''];
+    const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([...headerRows, tableHeader, ...tableRows, [], totalRow]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Cotizacion');
     XLSX.writeFile(wb, `${filenameBase}.xlsx`);
   };
 
-  const exportStockExcel = () => {
+  const exportStockExcel = async () => {
     const rows = filteredStockCatalog.map(item => ([
       item.brand || '',
       item.name || '',
@@ -2910,6 +2921,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       item.imageUrl || ''
     ]));
     const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Cantidad', 'Origen', 'Imagen'];
+    const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Stock');
@@ -2928,6 +2940,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     event.target.value = '';
     try {
       const buffer = await file.arrayBuffer();
+      const XLSX = await getXLSX();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
