@@ -336,6 +336,20 @@ button:active:not(:disabled) {
   background-size: 200% 100%;
 }
 
+/* ---------- l) Pin de riesgo pulsante (mapa de conexiones) ---------- */
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.9; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Los popups de Leaflet heredan el tema oscuro */
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
 /* ---------- k) Filas de tabla con hover suave ---------- */
 tbody tr {
   transition: background-color 0.15s ease;

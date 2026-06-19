@@ -1460,6 +1460,17 @@ const initDB = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS login_logs_user_idx ON login_logs(user_id, created_at);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS login_logs_usuario_idx ON login_logs(usuario, created_at);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS login_logs_ip_idx ON login_logs(ip_address, created_at);`);
+
+    // Geolocalización aproximada por IP (mapa de conexiones y detección de uso compartido).
+    for (const tabla of ['sesiones', 'login_logs']) {
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_country VARCHAR(80);`);
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_country_code VARCHAR(4);`);
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_city VARCHAR(120);`);
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_lat DECIMAL(9,6);`);
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_lon DECIMAL(9,6);`);
+      await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_isp VARCHAR(160);`);
+    }
+
     await pool.query(`UPDATE usuarios SET gp_qnap = gp WHERE gp_qnap IS NULL;`);
     await pool.query(`UPDATE usuarios SET gp_axis = gp WHERE gp_axis IS NULL;`);
 
@@ -1486,15 +1497,123 @@ const getSessionHeaders = (req) => ({
   deviceId: req.headers['x-device-id'] || req.headers['x-deviceid']
 });
 
+// ==================== GEOLOCALIZACIÓN POR IP ====================
+// Resuelve IP -> país/ciudad/coordenadas vía servicio externo gratuito (ipwho.is).
+// Cacheado por IP, con timeout y omisión de IPs privadas/locales. Configurable por env:
+//   GEO_ENABLED=false desactiva la función; GEO_API_TIMEOUT_MS ajusta el timeout.
+const GEO_ENABLED = String(process.env.GEO_ENABLED || 'true').toLowerCase() !== 'false';
+const GEO_API_TIMEOUT_MS = Math.max(1000, parseInt(process.env.GEO_API_TIMEOUT_MS || '2500', 10) || 2500);
+const GEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GEO_CACHE_MAX = 5000;
+const geoCache = new Map();
+const geoInflight = new Map();
+
+// Guarda en caché con tope de tamaño (evicción FIFO) para evitar crecimiento ilimitado.
+const setGeoCache = (ip, value, ttlMs) => {
+  if (geoCache.size >= GEO_CACHE_MAX) {
+    const oldest = geoCache.keys().next().value;
+    if (oldest !== undefined) geoCache.delete(oldest);
+  }
+  geoCache.set(ip, { value, expiresAt: Date.now() + ttlMs });
+};
+
+const normalizeIpForGeo = (ip) => {
+  let value = String(ip || '').trim();
+  if (!value) return '';
+  if (value.startsWith('::ffff:')) value = value.slice(7); // IPv4 mapeada en IPv6
+  return value;
+};
+
+const isPrivateOrLocalIp = (ip) => {
+  if (!ip) return true;
+  if (ip === '::1' || ip === '127.0.0.1' || ip.startsWith('127.') || ip.toLowerCase() === 'localhost') return true;
+  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+  const m = ip.match(/^172\.(\d+)\./);
+  if (m) {
+    const second = Number(m[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (ip.startsWith('fc') || ip.startsWith('fd') || ip.startsWith('fe80')) return true; // IPv6 privadas/link-local
+  return false;
+};
+
+const resolveGeo = (rawIp) => {
+  if (!GEO_ENABLED) return Promise.resolve(null);
+  const ip = normalizeIpForGeo(rawIp);
+  if (!ip || isPrivateOrLocalIp(ip)) return Promise.resolve(null);
+
+  const cached = geoCache.get(ip);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+
+  // Dedup de llamadas concurrentes: una sola petición externa por IP en vuelo.
+  if (geoInflight.has(ip)) return geoInflight.get(ip);
+
+  const promise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GEO_API_TIMEOUT_MS);
+    try {
+      const resp = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, { signal: controller.signal });
+      if (!resp.ok) throw new Error(`geo http ${resp.status}`);
+      const data = await resp.json();
+      if (!data || data.success === false) throw new Error(data?.message || 'geo lookup failed');
+      const value = {
+        country: data.country || null,
+        countryCode: data.country_code || null,
+        city: data.city || null,
+        lat: Number.isFinite(Number(data.latitude)) ? Number(data.latitude) : null,
+        lon: Number.isFinite(Number(data.longitude)) ? Number(data.longitude) : null,
+        isp: data.connection?.isp || data.connection?.org || null
+      };
+      setGeoCache(ip, value, GEO_CACHE_TTL_MS);
+      return value;
+    } catch (error) {
+      // Cachea el fallo por un rato corto para no martillar el servicio.
+      setGeoCache(ip, null, 5 * 60 * 1000);
+      logger.warn({ event: 'geo_lookup_failed', message: error.message }, 'No se pudo geolocalizar la IP');
+      return null;
+    } finally {
+      clearTimeout(timer);
+      geoInflight.delete(ip);
+    }
+  })();
+  geoInflight.set(ip, promise);
+  return promise;
+};
+
+// Enriquecimiento asíncrono (fire-and-forget): nunca bloquea el camino crítico de login.
+const enrichLoginLogGeo = (logId, ip) => {
+  if (!logId) return;
+  resolveGeo(ip).then((geo) => {
+    if (!geo) return;
+    pool.query(
+      `UPDATE login_logs SET geo_country=$2, geo_country_code=$3, geo_city=$4, geo_lat=$5, geo_lon=$6, geo_isp=$7 WHERE id=$1`,
+      [logId, geo.country || null, geo.countryCode || null, geo.city || null, geo.lat ?? null, geo.lon ?? null, geo.isp || null]
+    ).catch(() => {});
+  }).catch(() => {});
+};
+
+const enrichSessionGeo = (userId, sessionId, ip) => {
+  if (!userId || !sessionId) return;
+  resolveGeo(ip).then((geo) => {
+    if (!geo) return;
+    pool.query(
+      `UPDATE sesiones SET geo_country=$3, geo_country_code=$4, geo_city=$5, geo_lat=$6, geo_lon=$7, geo_isp=$8 WHERE user_id=$1 AND session_id=$2`,
+      [userId, sessionId, geo.country || null, geo.countryCode || null, geo.city || null, geo.lat ?? null, geo.lon ?? null, geo.isp || null]
+    ).catch(() => {});
+  }).catch(() => {});
+};
+
 const recordLoginAttempt = async ({ userId, usuario, success, req, sessionId, deviceId }) => {
   try {
     const ip = getRequestIp(req);
     const userAgent = req.headers['user-agent'] || '';
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO login_logs (user_id, usuario, success, ip_address, user_agent, device_id, session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [userId || null, usuario || null, Boolean(success), ip || null, userAgent || null, deviceId || null, sessionId || null]
     );
+    // Geolocalización en segundo plano: no bloquea la respuesta de login.
+    enrichLoginLogGeo(result.rows[0]?.id, ip);
   } catch (error) {
     console.error('Error registrando login:', error);
   }
@@ -1521,6 +1640,7 @@ const upsertSession = async (user, req) => {
        WHERE id = $4`,
       [deviceId || null, ip || null, userAgent || null, existing.rows[0].id]
     );
+    enrichSessionGeo(user.id, sessionId, ip);
     return { sessionId, revokedSessions: [] };
   }
 
@@ -1545,6 +1665,7 @@ const upsertSession = async (user, req) => {
     [user.id, sessionId, deviceId || null, ip || null, userAgent || null]
   );
 
+  enrichSessionGeo(user.id, sessionId, ip);
   return { sessionId, revokedSessions };
 };
 
@@ -1788,6 +1909,174 @@ app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, asy
     res.json({ ok: true, session_id: result.rows[0].session_id });
   } catch (error) {
     console.error('Error revocando sesi?n:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// Distancia entre dos puntos geográficos en km (haversine).
+const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// SEGURIDAD - Mapa de conexiones activas + detección de uso compartido (admin)
+app.get('/api/security/connections', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const sessionsResult = await pool.query(
+      `SELECT s.id, s.session_id, s.device_id, s.ip_address, s.user_agent, s.started_at, s.last_seen,
+              s.geo_country, s.geo_country_code, s.geo_city, s.geo_lat, s.geo_lon, s.geo_isp,
+              u.id AS user_id, u.usuario, u.nombre, u.empresa, u.role
+       FROM sesiones s
+       JOIN usuarios u ON u.id = s.user_id
+       WHERE s.revoked = false
+         AND s.last_seen >= (
+           CASE WHEN u.role = 'admin' THEN NOW() - ($1 || ' minutes')::interval
+                ELSE NOW() - ($2 || ' minutes')::interval END
+         )
+       ORDER BY s.last_seen DESC`,
+      [ADMIN_SESSION_TTL_MIN, SESSION_TTL_MIN]
+    );
+
+    // Enriquecer sesiones legacy sin geo: en paralelo y con tope, para no encadenar
+    // N llamadas externas en serie dentro del request del admin.
+    const missingGeo = sessionsResult.rows
+      .filter(s => s.geo_lat == null && !isPrivateOrLocalIp(normalizeIpForGeo(s.ip_address)))
+      .slice(0, 15);
+    await Promise.all(missingGeo.map(async (s) => {
+      const geo = await resolveGeo(s.ip_address);
+      if (!geo) return;
+      s.geo_country = geo.country;
+      s.geo_country_code = geo.countryCode;
+      s.geo_city = geo.city;
+      s.geo_lat = geo.lat;
+      s.geo_lon = geo.lon;
+      s.geo_isp = geo.isp;
+      pool.query(
+        `UPDATE sesiones SET geo_country=$2, geo_country_code=$3, geo_city=$4, geo_lat=$5, geo_lon=$6, geo_isp=$7 WHERE id=$1`,
+        [s.id, geo.country, geo.countryCode, geo.city, geo.lat, geo.lon, geo.isp]
+      ).catch(() => {});
+    }));
+
+    const sessions = sessionsResult.rows.map(s => ({
+      session_id: s.session_id,
+      user_id: s.user_id,
+      usuario: s.usuario,
+      nombre: s.nombre,
+      empresa: s.empresa,
+      role: s.role,
+      ip_address: s.ip_address,
+      started_at: s.started_at,
+      last_seen: s.last_seen,
+      country: s.geo_country,
+      country_code: s.geo_country_code,
+      city: s.geo_city,
+      lat: s.geo_lat != null ? Number(s.geo_lat) : null,
+      lon: s.geo_lon != null ? Number(s.geo_lon) : null,
+      isp: s.geo_isp
+    }));
+
+    // Señal 1: sesiones activas concurrentes del mismo usuario desde distinta ciudad/país.
+    const byUser = new Map();
+    sessions.forEach(s => {
+      if (!byUser.has(s.user_id)) byUser.set(s.user_id, []);
+      byUser.get(s.user_id).push(s);
+    });
+
+    // Señal 2: historial de logins exitosos últimos 7 días (multi-ubicación / viaje imposible).
+    const logsResult = await pool.query(
+      `SELECT user_id, usuario, ip_address, geo_country, geo_city, geo_lat, geo_lon, geo_isp, created_at
+       FROM login_logs
+       WHERE success = true AND user_id IS NOT NULL
+         AND created_at >= NOW() - INTERVAL '7 days'
+         AND geo_lat IS NOT NULL
+       ORDER BY user_id, created_at ASC`
+    );
+    const logsByUser = new Map();
+    logsResult.rows.forEach(r => {
+      if (!logsByUser.has(r.user_id)) logsByUser.set(r.user_id, []);
+      logsByUser.get(r.user_id).push(r);
+    });
+
+    const alerts = [];
+    const flaggedUserIds = new Set();
+    const allUserIds = new Set([...byUser.keys(), ...logsByUser.keys()]);
+
+    for (const userId of allUserIds) {
+      const reasons = [];
+      const locations = new Map();
+      const addLoc = (country, city, lat, lon) => {
+        const key = `${country || '?'}|${city || '?'}`;
+        if (!locations.has(key)) locations.set(key, { country, city, lat, lon });
+      };
+
+      const activeForUser = byUser.get(userId) || [];
+      const usuario = activeForUser[0]?.usuario || logsByUser.get(userId)?.[0]?.usuario || `user ${userId}`;
+      activeForUser.forEach(s => { if (s.lat != null) addLoc(s.country, s.city, s.lat, s.lon); });
+
+      // Señal A (sobre todo para admins, que pueden tener 2 sesiones activas):
+      // sesiones activas simultáneas desde distinta ciudad.
+      const activeCities = new Set(activeForUser.filter(s => s.city).map(s => `${s.country}|${s.city}`));
+      if (activeForUser.length >= 2 && activeCities.size >= 2) {
+        reasons.push('Sesiones activas simultáneas desde distinta ciudad');
+      }
+
+      const logs = logsByUser.get(userId) || [];
+      logs.forEach(l => addLoc(l.geo_country, l.geo_city, Number(l.geo_lat), Number(l.geo_lon)));
+
+      // Señal B: múltiples ciudades en una ventana corta (24h). Es la señal útil para
+      // clientes (cuyas sesiones viejas se revocan), sin penalizar viajes esporádicos en 7 días.
+      const dayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
+      const recentCities = new Set(
+        logs.filter(l => l.geo_city && new Date(l.created_at).getTime() >= dayAgoMs)
+          .map(l => `${l.geo_country}|${l.geo_city}`)
+      );
+      if (recentCities.size >= 2) {
+        reasons.push(`Logins desde ${recentCities.size} ciudades distintas en 24h`);
+      }
+
+      // Señal C: viaje imposible entre dos logins consecutivos (> 800 km/h).
+      // Omite pares del mismo ISP (probable reasignación de IP móvil/CGNAT) y exige > 500 km
+      // para reducir falsos positivos por imprecisión de geo-IP.
+      for (let i = 1; i < logs.length; i++) {
+        const a = logs[i - 1];
+        const b = logs[i];
+        if (a.geo_isp && b.geo_isp && a.geo_isp === b.geo_isp) continue;
+        const km = haversineKm(Number(a.geo_lat), Number(a.geo_lon), Number(b.geo_lat), Number(b.geo_lon));
+        const minutes = Math.abs(new Date(b.created_at) - new Date(a.created_at)) / 60000;
+        const hours = minutes / 60;
+        if (km > 500 && (minutes < 3 || km / Math.max(hours, 1 / 60) > 800)) {
+          const tiempo = minutes < 1 ? '<1 min' : `${Math.round(minutes)} min`;
+          reasons.push(`Viaje imposible: ${Math.round(km)} km en ${tiempo} (${a.geo_city || a.geo_country} → ${b.geo_city || b.geo_country})`);
+          break;
+        }
+      }
+
+      if (reasons.length > 0) {
+        flaggedUserIds.add(userId);
+        alerts.push({
+          user_id: userId,
+          usuario,
+          reasons: [...new Set(reasons)],
+          locations: [...locations.values()]
+        });
+      }
+    }
+
+    sessions.forEach(s => { s.shared_risk = flaggedUserIds.has(s.user_id); });
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      geo_enabled: GEO_ENABLED,
+      sessions,
+      alerts
+    });
+  } catch (error) {
+    logError(req, error, 'security_connections_failed');
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

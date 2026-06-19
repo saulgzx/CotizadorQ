@@ -474,6 +474,11 @@ export const sesionesAPI = {
     }
     return response.json().catch(() => ({}));
   },
+  getConnections: async () => {
+    const response = await fetchWithAuth('/api/security/connections');
+    if (!response.ok) throw new Error('Error obteniendo mapa de conexiones');
+    return response.json();
+  },
 };
 
 

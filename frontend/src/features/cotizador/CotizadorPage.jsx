@@ -62,6 +62,7 @@ import useTheme from '../theme/useTheme';
 import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
+const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
 
 const NAV_ICON_PATHS = {
   home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
@@ -5670,6 +5671,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
               </div>
             </div>
+            <Suspense fallback={<div className="glass-card rounded-2xl border border-white/70 p-4 text-sm text-slate-500">Cargando mapa…</div>}>
+              <ConnectionsMap />
+            </Suspense>
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-gray-800">Sesiones activas</h2>
