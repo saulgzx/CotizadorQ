@@ -2178,20 +2178,25 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
     // o servicio de geo bloqueado). Es admin-only.
     const detectedIp = getRequestIp(req);
     const xff = req.headers['x-forwarded-for'] || null;
-    const xffFirst = xff ? String(xff).split(',')[0].trim() : null;
     const detectedPrivate = isPrivateOrLocalIp(normalizeIpForGeo(detectedIp));
     const detectedGeo = await resolveGeo(detectedIp);
-    let xffFirstGeo = null;
-    if (detectedPrivate && xffFirst && !isPrivateOrLocalIp(normalizeIpForGeo(xffFirst))) {
-      xffFirstGeo = await resolveGeo(xffFirst);
-    }
+
+    // Geolocaliza cada salto de la cadena X-Forwarded-For. Si aparece una IP de Chile antes
+    // del datacenter, hay un CDN/proxy delante y se corrige subiendo TRUST_PROXY; si la única
+    // IP pública es la del datacenter, es la salida real del cliente (VPN).
+    const chainIps = (xff ? String(xff).split(',') : []).map(s => s.trim()).filter(Boolean).slice(0, 6);
+    const forwardedChain = await Promise.all(chainIps.map(async (ip) => {
+      const priv = isPrivateOrLocalIp(normalizeIpForGeo(ip));
+      const geo = priv ? null : await resolveGeo(ip);
+      return { ip, private: priv, geo: geo ? `${geo.city || '?'}, ${geo.country || '?'}` : null };
+    }));
+
     const debug = {
       detected_ip: detectedIp || null,
       detected_ip_private: detectedPrivate,
       detected_ip_geo: detectedGeo ? `${detectedGeo.city || '?'}, ${detectedGeo.country || '?'}` : null,
       x_forwarded_for: xff,
-      x_forwarded_for_first: xffFirst,
-      x_forwarded_for_first_geo: xffFirstGeo ? `${xffFirstGeo.city || '?'}, ${xffFirstGeo.country || '?'}` : null,
+      forwarded_chain: forwardedChain,
       trust_proxy: String(app.get('trust proxy')),
       last_geo_error: lastGeoError,
       last_geo_error_at: lastGeoErrorAt,

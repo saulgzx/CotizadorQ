@@ -156,6 +156,34 @@ export default function ConnectionsMap() {
         </button>
       </div>
 
+      {data?.debug && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-slate-500 hover:text-slate-700 dark:text-slate-400">Diagnóstico de conexión (admin)</summary>
+          <div className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 p-2 space-y-1 text-slate-600 dark:text-slate-300">
+            <div>
+              El servidor ve tu petición como <span className="font-mono">{data.debug.detected_ip || '—'}</span>
+              {data.debug.detected_ip_geo ? <> → <b>{data.debug.detected_ip_geo}</b></> : ' (sin geo)'}.
+            </div>
+            {Array.isArray(data.debug.forwarded_chain) && data.debug.forwarded_chain.length > 0 && (
+              <div>
+                <div className="text-slate-400">Cadena X-Forwarded-For (cliente → proxies):</div>
+                <ol className="ml-4 list-decimal">
+                  {data.debug.forwarded_chain.map((h, i) => (
+                    <li key={i}>
+                      <span className="font-mono">{h.ip}</span> — {h.private ? 'IP interna' : (h.geo || 'sin geo')}
+                    </li>
+                  ))}
+                </ol>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Si arriba aparece una IP de tu ciudad real antes del datacenter, hay un proxy/CDN delante: poné <span className="font-mono">TRUST_PROXY=true</span> en el backend. Si la única IP pública es la del datacenter, estás detrás de un VPN (tus usuarios sin VPN aparecerán bien).
+                </div>
+              </div>
+            )}
+            <div className="text-slate-400">trust proxy actual: <span className="font-mono">{data.debug.trust_proxy}</span></div>
+          </div>
+        </details>
+      )}
+
       {error && <div className="mt-2 text-sm text-rose-600">{error}</div>}
 
       {alerts.length > 0 && (
@@ -201,14 +229,17 @@ export default function ConnectionsMap() {
                   <p className="mt-1">
                     Registra tu conexión como <span className="font-mono">{d.detected_ip || '—'}</span> (IP interna del proxy), por eso no puede geolocalizar.
                   </p>
-                  {d.x_forwarded_for_first_geo ? (
-                    <p className="mt-1">
-                      Tu IP pública real (<span className="font-mono">{d.x_forwarded_for_first}</span>) sí geolocaliza en <b>{d.x_forwarded_for_first_geo}</b>.
-                      Solución: poné <span className="font-mono">TRUST_PROXY=true</span> en el backend y volvé a iniciar sesión.
-                    </p>
-                  ) : (
-                    <p className="mt-1">Ajustá <span className="font-mono">TRUST_PROXY</span> en el backend (probá <span className="font-mono">true</span>) y reiniciá sesión.</p>
-                  )}
+                  {(() => {
+                    const candidate = (d.forwarded_chain || []).find(h => !h.private && h.geo);
+                    return candidate ? (
+                      <p className="mt-1">
+                        Tu IP pública real (<span className="font-mono">{candidate.ip}</span>) sí geolocaliza en <b>{candidate.geo}</b>.
+                        Solución: poné <span className="font-mono">TRUST_PROXY=true</span> en el backend y volvé a iniciar sesión.
+                      </p>
+                    ) : (
+                      <p className="mt-1">Ajustá <span className="font-mono">TRUST_PROXY</span> en el backend (probá <span className="font-mono">true</span>) y reiniciá sesión.</p>
+                    );
+                  })()}
                 </div>
               );
             }
