@@ -1987,13 +1987,13 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
       byUser.get(s.user_id).push(s);
     });
 
-    // Señal 2: historial de logins exitosos últimos 7 días (multi-ubicación / viaje imposible).
+    // Señal 2: historial de logins exitosos últimos 7 días. Incluye device_id/IP/ISP
+    // para detectar uso compartido por dispositivo+red (funciona aunque la geo sea la misma ciudad).
     const logsResult = await pool.query(
-      `SELECT user_id, usuario, ip_address, geo_country, geo_city, geo_lat, geo_lon, geo_isp, created_at
+      `SELECT user_id, usuario, ip_address, device_id, geo_country, geo_city, geo_lat, geo_lon, geo_isp, created_at
        FROM login_logs
        WHERE success = true AND user_id IS NOT NULL
          AND created_at >= NOW() - INTERVAL '7 days'
-         AND geo_lat IS NOT NULL
        ORDER BY user_id, created_at ASC`
     );
     const logsByUser = new Map();
@@ -2026,13 +2026,45 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
       }
 
       const logs = logsByUser.get(userId) || [];
-      logs.forEach(l => addLoc(l.geo_country, l.geo_city, Number(l.geo_lat), Number(l.geo_lon)));
-
-      // Señal B: múltiples ciudades en una ventana corta (24h). Es la señal útil para
-      // clientes (cuyas sesiones viejas se revocan), sin penalizar viajes esporádicos en 7 días.
       const dayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
+      const logs24h = logs.filter(l => new Date(l.created_at).getTime() >= dayAgoMs);
+      const geoLogs = logs.filter(l => l.geo_lat != null);
+      geoLogs.forEach(l => addLoc(l.geo_country, l.geo_city, Number(l.geo_lat), Number(l.geo_lon)));
+
+      // === Señales por DISPOSITIVO + RED (las útiles cuando todos se conectan desde la
+      // misma ciudad; la geo por IP no distingue comunas). ===
+
+      // Señal D: una misma cuenta usada desde varios dispositivos Y varias redes/IPs en 24h.
+      // El doble requisito (device + red) evita falsos positivos de quien limpia el navegador
+      // (nuevo device_id pero misma IP/ISP) o cambia de WiFi a datos (misma persona).
+      const devices = new Set(logs24h.map(l => l.device_id).filter(Boolean));
+      const ips = new Set(logs24h.map(l => l.ip_address).filter(Boolean));
+      const isps = new Set(logs24h.map(l => l.geo_isp).filter(Boolean));
+      if (devices.size >= 2 && (isps.size >= 2 || ips.size >= 3)) {
+        const parts = [`${devices.size} dispositivos`];
+        if (isps.size >= 2) parts.push(`${isps.size} redes`);
+        if (ips.size >= 3) parts.push(`${ips.size} IPs`);
+        reasons.push(`${parts.join(' / ')} distintos en 24h`);
+      }
+
+      // Señal E: ping-pong. Como el límite es de 1 sesión, dos personas usando la misma
+      // cuenta se expulsan entre sí y los logins rebotan entre dispositivos. Varios cambios
+      // alternados = uso concurrente real (la huella clásica de cuenta compartida).
+      const devLogs = logs24h.filter(l => l.device_id);
+      let deviceSwitches = 0;
+      for (let i = 1; i < devLogs.length; i++) {
+        if (devLogs[i].device_id !== devLogs[i - 1].device_id) deviceSwitches += 1;
+      }
+      if (devices.size >= 2 && deviceSwitches >= 3) {
+        reasons.push(`Uso concurrente: ${deviceSwitches} cambios de dispositivo alternados en 24h`);
+      }
+
+      // === Señales GEOGRÁFICAS (sirven sobre todo para cazar el OUTLIER: una conexión
+      // desde otra ciudad/país). Rara vez disparan si todos están en la misma ciudad. ===
+
+      // Señal B: múltiples ciudades distintas en 24h.
       const recentCities = new Set(
-        logs.filter(l => l.geo_city && new Date(l.created_at).getTime() >= dayAgoMs)
+        geoLogs.filter(l => l.geo_city && new Date(l.created_at).getTime() >= dayAgoMs)
           .map(l => `${l.geo_country}|${l.geo_city}`)
       );
       if (recentCities.size >= 2) {
@@ -2042,9 +2074,9 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
       // Señal C: viaje imposible entre dos logins consecutivos (> 800 km/h).
       // Omite pares del mismo ISP (probable reasignación de IP móvil/CGNAT) y exige > 500 km
       // para reducir falsos positivos por imprecisión de geo-IP.
-      for (let i = 1; i < logs.length; i++) {
-        const a = logs[i - 1];
-        const b = logs[i];
+      for (let i = 1; i < geoLogs.length; i++) {
+        const a = geoLogs[i - 1];
+        const b = geoLogs[i];
         if (a.geo_isp && b.geo_isp && a.geo_isp === b.geo_isp) continue;
         const km = haversineKm(Number(a.geo_lat), Number(a.geo_lon), Number(b.geo_lat), Number(b.geo_lon));
         const minutes = Math.abs(new Date(b.created_at) - new Date(a.created_at)) / 60000;

@@ -91,7 +91,22 @@ export default function ConnectionsMap() {
     group.clearLayers();
     const located = (data?.sessions || []).filter(s => s.lat != null && s.lon != null);
     const bounds = [];
+    // La geo por IP ubica a todos en la misma ciudad; separamos visualmente los pines que
+    // coinciden en coordenadas con un pequeño desplazamiento en círculo (jitter), para no
+    // apilarlos en uno solo. El popup conserva la ciudad/IP/ISP reales.
+    const seenCoords = new Map();
     located.forEach(s => {
+      const key = `${s.lat.toFixed(3)},${s.lon.toFixed(3)}`;
+      const n = seenCoords.get(key) || 0;
+      seenCoords.set(key, n + 1);
+      let lat = s.lat;
+      let lon = s.lon;
+      if (n > 0) {
+        const angle = (n % 8) * (Math.PI / 4);
+        const radius = 0.018 * Math.ceil(n / 8);
+        lat += radius * Math.cos(angle);
+        lon += radius * Math.sin(angle);
+      }
       const popup = `
         <div style="min-width:180px;font-size:12px;line-height:1.4">
           <div style="font-weight:700">${escapeHtml(s.nombre || s.usuario)}</div>
@@ -101,8 +116,8 @@ export default function ConnectionsMap() {
           <div style="color:#64748b">Última actividad: ${escapeHtml(formatDateTime(s.last_seen))}</div>
           ${s.shared_risk ? '<div style="margin-top:4px;color:#dc2626;font-weight:600">⚠ Posible uso compartido</div>' : ''}
         </div>`;
-      L.marker([s.lat, s.lon], { icon: pinIcon(s.shared_risk) }).bindPopup(popup).addTo(group);
-      bounds.push([s.lat, s.lon]);
+      L.marker([lat, lon], { icon: pinIcon(s.shared_risk) }).bindPopup(popup).addTo(group);
+      bounds.push([lat, lon]);
     });
     // Encuadrar solo en la primera carga con datos; refrescar luego no descarta el
     // pan/zoom manual que el admin haya hecho sobre el mapa.
@@ -126,8 +141,11 @@ export default function ConnectionsMap() {
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Mapa de conexiones</h2>
           <p className="text-xs text-slate-500">
-            Ubicación aproximada por IP · {located.length} de {sessions.length} sesiones localizadas
+            Ubicación aproximada por IP (nivel ciudad) · {located.length} de {sessions.length} sesiones localizadas
             {data && data.geo_enabled === false && ' · geolocalización desactivada'}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            El mapa sirve para detectar conexiones de otra ciudad/país. El uso compartido dentro de la misma ciudad se detecta por dispositivo y red (ver alertas).
           </p>
         </div>
         <button
