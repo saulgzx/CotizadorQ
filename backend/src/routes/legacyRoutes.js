@@ -1481,6 +1481,10 @@ const initDB = async () => {
       await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_lon DECIMAL(9,6);`);
       await pool.query(`ALTER TABLE ${tabla} ADD COLUMN IF NOT EXISTS geo_isp VARCHAR(160);`);
     }
+    // Ubicación GPS del navegador (consentida por el usuario) + origen de la geo.
+    await pool.query(`ALTER TABLE sesiones ADD COLUMN IF NOT EXISTS geo_source VARCHAR(10);`);
+    await pool.query(`ALTER TABLE sesiones ADD COLUMN IF NOT EXISTS geo_accuracy INTEGER;`);
+    await pool.query(`ALTER TABLE sesiones ADD COLUMN IF NOT EXISTS location_consent_at TIMESTAMP;`);
 
     await pool.query(`UPDATE usuarios SET gp_qnap = gp WHERE gp_qnap IS NULL;`);
     await pool.query(`UPDATE usuarios SET gp_axis = gp WHERE gp_axis IS NULL;`);
@@ -2001,7 +2005,7 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
   try {
     const sessionsResult = await pool.query(
       `SELECT s.id, s.session_id, s.device_id, s.ip_address, s.user_agent, s.started_at, s.last_seen,
-              s.geo_country, s.geo_country_code, s.geo_city, s.geo_lat, s.geo_lon, s.geo_isp,
+              s.geo_country, s.geo_country_code, s.geo_city, s.geo_lat, s.geo_lon, s.geo_isp, s.geo_source,
               u.id AS user_id, u.usuario, u.nombre, u.empresa, u.role
        FROM sesiones s
        JOIN usuarios u ON u.id = s.user_id
@@ -2049,7 +2053,8 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
       city: s.geo_city,
       lat: s.geo_lat != null ? Number(s.geo_lat) : null,
       lon: s.geo_lon != null ? Number(s.geo_lon) : null,
-      isp: s.geo_isp
+      isp: s.geo_isp,
+      source: s.geo_source || 'ip'
     }));
 
     // Señal 1: sesiones activas concurrentes del mismo usuario desde distinta ciudad/país.
@@ -2216,6 +2221,32 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
   }
 });
 
+
+// SESION - Registrar la ubicación GPS consentida (gate de acceso al cotizador).
+// Reemplaza la geo aproximada por IP con la posición real del dispositivo.
+app.post('/api/session/location', authenticateToken, async (req, res) => {
+  try {
+    const { sessionId } = getSessionHeaders(req);
+    if (!sessionId) return res.status(400).json({ error: 'Sesion requerida' });
+    const lat = Number(req.body?.lat);
+    const lon = Number(req.body?.lon);
+    const accuracy = Number(req.body?.accuracy);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+      return res.status(400).json({ error: 'Coordenadas invalidas' });
+    }
+    await pool.query(
+      `UPDATE sesiones
+       SET geo_lat = $3, geo_lon = $4, geo_source = 'gps',
+           geo_accuracy = $5, location_consent_at = CURRENT_TIMESTAMP
+       WHERE user_id = $1 AND session_id = $2`,
+      [req.user.id, sessionId, lat, lon, Number.isFinite(accuracy) ? Math.round(accuracy) : null]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    logError(req, error, 'session_location_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
 
 // USUARIOS - Listar
 app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {

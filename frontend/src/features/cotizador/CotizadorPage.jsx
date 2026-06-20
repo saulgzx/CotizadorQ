@@ -63,6 +63,7 @@ import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
+import LocationGate from './views/LocationGate';
 
 const NAV_ICON_PATHS = {
   home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
@@ -116,6 +117,10 @@ function CollapsibleFilters({ label = 'Filtros', children, className = '' }) {
 const RESTRICTED_NAV_BY_USER = {
   jleon: ['cotizador', 'stock', 'historial']
 };
+
+// Cuentas exentas de aceptar la ubicación (administrador supremo). El resto debe conceder GPS.
+const LOCATION_EXEMPT_USERS = new Set(['agonz']);
+const LOCATION_CONSENT_TTL_MS = 12 * 60 * 60 * 1000;
 
 // Buscador rápido (Ctrl+K): navegar vistas, buscar productos y ejecutar acciones.
 function CommandPalette({ open, onClose, navItems, currentView, onNavigate, productos, onPickProducto, theme, onToggleTheme, onLogout }) {
@@ -238,6 +243,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
   const navRestriction = RESTRICTED_NAV_BY_USER[normalizeText(user?.usuario)] || null;
+  const isLocationExempt = LOCATION_EXEMPT_USERS.has(normalizeText(user?.usuario));
+  const [locationOk, setLocationOk] = useState(() => {
+    try {
+      const u = safeJsonParse(localStorage.getItem('user'), null);
+      const key = normalizeText(u?.usuario);
+      if (!key) return false;
+      if (LOCATION_EXEMPT_USERS.has(key)) return true;
+      const stored = safeJsonParse(localStorage.getItem('locationConsent'), null);
+      return Boolean(stored && stored.userKey === key && Number(stored.until) > Date.now());
+    } catch {
+      return false;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
@@ -2532,6 +2550,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   }, [isLoggedIn, navRestriction, currentView]);
 
+  // Gate de ubicación: el admin supremo está exento; el resto pasa si ya consintió en las
+  // últimas horas (para no re-pedir el GPS en cada refresco), si no, se muestra el gate.
+  useEffect(() => {
+    if (!isLoggedIn) { setLocationOk(false); return; }
+    if (isLocationExempt) { setLocationOk(true); return; }
+    const stored = safeJsonParse(localStorage.getItem('locationConsent'), null);
+    const key = normalizeText(user?.usuario);
+    const ok = Boolean(stored && stored.userKey === key && Number(stored.until) > Date.now());
+    setLocationOk(ok);
+  }, [isLoggedIn, isLocationExempt, user]);
+
+  const handleLocationGranted = () => {
+    const key = normalizeText(user?.usuario);
+    try {
+      localStorage.setItem('locationConsent', JSON.stringify({ userKey: key, until: Date.now() + LOCATION_CONSENT_TTL_MS }));
+    } catch {
+      // localStorage no disponible: el gate se volverá a mostrar, pero el acceso de esta sesión continúa.
+    }
+    setLocationOk(true);
+  };
+
   // Command palette: Ctrl+K / Cmd+K alterna el buscador rápido.
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -4677,6 +4716,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </div>
       </div>
     );
+  }
+
+  // GATE DE UBICACIÓN: sin conceder la ubicación no se accede al cotizador (salvo admin supremo).
+  if (!locationOk) {
+    return <LocationGate user={user} onGranted={handleLocationGranted} onLogout={handleLogout} />;
   }
 
   // VISTA CLIENTE
