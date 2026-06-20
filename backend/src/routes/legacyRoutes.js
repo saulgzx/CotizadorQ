@@ -1548,6 +1548,62 @@ const isPrivateOrLocalIp = (ip) => {
   return false;
 };
 
+// Último error de geolocalización (se expone en el diagnóstico admin para saber por qué falla).
+let lastGeoError = null;
+let lastGeoErrorAt = null;
+let lastGeoOkAt = null;
+
+// GET JSON con timeout. Usa global fetch si existe; si no (Node sin fetch), cae a https/http nativo.
+const geoHttpGetJson = (url, timeoutMs) => {
+  if (typeof fetch === 'function') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'CotizadorQ/geo' } })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`http ${r.status}`);
+        return r.json();
+      })
+      .finally(() => clearTimeout(timer));
+  }
+  return new Promise((resolve, reject) => {
+    const lib = require(url.startsWith('https') ? 'https' : 'http');
+    const req = lib.get(url, { headers: { 'User-Agent': 'CotizadorQ/geo' } }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        reject(new Error(`http ${res.statusCode}`));
+        return;
+      }
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+      });
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+};
+
+// Proveedores en orden: distinto host y protocolo, para sobrevivir a bloqueos puntuales.
+const GEO_PROVIDERS = [
+  {
+    name: 'ipwho.is',
+    url: (ip) => `https://ipwho.is/${encodeURIComponent(ip)}`,
+    parse: (d) => (d && d.success !== false) ? {
+      country: d.country || null, countryCode: d.country_code || null, city: d.city || null,
+      lat: Number(d.latitude), lon: Number(d.longitude), isp: d.connection?.isp || d.connection?.org || null
+    } : null
+  },
+  {
+    name: 'ip-api.com',
+    url: (ip) => `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,city,lat,lon,isp`,
+    parse: (d) => (d && d.status === 'success') ? {
+      country: d.country || null, countryCode: d.countryCode || null, city: d.city || null,
+      lat: Number(d.lat), lon: Number(d.lon), isp: d.isp || null
+    } : null
+  }
+];
+
 const resolveGeo = (rawIp) => {
   if (!GEO_ENABLED) return Promise.resolve(null);
   const ip = normalizeIpForGeo(rawIp);
@@ -1560,30 +1616,35 @@ const resolveGeo = (rawIp) => {
   if (geoInflight.has(ip)) return geoInflight.get(ip);
 
   const promise = (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), GEO_API_TIMEOUT_MS);
+    const errors = [];
     try {
-      const resp = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, { signal: controller.signal });
-      if (!resp.ok) throw new Error(`geo http ${resp.status}`);
-      const data = await resp.json();
-      if (!data || data.success === false) throw new Error(data?.message || 'geo lookup failed');
-      const value = {
-        country: data.country || null,
-        countryCode: data.country_code || null,
-        city: data.city || null,
-        lat: Number.isFinite(Number(data.latitude)) ? Number(data.latitude) : null,
-        lon: Number.isFinite(Number(data.longitude)) ? Number(data.longitude) : null,
-        isp: data.connection?.isp || data.connection?.org || null
-      };
-      setGeoCache(ip, value, GEO_CACHE_TTL_MS);
-      return value;
-    } catch (error) {
-      // Cachea el fallo por un rato corto para no martillar el servicio.
+      for (const provider of GEO_PROVIDERS) {
+        try {
+          const data = await geoHttpGetJson(provider.url(ip), GEO_API_TIMEOUT_MS);
+          const parsed = provider.parse(data);
+          if (!parsed) throw new Error(data?.message || 'respuesta sin datos');
+          const value = {
+            country: parsed.country,
+            countryCode: parsed.countryCode,
+            city: parsed.city,
+            lat: Number.isFinite(parsed.lat) ? parsed.lat : null,
+            lon: Number.isFinite(parsed.lon) ? parsed.lon : null,
+            isp: parsed.isp
+          };
+          setGeoCache(ip, value, GEO_CACHE_TTL_MS);
+          lastGeoOkAt = new Date().toISOString();
+          return value;
+        } catch (error) {
+          errors.push(`${provider.name}: ${error.message}`);
+        }
+      }
+      // Todos los proveedores fallaron.
+      lastGeoError = errors.join(' | ');
+      lastGeoErrorAt = new Date().toISOString();
       setGeoCache(ip, null, 5 * 60 * 1000);
-      logger.warn({ event: 'geo_lookup_failed', message: error.message }, 'No se pudo geolocalizar la IP');
+      logger.warn({ event: 'geo_lookup_failed', message: lastGeoError }, 'No se pudo geolocalizar la IP');
       return null;
     } finally {
-      clearTimeout(timer);
       geoInflight.delete(ip);
     }
   })();
@@ -2131,7 +2192,10 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
       x_forwarded_for: xff,
       x_forwarded_for_first: xffFirst,
       x_forwarded_for_first_geo: xffFirstGeo ? `${xffFirstGeo.city || '?'}, ${xffFirstGeo.country || '?'}` : null,
-      trust_proxy: String(app.get('trust proxy'))
+      trust_proxy: String(app.get('trust proxy')),
+      last_geo_error: lastGeoError,
+      last_geo_error_at: lastGeoErrorAt,
+      last_geo_ok_at: lastGeoOkAt
     };
 
     res.json({

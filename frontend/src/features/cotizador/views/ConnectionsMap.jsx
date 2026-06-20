@@ -214,9 +214,15 @@ export default function ConnectionsMap() {
             }
             if (!d.detected_ip_geo) {
               return (
-                <p className="text-amber-600 dark:text-amber-400">
-                  Tu IP <span className="font-mono">{d.detected_ip}</span> es pública pero el servicio de geolocalización no respondió (puede estar bloqueado el egreso de red del backend, o caído ipwho.is).
-                </p>
+                <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 p-2 text-amber-800 dark:text-amber-300">
+                  <p className="font-semibold">El backend no pudo geolocalizar.</p>
+                  <p className="mt-1">
+                    Tu IP <span className="font-mono">{d.detected_ip}</span> es pública (el servicio externo funciona desde fuera), así que lo más probable es que el hosting del backend esté bloqueando la salida de red.
+                  </p>
+                  {d.last_geo_error && (
+                    <p className="mt-1">Error del servidor: <span className="font-mono break-all">{d.last_geo_error}</span></p>
+                  )}
+                </div>
               );
             }
             return <p>Tu sesión se geolocalizó en <b>{d.detected_ip_geo}</b>; los pines aparecen al refrescar tras el próximo login.</p>;
