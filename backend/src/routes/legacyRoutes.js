@@ -43,7 +43,18 @@ const corsOptions = {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-app.set('trust proxy', 1);
+// Cuántos proxies confiar para resolver la IP real del cliente (req.ip). Por defecto 1,
+// pero si el backend está detrás de varios proxies (CDN + hosting) hay que subirlo o usar
+// 'true'; si no, req.ip queda como una IP interna y la geolocalización no funciona.
+const parseTrustProxy = (raw) => {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (v === '') return 1;
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : 1;
+};
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
 // Middleware
 app.use(requestLogger);
@@ -2101,11 +2112,34 @@ app.get('/api/security/connections', authenticateToken, requireAdmin, async (req
 
     sessions.forEach(s => { s.shared_risk = flaggedUserIds.has(s.user_id); });
 
+    // Diagnóstico: qué IP ve el servidor para esta petición y si geolocaliza. Sirve para
+    // entender por qué no hay sesiones localizables (IP interna por trust proxy mal seteado,
+    // o servicio de geo bloqueado). Es admin-only.
+    const detectedIp = getRequestIp(req);
+    const xff = req.headers['x-forwarded-for'] || null;
+    const xffFirst = xff ? String(xff).split(',')[0].trim() : null;
+    const detectedPrivate = isPrivateOrLocalIp(normalizeIpForGeo(detectedIp));
+    const detectedGeo = await resolveGeo(detectedIp);
+    let xffFirstGeo = null;
+    if (detectedPrivate && xffFirst && !isPrivateOrLocalIp(normalizeIpForGeo(xffFirst))) {
+      xffFirstGeo = await resolveGeo(xffFirst);
+    }
+    const debug = {
+      detected_ip: detectedIp || null,
+      detected_ip_private: detectedPrivate,
+      detected_ip_geo: detectedGeo ? `${detectedGeo.city || '?'}, ${detectedGeo.country || '?'}` : null,
+      x_forwarded_for: xff,
+      x_forwarded_for_first: xffFirst,
+      x_forwarded_for_first_geo: xffFirstGeo ? `${xffFirstGeo.city || '?'}, ${xffFirstGeo.country || '?'}` : null,
+      trust_proxy: String(app.get('trust proxy'))
+    };
+
     res.json({
       generated_at: new Date().toISOString(),
       geo_enabled: GEO_ENABLED,
       sessions,
-      alerts
+      alerts,
+      debug
     });
   } catch (error) {
     logError(req, error, 'security_connections_failed');

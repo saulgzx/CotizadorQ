@@ -186,9 +186,42 @@ export default function ConnectionsMap() {
       </div>
 
       {located.length === 0 && !loading && (
-        <p className="mt-2 text-xs text-slate-500">
-          No hay sesiones localizables todavía. Las IPs locales/privadas (entorno de desarrollo) no se geolocalizan; en producción los pines aparecen tras el próximo login.
-        </p>
+        <div className="mt-2 text-xs text-slate-500 space-y-2">
+          <p>No hay sesiones localizables todavía.</p>
+          {(() => {
+            const d = data?.debug;
+            if (data && data.geo_enabled === false) {
+              return <p className="text-amber-600 dark:text-amber-400">Geolocalización desactivada (GEO_ENABLED=false en el backend).</p>;
+            }
+            if (!d) return <p>Los pines aparecen tras el próximo login desde una IP pública.</p>;
+            if (d.detected_ip_private) {
+              return (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 p-2 text-amber-800 dark:text-amber-300">
+                  <p className="font-semibold">El servidor no está viendo tu IP pública real.</p>
+                  <p className="mt-1">
+                    Registra tu conexión como <span className="font-mono">{d.detected_ip || '—'}</span> (IP interna del proxy), por eso no puede geolocalizar.
+                  </p>
+                  {d.x_forwarded_for_first_geo ? (
+                    <p className="mt-1">
+                      Tu IP pública real (<span className="font-mono">{d.x_forwarded_for_first}</span>) sí geolocaliza en <b>{d.x_forwarded_for_first_geo}</b>.
+                      Solución: poné <span className="font-mono">TRUST_PROXY=true</span> en el backend y volvé a iniciar sesión.
+                    </p>
+                  ) : (
+                    <p className="mt-1">Ajustá <span className="font-mono">TRUST_PROXY</span> en el backend (probá <span className="font-mono">true</span>) y reiniciá sesión.</p>
+                  )}
+                </div>
+              );
+            }
+            if (!d.detected_ip_geo) {
+              return (
+                <p className="text-amber-600 dark:text-amber-400">
+                  Tu IP <span className="font-mono">{d.detected_ip}</span> es pública pero el servicio de geolocalización no respondió (puede estar bloqueado el egreso de red del backend, o caído ipwho.is).
+                </p>
+              );
+            }
+            return <p>Tu sesión se geolocalizó en <b>{d.detected_ip_geo}</b>; los pines aparecen al refrescar tras el próximo login.</p>;
+          })()}
+        </div>
       )}
     </div>
   );
