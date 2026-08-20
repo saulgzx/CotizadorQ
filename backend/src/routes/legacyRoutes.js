@@ -1835,7 +1835,15 @@ const authenticateToken = requireAuth;
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'OK', message: 'API Cotizador funcionando', version: APP_VERSION });
+  // commit y deploy los inyecta Railway en cada build. Sirven para saber que
+  // codigo esta realmente corriendo sin tener que adivinar por el comportamiento.
+  res.json({
+    status: 'OK',
+    message: 'API Cotizador funcionando',
+    version: APP_VERSION,
+    commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
+    deploy: process.env.RAILWAY_DEPLOYMENT_ID || null
+  });
 });
 
 // LOGIN
