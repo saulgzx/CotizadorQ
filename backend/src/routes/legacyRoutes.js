@@ -20,6 +20,7 @@ const {
   validateCotizacionInput
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
+const aiQuoteService = require('../services/aiQuoteService');
 
 const JWT_SECRET = (process.env.JWT_SECRET || '').trim();
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -220,6 +221,19 @@ const loginRateLimiter = rateLimit({
   skipSuccessfulRequests: true,
   skip: (req) => shouldBypassLoginRateLimit(req?.body?.usuario),
   message: { error: 'Demasiados intentos de inicio de sesion. Intenta mas tarde.' }
+});
+
+// Rate limit del asistente de cotizacion: cada llamada consume creditos de la API de
+// Anthropic, asi que se limita por usuario autenticado (no por IP, porque varios
+// vendedores pueden salir por la misma NAT).
+const AI_QUOTE_RATE_LIMIT_MAX = parseInt(process.env.AI_QUOTE_RATE_LIMIT_MAX || '20', 10);
+const aiQuoteRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Number.isFinite(AI_QUOTE_RATE_LIMIT_MAX) && AI_QUOTE_RATE_LIMIT_MAX > 0 ? AI_QUOTE_RATE_LIMIT_MAX : 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req?.user?.id ?? req.ip),
+  message: { error: 'Limite de interpretaciones por hora alcanzado. Intenta mas tarde.' }
 });
 
 const getSessionTtlMsForRole = (role) =>
@@ -3466,6 +3480,55 @@ app.delete('/api/productos/:id', authenticateToken, requireCotizadorStockAdmin, 
 });
 
 // COTIZACIONES - Guardar
+// ASISTENTE IA - Interpretar un requerimiento en texto libre y proponer lineas.
+// Solo propone: no crea la cotizacion ni calcula precios. El vendedor revisa las
+// lineas en la UI y luego pasa por POST /api/cotizaciones, que recalcula todo
+// contra la tabla productos como siempre.
+app.get('/api/cotizaciones/asistente/estado', authenticateToken, (req, res) => {
+  res.json({ habilitado: aiQuoteService.isEnabled(), modelo: aiQuoteService.MODEL });
+});
+
+app.post('/api/cotizaciones/interpretar', authenticateToken, aiQuoteRateLimiter, async (req, res) => {
+  try {
+    if (!aiQuoteService.isEnabled()) {
+      return res.status(503).json({ error: 'Asistente de cotizacion no configurado' });
+    }
+
+    const texto = typeof req.body?.texto === 'string' ? req.body.texto : '';
+    if (!texto.trim()) {
+      return res.status(400).json({ error: 'Texto del requerimiento requerido' });
+    }
+
+    const productosResult = await pool.query(
+      'SELECT id, origen, marca, sku, mpn, descripcion FROM productos WHERE activo = true ORDER BY id'
+    );
+
+    const resultado = await aiQuoteService.interpretarRequerimiento(texto, productosResult.rows);
+
+    logger.info(
+      {
+        event: 'ai_quote_interpreted',
+        usuario_id: req.user?.id || null,
+        lineas: resultado.lineas.length,
+        sin_coincidencia: resultado.sinCoincidencia.length,
+        uso: resultado.uso
+      },
+      'Requerimiento interpretado'
+    );
+
+    res.json({
+      lineas: resultado.lineas,
+      sin_coincidencia: resultado.sinCoincidencia,
+      notas: resultado.notas
+    });
+  } catch (error) {
+    logError(req, error, 'ai_quote_interpret_failed');
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    const mensaje = status === 500 ? 'Error del servidor' : error.message;
+    res.status(status).json({ error: mensaje });
+  }
+});
+
 app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async (req, res) => {
   const client = await pool.connect();
   try {

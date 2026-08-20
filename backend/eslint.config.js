@@ -12,7 +12,10 @@
         __dirname: 'readonly',
         Buffer: 'readonly',
         setTimeout: 'readonly',
-        clearTimeout: 'readonly'
+        clearTimeout: 'readonly',
+        // Disponibles de forma nativa desde Node 18 (ver engines en package.json).
+        fetch: 'readonly',
+        AbortController: 'readonly'
       }
     },
     rules: {

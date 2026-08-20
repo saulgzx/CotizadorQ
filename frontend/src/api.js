@@ -167,6 +167,32 @@ export const productosAPI = {
 
 // API de Cotizaciones
 export const cotizacionesAPI = {
+  // Asistente IA: consulta si la feature esta configurada en el backend.
+  // Devuelve { habilitado: false } en vez de lanzar, para que la UI simplemente
+  // no muestre el asistente cuando no hay API key.
+  asistenteEstado: async () => {
+    try {
+      const response = await fetchWithAuth('/api/cotizaciones/asistente/estado');
+      if (!response.ok) return { habilitado: false };
+      return response.json();
+    } catch {
+      return { habilitado: false };
+    }
+  },
+
+  // Convierte texto libre en lineas propuestas. No crea nada: solo sugiere.
+  interpretar: async (texto) => {
+    const response = await fetchWithAuth('/api/cotizaciones/interpretar', {
+      method: 'POST',
+      body: JSON.stringify({ texto }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.error || `No se pudo interpretar el requerimiento (${response.status})`);
+    }
+    return response.json();
+  },
+
   getAll: async ({ includeItems } = {}) => {
     const query = includeItems ? '?includeItems=1' : '';
     const response = await fetchWithAuth(`/api/cotizaciones${query}`);
