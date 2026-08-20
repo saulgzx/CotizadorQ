@@ -27,6 +27,33 @@ const isEnabled = () => Boolean((process.env.ANTHROPIC_API_KEY || '').trim());
 
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Traduce el error de la API a algo accionable. El endpoint esta autenticado, asi
+// que se puede ser concreto: quien lo ve es un usuario del sistema, no el publico.
+const mensajeParaUsuario = (status, apiTipo, apiMensaje) => {
+  if (/credit balance/i.test(apiMensaje)) {
+    return 'La cuenta de Anthropic no tiene creditos. Cargalos en console.anthropic.com > Plans & Billing.';
+  }
+  if (status === 401 || apiTipo === 'authentication_error') {
+    return 'La API key de Anthropic es invalida. Revisa ANTHROPIC_API_KEY en Railway.';
+  }
+  if (status === 403 || apiTipo === 'permission_error') {
+    return `La API key no tiene permiso para usar el modelo ${MODEL}.`;
+  }
+  if (status === 404 || apiTipo === 'not_found_error') {
+    return `El modelo ${MODEL} no esta disponible para esta cuenta.`;
+  }
+  if (status === 413) {
+    return 'El catalogo es demasiado grande para una sola consulta. Baja AI_QUOTE_MAX_CATALOG.';
+  }
+  if (status === 429) {
+    return 'El asistente esta saturado. Intenta en unos minutos.';
+  }
+  if (status === 400) {
+    return `La API rechazo la consulta: ${apiMensaje.slice(0, 200)}`;
+  }
+  return 'El asistente no esta disponible en este momento.';
+};
+
 // POST a /v1/messages con reintentos en 429 y 5xx. Los 4xx restantes son errores
 // de nuestra request: no se reintentan.
 const llamarApi = async (payload) => {
@@ -53,19 +80,34 @@ const llamarApi = async (payload) => {
       const detalle = await response.text().catch(() => '');
       const reintentable = response.status === 429 || response.status >= 500;
 
+      // El cuerpo de error de la API trae { error: { type, message } }. Sin esto
+      // el diagnostico se vuelve adivinanza: hay que loguearlo.
+      let apiTipo = '';
+      let apiMensaje = '';
+      try {
+        const parsed = JSON.parse(detalle);
+        apiTipo = parsed?.error?.type || '';
+        apiMensaje = parsed?.error?.message || '';
+      } catch {
+        apiMensaje = detalle.slice(0, 300);
+      }
+
       logger.warn(
-        { event: 'ai_quote_api_error', status: response.status, intento, reintentable },
+        {
+          event: 'ai_quote_api_error',
+          status: response.status,
+          intento,
+          reintentable,
+          apiTipo,
+          apiMensaje: apiMensaje.slice(0, 300)
+        },
         'Error llamando a la API de Anthropic'
       );
 
       if (!reintentable || intento === MAX_RETRIES) {
-        const error = new Error(
-          response.status === 429
-            ? 'El asistente esta saturado. Intenta en unos minutos.'
-            : 'El asistente no esta disponible en este momento.'
-        );
+        const error = new Error(mensajeParaUsuario(response.status, apiTipo, apiMensaje));
         error.status = response.status === 429 ? 429 : 502;
-        error.detalle = detalle.slice(0, 500);
+        error.detalle = `${response.status} ${apiTipo} ${apiMensaje}`.slice(0, 500);
         throw error;
       }
     } catch (error) {

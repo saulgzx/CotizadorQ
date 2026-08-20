@@ -3530,7 +3530,9 @@ app.post('/api/cotizaciones/interpretar', authenticateToken, aiQuoteRateLimiter,
       notas: resultado.notas
     });
   } catch (error) {
-    logError(req, error, 'ai_quote_interpret_failed');
+    // detalle trae la respuesta cruda de la API de Anthropic; logError no la
+    // incluiria por si sola porque solo mira message/code/stack.
+    logError(req, error, 'ai_quote_interpret_failed', { detalle: error?.detalle || null });
     const status = Number.isInteger(error?.status) ? error.status : 500;
     const mensaje = status === 500 ? 'Error del servidor' : error.message;
     res.status(status).json({ error: mensaje });
