@@ -63,7 +63,6 @@ import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
-const AsistenteCotizacion = lazy(() => import('./views/AsistenteCotizacion'));
 import LocationGate from './views/LocationGate';
 
 const NAV_ICON_PATHS = {
@@ -294,9 +293,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     ordenes: DEFAULT_PAGE_SIZE
   });
   const [productos, setProductos] = useState([]);
-  // Asistente IA: solo se muestra si el backend tiene ANTHROPIC_API_KEY configurada.
-  const [asistenteHabilitado, setAsistenteHabilitado] = useState(false);
-  const [asistenteAbierto, setAsistenteAbierto] = useState(false);
   const [stockByMpn, setStockByMpn] = useState({});
   const [stockCatalog, setStockCatalog] = useState([]);
   const [stockCatalogLoading, setStockCatalogLoading] = useState(false);
@@ -431,18 +427,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [empresaConfigs, setEmpresaConfigs] = useState(() => {
     return safeJsonParse(localStorage.getItem('empresaConfigs'), {});
   });
-
-  // El asistente IA es opcional: se pregunta una sola vez al backend si esta
-  // configurado. Si no lo esta, el boton nunca se muestra.
-  useEffect(() => {
-    let cancelado = false;
-    cotizacionesAPI.asistenteEstado()
-      .then((estado) => {
-        if (!cancelado) setAsistenteHabilitado(Boolean(estado?.habilitado));
-      })
-      .catch(() => {});
-    return () => { cancelado = true; };
-  }, []);
 
   useEffect(() => {
     localStorage.setItem('osoFilter', osoFilter || '');
@@ -2278,31 +2262,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       gpOverride: null,
       tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
     }]);
-  };
-
-  // Aplica las líneas confirmadas por el vendedor en el asistente IA.
-  // Reusa la misma forma de item que addToCotizacion; lo único distinto es que
-  // la cantidad viene de la sugerencia en vez de arrancar en 1.
-  const aplicarSugerenciasAsistente = (sugerencias) => {
-    setCotizacion(prev => {
-      const next = [...prev];
-      sugerencias.forEach(({ producto, cantidad }) => {
-        const index = next.findIndex(x => x.id === producto.id);
-        if (index >= 0) {
-          next[index] = { ...next[index], cant: next[index].cant + cantidad };
-          return;
-        }
-        next.push({
-          ...producto,
-          cant: cantidad,
-          partnerCategory: producto.origen === 'AXIS' ? cotizacionPartnerCategory : undefined,
-          rebateProject: producto.origen === 'AXIS' ? 0 : undefined,
-          gpOverride: null,
-          tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
-        });
-      });
-      return next;
-    });
   };
 
   const applyPartnerCategoryToAxis = (category) => {
@@ -5997,16 +5956,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 overflow-hidden">
               <div className="p-3 border-b flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-semibold">Catlogo ({adminProductos.length})</h3>
-                {asistenteHabilitado && (
-                  <button
-                    type="button"
-                    onClick={() => setAsistenteAbierto(true)}
-                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-white transition hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
-                    title="Convertir el requerimiento del cliente en lineas de cotizacion"
-                  >
-                    Asistente IA
-                  </button>
-                )}
                 {isAdmin ? (
                   <input
                     type="text"
@@ -8387,15 +8336,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </p>
           </div>
         </footer>
-      )}
-      {asistenteAbierto && (
-        <Suspense fallback={null}>
-          <AsistenteCotizacion
-            productos={productos}
-            onAplicar={aplicarSugerenciasAsistente}
-            onCerrar={() => setAsistenteAbierto(false)}
-          />
-        </Suspense>
       )}
     </div>
     </CotizadorContext.Provider>
