@@ -264,7 +264,10 @@ export const resolverItems = async (
 ): Promise<{ lineas: LineaResuelta[]; noResueltos: SkuNoResuelto[]; total: number }> => {
   const [catalogo, stock] = await Promise.all([getCatalogo(), getStock()]);
 
-  const lineas: LineaResuelta[] = [];
+  // Se agrupa por producto_id y no por el texto pedido: un mismo producto puede
+  // llegar dos veces, por SKU y por MPN, o repetido en la misma lista. Sin esto
+  // la cotizacion guardada saldria con el renglon duplicado en el PDF.
+  const porProducto = new Map<number, LineaResuelta>();
   const noResueltos: SkuNoResuelto[] = [];
 
   for (const item of items) {
@@ -274,8 +277,15 @@ export const resolverItems = async (
       continue;
     }
     const cantidad = Math.max(1, Math.trunc(Number(item.cantidad) || 1));
+    const id = Number(producto.id);
+    const existente = porProducto.get(id);
+    if (existente) {
+      existente.cantidad += cantidad;
+      existente.precio_total = Number((existente.precio_unitario * existente.cantidad).toFixed(2));
+      continue;
+    }
     const precioUnitario = Number(producto.precio_cliente) || 0;
-    lineas.push({
+    porProducto.set(id, {
       producto,
       cantidad,
       stock: stock.get(normalizar(producto.mpn)) ?? null,
@@ -283,6 +293,8 @@ export const resolverItems = async (
       precio_total: Number((precioUnitario * cantidad).toFixed(2))
     });
   }
+
+  const lineas = [...porProducto.values()];
 
   const total = Number(lineas.reduce((suma, l) => suma + l.precio_total, 0).toFixed(2));
   return { lineas, noResueltos, total };
