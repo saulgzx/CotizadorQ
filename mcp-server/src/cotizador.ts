@@ -47,6 +47,8 @@ export interface Producto {
 }
 
 export interface LineaResuelta {
+  /** Como se llego al producto: exacta, parcial o por descripcion. */
+  coincidencia: TipoCoincidencia;
   producto: Producto;
   cantidad: number;
   stock: number | string | null;
@@ -244,16 +246,77 @@ export const getStock = async (): Promise<Map<string, number | string>> => {
   return mapa;
 };
 
-/** Empareja por SKU y, si no hay, por MPN. Ambos case-insensitive. */
-export const buscarProducto = (catalogo: Producto[], sku: string): Producto | null => {
-  const clave = normalizar(sku);
-  if (!clave) return null;
-  return (
-    catalogo.find((p) => normalizar(p.sku) === clave) ||
-    catalogo.find((p) => normalizar(p.mpn) === clave) ||
-    null
+/**
+ * Clave de comparacion: solo letras y numeros, en mayuscula. Asi "rail b02",
+ * "RAIL-B02" y "Rail_B02" colapsan al mismo valor RAILB02.
+ */
+const clavear = (valor: unknown) =>
+  String(valor ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+export type TipoCoincidencia = 'exacta' | 'parcial' | 'descripcion';
+
+export interface ResultadoBusqueda {
+  producto: Producto | null;
+  tipo: TipoCoincidencia | null;
+  /** Se llena cuando hay mas de un candidato: no se elige por el usuario. */
+  candidatos: Producto[];
+}
+
+const MAX_CANDIDATOS = 10;
+
+/**
+ * Busqueda tolerante en tres niveles. Deliberadamente NO usa distancia de
+ * edicion sobre los codigos: dos productos reales pueden diferir en un solo
+ * caracter (RAIL-B02 / RAIL-B03) y elegir "el mas parecido" pondria el
+ * articulo equivocado en una cotizacion real. Ante ambiguedad se devuelven los
+ * candidatos para que decida una persona.
+ */
+export const buscarProductoTolerante = (
+  catalogo: Producto[],
+  texto: string
+): ResultadoBusqueda => {
+  const vacio: ResultadoBusqueda = { producto: null, tipo: null, candidatos: [] };
+  const clave = clavear(texto);
+  if (!clave) return vacio;
+
+  // Nivel 1: coincidencia exacta ignorando guiones, espacios y mayusculas.
+  const exacta =
+    catalogo.find((p) => clavear(p.sku) === clave) ||
+    catalogo.find((p) => clavear(p.mpn) === clave);
+  if (exacta) return { producto: exacta, tipo: 'exacta', candidatos: [] };
+
+  // Nivel 2: el codigo contiene lo escrito (sirve para codigos incompletos).
+  const parciales = catalogo.filter(
+    (p) => clavear(p.sku).includes(clave) || clavear(p.mpn).includes(clave)
   );
+  if (parciales.length === 1) return { producto: parciales[0], tipo: 'parcial', candidatos: [] };
+  if (parciales.length > 1) {
+    return { producto: null, tipo: null, candidatos: parciales.slice(0, MAX_CANDIDATOS) };
+  }
+
+  // Nivel 3: todas las palabras aparecen en algun campo del producto.
+  const palabras = String(texto || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .map((palabra) => palabra.trim())
+    .filter((palabra) => palabra.length > 1);
+  if (palabras.length === 0) return vacio;
+
+  const porDescripcion = catalogo.filter((p) => {
+    const campos = `${p.sku} ${p.mpn} ${p.marca} ${p.descripcion}`.toLowerCase();
+    return palabras.every((palabra) => campos.includes(palabra));
+  });
+  if (porDescripcion.length === 1) {
+    return { producto: porDescripcion[0], tipo: 'descripcion', candidatos: [] };
+  }
+  return { producto: null, tipo: null, candidatos: porDescripcion.slice(0, MAX_CANDIDATOS) };
 };
+
+/** Compatibilidad: devuelve solo el producto cuando la busqueda es concluyente. */
+export const buscarProducto = (catalogo: Producto[], sku: string): Producto | null =>
+  buscarProductoTolerante(catalogo, sku).producto;
 
 /**
  * Resuelve una lista de {sku, cantidad} contra el catalogo y el stock.
@@ -271,9 +334,16 @@ export const resolverItems = async (
   const noResueltos: SkuNoResuelto[] = [];
 
   for (const item of items) {
-    const producto = buscarProducto(catalogo, item.sku);
+    const { producto, tipo, candidatos } = buscarProductoTolerante(catalogo, item.sku);
     if (!producto) {
-      noResueltos.push({ sku: item.sku, motivo: 'No existe en el catalogo activo' });
+      // Con varios candidatos no se elige: se listan para que decida una persona.
+      const motivo =
+        candidatos.length > 0
+          ? `Ambiguo, ${candidatos.length} coincidencias: ${candidatos
+              .map((c) => `${c.sku} (${c.mpn})`)
+              .join(', ')}`
+          : 'No existe en el catalogo activo';
+      noResueltos.push({ sku: item.sku, motivo });
       continue;
     }
     const cantidad = Math.max(1, Math.trunc(Number(item.cantidad) || 1));
@@ -286,6 +356,7 @@ export const resolverItems = async (
     }
     const precioUnitario = Number(producto.precio_cliente) || 0;
     porProducto.set(id, {
+      coincidencia: tipo || 'exacta',
       producto,
       cantidad,
       stock: stock.get(normalizar(producto.mpn)) ?? null,

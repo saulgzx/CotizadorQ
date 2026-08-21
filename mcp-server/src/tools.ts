@@ -6,7 +6,7 @@ import {
   getCatalogo,
   getCotizacion,
   getStock,
-  buscarProducto,
+  buscarProductoTolerante,
   resolverItems,
   type LineaResuelta,
   type SkuNoResuelto
@@ -39,17 +39,36 @@ const respuesta = (texto: string, datos: unknown) => ({
   ]
 });
 
+// Una coincidencia no exacta se marca en la fila: el usuario tiene que poder
+// ver de un vistazo que ese renglon salio de una busqueda aproximada antes de
+// mandarle la cotizacion a un cliente.
+const MARCA_COINCIDENCIA: Record<string, string> = {
+  exacta: '',
+  parcial: ' ⚠️',
+  descripcion: ' ⚠️'
+};
+
 const tablaLineas = (lineas: LineaResuelta[]): string => {
   if (lineas.length === 0) return '_Sin lineas resueltas._';
   const filas = lineas.map((l) => {
     const stock = l.stock === null || l.stock === '' ? 's/d' : String(l.stock);
-    return `| ${l.producto.sku} | ${l.producto.descripcion.slice(0, 45)} | ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} | ${stock} | ${l.producto.tiempo_entrega || 's/d'} |`;
+    const marca = MARCA_COINCIDENCIA[l.coincidencia] ?? '';
+    return `| ${l.producto.sku}${marca} | ${l.producto.descripcion.slice(0, 45)} | ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} | ${stock} | ${l.producto.tiempo_entrega || 's/d'} |`;
   });
-  return [
-    '| SKU | Descripcion | Cant | Unitario | Total | Stock | Entrega |',
-    '|---|---|---|---|---|---|---|',
-    ...filas
-  ].join('\n');
+  const aproximadas = lineas.filter((l) => l.coincidencia !== 'exacta');
+  const nota =
+    aproximadas.length === 0
+      ? ''
+      : `\n\n⚠️ ${aproximadas.length} linea(s) resueltas por busqueda aproximada: ` +
+        aproximadas.map((l) => `${l.producto.sku} (${l.producto.mpn || 's/mpn'})`).join(', ') +
+        '. Verifica que sean los productos correctos.';
+  return (
+    [
+      '| SKU | Descripcion | Cant | Unitario | Total | Stock | Entrega |',
+      '|---|---|---|---|---|---|---|',
+      ...filas
+    ].join('\n') + nota
+  );
 };
 
 const bloqueNoResueltos = (noResueltos: SkuNoResuelto[]): string =>
@@ -68,18 +87,33 @@ export const registrarTools = (server: McpServer): void => {
     },
     async ({ sku }) => {
       const [catalogo, stock] = await Promise.all([getCatalogo(), getStock()]);
-      const producto = buscarProducto(catalogo, sku);
+      const { producto, tipo, candidatos } = buscarProductoTolerante(catalogo, sku);
 
       if (!producto) {
-        return respuesta(
-          `No encontre \`${sku}\` en el catalogo activo.`,
-          { encontrado: false, sku }
-        );
+        // Con varios candidatos no se elige uno: se muestran para que decida
+        // el usuario. Elegir "el mas parecido" en codigos de producto pondria
+        // el articulo equivocado en una cotizacion real.
+        if (candidatos.length > 0) {
+          const filas = candidatos.map(
+            (c) => `| ${c.sku} | ${c.mpn} | ${c.descripcion.slice(0, 45)} | ${USD(c.precio_cliente)} |`
+          );
+          return respuesta(
+            `\`${sku}\` coincide con ${candidatos.length} productos. Especifica cual:\n\n` +
+              ['| SKU | MPN | Descripcion | Precio |', '|---|---|---|---|', ...filas].join('\n'),
+            { encontrado: false, ambiguo: true, sku, candidatos }
+          );
+        }
+        return respuesta(`No encontre \`${sku}\` en el catalogo activo.`, {
+          encontrado: false,
+          ambiguo: false,
+          sku
+        });
       }
 
       const cantidad = stock.get(String(producto.mpn || '').trim().toUpperCase()) ?? null;
       const datos = {
         encontrado: true,
+        coincidencia: tipo,
         id: producto.id,
         sku: producto.sku,
         mpn: producto.mpn,
@@ -91,13 +125,18 @@ export const registrarTools = (server: McpServer): void => {
         tiempo_entrega: producto.tiempo_entrega
       };
 
+      const aviso =
+        tipo === 'exacta'
+          ? ''
+          : `\n\n⚠️ Coincidencia **${tipo}**, no exacta: buscaste \`${sku}\`. Verifica que sea el producto correcto.`;
+
       const texto =
         `**${producto.sku}** — ${producto.descripcion}\n` +
         `- Marca: ${producto.marca} (${producto.origen})\n` +
         `- MPN: ${producto.mpn}\n` +
         `- Precio: ${USD(producto.precio_cliente)}\n` +
         `- Stock: ${cantidad === null || cantidad === '' ? 'sin dato' : cantidad}\n` +
-        `- Entrega: ${producto.tiempo_entrega || 'sin dato'}`;
+        `- Entrega: ${producto.tiempo_entrega || 'sin dato'}` + aviso;
 
       return respuesta(texto, datos);
     }
