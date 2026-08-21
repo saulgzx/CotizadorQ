@@ -104,6 +104,77 @@ export const registrarTools = (server: McpServer): void => {
   );
 
   server.registerTool(
+    'buscar_productos',
+    {
+      description:
+        'Busca productos del catalogo por texto parcial en SKU, MPN, marca o descripcion. Usalo cuando no sepas el SKU exacto, o para explorar que hay disponible. Solo lectura.',
+      inputSchema: z.object({
+        texto: z
+          .string()
+          .default('')
+          .describe('Texto parcial. Vacio devuelve los primeros resultados del catalogo.'),
+        origen: z.enum(['QNAP', 'AXIS']).optional().describe('Filtra por linea de producto'),
+        limite: z.number().int().positive().max(100).default(20)
+      })
+    },
+    async ({ texto, origen, limite }) => {
+      const catalogo = await getCatalogo();
+      const busqueda = String(texto || '').trim().toLowerCase();
+
+      const filtrados = catalogo.filter((p) => {
+        if (origen && String(p.origen || '').toUpperCase() !== origen) return false;
+        if (!busqueda) return true;
+        return [p.sku, p.mpn, p.marca, p.descripcion]
+          .map((campo) => String(campo || '').toLowerCase())
+          .some((campo) => campo.includes(busqueda));
+      });
+
+      const pagina = filtrados.slice(0, limite);
+      const datos = {
+        total_catalogo: catalogo.length,
+        coincidencias: filtrados.length,
+        mostrados: pagina.length,
+        productos: pagina.map((p) => ({
+          sku: p.sku,
+          mpn: p.mpn,
+          marca: p.marca,
+          origen: p.origen,
+          descripcion: p.descripcion,
+          precio_cliente: p.precio_cliente,
+          tiempo_entrega: p.tiempo_entrega
+        }))
+      };
+
+      if (catalogo.length === 0) {
+        return respuesta(
+          'El catalogo esta vacio: el backend no devolvio ningun producto activo.',
+          datos
+        );
+      }
+      if (pagina.length === 0) {
+        return respuesta(
+          `Sin coincidencias para "${texto}". El catalogo tiene ${catalogo.length} productos activos.`,
+          datos
+        );
+      }
+
+      const filas = pagina.map(
+        (p) =>
+          `| ${p.sku} | ${p.mpn} | ${p.marca} | ${p.descripcion.slice(0, 40)} | ${USD(p.precio_cliente)} |`
+      );
+      const texto_salida = [
+        `**${filtrados.length}** coincidencias de ${catalogo.length} productos (mostrando ${pagina.length}):`,
+        '',
+        '| SKU | MPN | Marca | Descripcion | Precio |',
+        '|---|---|---|---|---|',
+        ...filas
+      ].join('\n');
+
+      return respuesta(texto_salida, datos);
+    }
+  );
+
+  server.registerTool(
     'simular_cotizacion',
     {
       description:
