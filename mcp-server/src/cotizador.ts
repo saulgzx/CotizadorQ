@@ -6,9 +6,29 @@
 //
 // Regla dura: ni el password ni el token salen nunca en logs ni en errores.
 
+import { randomUUID } from 'node:crypto';
+
 const API_URL = (process.env.COTIZADOR_API_URL || '').replace(/\/+$/, '');
 const USER = process.env.COTIZADOR_USER || '';
 const PASS = process.env.COTIZADOR_PASS || '';
+
+// El backend no valida solo el JWT: requireAuth exige ademas X-Session-Id, y si
+// falta responde 401 "Sesion requerida". Un id desconocido si se acepta (el
+// middleware registra la sesion sobre la marcha), pero la ausencia del header no.
+//
+// El id se genera una vez por proceso y se reusa en TODAS las peticiones,
+// incluido el login. Es a proposito: para rol "client" el backend permite una
+// sola sesion activa y revoca las anteriores al crear una nueva, asi que rotar
+// el id en cada login haria que el server se expulsara a si mismo.
+const SESSION_ID = process.env.MCP_SESSION_ID || `mcp-${randomUUID()}`;
+const DEVICE_ID = process.env.MCP_DEVICE_ID || 'mcp-server';
+const USER_AGENT = 'cotizadorq-mcp/1.0';
+
+const cabecerasSesion = () => ({
+  'x-session-id': SESSION_ID,
+  'x-device-id': DEVICE_ID,
+  'user-agent': USER_AGENT
+});
 
 const TIMEOUT_MS = Number(process.env.COTIZADOR_TIMEOUT_MS || 30000);
 const MAX_RETRIES = Number(process.env.COTIZADOR_MAX_RETRIES || 3);
@@ -82,7 +102,7 @@ const login = async (): Promise<string> => {
   try {
     const response = await fetch(`${API_URL}/api/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...cabecerasSesion() },
       body: JSON.stringify({ usuario: USER, password: PASS }),
       signal: controller.signal
     });
@@ -130,6 +150,7 @@ const peticion = async <T>(ruta: string, opts: PeticionOpts = {}): Promise<T> =>
         method: opts.method || 'GET',
         headers: {
           authorization: `Bearer ${token}`,
+          ...cabecerasSesion(),
           ...(opts.body ? { 'content-type': 'application/json' } : {})
         },
         body: opts.body ? JSON.stringify(opts.body) : undefined,
