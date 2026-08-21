@@ -59,10 +59,12 @@ Creala desde CotizadorQ (**Usuarios → Nuevo**, requiere admin):
 Si falta cualquier variable el proceso sale con error al arrancar y el deploy
 queda en rojo, en vez de quedar vivo y fallar en la primera consulta.
 
-Para generar el secreto, en PowerShell:
+Para generar el secreto, en PowerShell. **Usa hexadecimal**: base64 produce
+`+`, `/` y `=`, y una barra dentro del secreto rompe la variante `/mcp/<secreto>`
+porque parte la URL en varios segmentos.
 
 ```bash
-[Convert]::ToBase64String((1..32|%{Get-Random -Max 256}))
+-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
 ```
 
 ## Conectar Claude Code

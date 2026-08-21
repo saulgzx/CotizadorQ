@@ -42,9 +42,13 @@ const authPorHeader = (req: Request, res: Response, next: NextFunction) => {
   return next();
 };
 
-/** Via 2: /mcp/<secreto>, para clientes que no permiten headers. */
+/**
+ * Via 2: /mcp/<secreto>, para clientes que no permiten headers.
+ * Se captura con regex y no con :param porque un secreto en base64 puede
+ * contener "/" y partiria la ruta en varios segmentos.
+ */
 const authPorRuta = (req: Request, res: Response, next: NextFunction) => {
-  const desdeRuta = String(req.params.secreto || '');
+  const desdeRuta = decodeURIComponent(String(req.params[0] || ''));
   if (!secretoValido(desdeRuta)) return rechazar(res);
   return next();
 };
@@ -81,8 +85,24 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'OK', service: 'cotizadorq-mcp', commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null });
 });
 
+// Este servidor no usa OAuth. Si un cliente cae aca es porque recibio un 401 y
+// arranco el flujo de autorizacion: el secreto no coincidio. Se responde algo
+// explicito en vez de un "Cannot GET /authorize" que no dice nada.
+const sinOauth = (_req: Request, res: Response) => {
+  res.status(404).json({
+    error: 'Este servidor MCP no usa OAuth',
+    detalle:
+      'Se autentica con un secreto estatico. Si llegaste aca, el secreto enviado no coincide con CONNECTOR_SECRET. ' +
+      'Usa Authorization: Bearer <secreto>, o la URL /mcp/<secreto>.'
+  });
+};
+app.get('/authorize', sinOauth);
+app.get('/.well-known/oauth-authorization-server', sinOauth);
+app.get('/.well-known/oauth-protected-resource', sinOauth);
+
 app.all('/mcp', authPorHeader, servirMcp);
-app.all('/mcp/:secreto', authPorRuta, servirMcp);
+// Regex en vez de :secreto para que un secreto con "/" no parta la ruta.
+app.all(/^\/mcp\/(.+)$/, authPorRuta, servirMcp);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`cotizadorq-mcp escuchando en :${PORT}`);
