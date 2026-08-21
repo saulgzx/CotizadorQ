@@ -55,7 +55,22 @@ const handler = createMcpHandler(() => {
   return server;
 });
 
-const app = createMcpExpressApp();
+// createMcpExpressApp valida el header Host contra DNS rebinding y por defecto
+// solo acepta localhost: en un dominio publico rechaza todo con 403. Railway
+// inyecta RAILWAY_PUBLIC_DOMAIN, asi que el dominio propio se autoriza solo;
+// MCP_ALLOWED_HOSTS queda para dominios extra (custom domain, staging).
+const allowedHosts = [
+  process.env.RAILWAY_PUBLIC_DOMAIN,
+  ...(process.env.MCP_ALLOWED_HOSTS || '').split(','),
+  'localhost',
+  '127.0.0.1'
+]
+  .map((valor) => String(valor || '').trim())
+  .filter(Boolean);
+
+console.log(`Hosts autorizados: ${allowedHosts.join(', ')}`);
+
+const app = createMcpExpressApp({ host: '0.0.0.0', allowedHosts });
 const node = toNodeHandler(handler);
 
 // createMcpExpressApp ya configura express.json(); hay que pasar req.body para
@@ -69,6 +84,6 @@ app.get('/health', (_req, res) => {
 app.all('/mcp', authPorHeader, servirMcp);
 app.all('/mcp/:secreto', authPorRuta, servirMcp);
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`cotizadorq-mcp escuchando en :${PORT}`);
 });
