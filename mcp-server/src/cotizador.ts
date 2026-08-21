@@ -225,9 +225,20 @@ export const getCatalogo = async (): Promise<Producto[]> => {
   return productos;
 };
 
+// Estado de la ultima lectura de stock. Existe porque tragarse el error dejaba
+// todo en null sin distinguir "no hay unidades" de "no pude leer el stock", que
+// son dos cosas muy distintas para quien cotiza.
+export interface EstadoStock {
+  entradas: number;
+  error: string | null;
+}
+let estadoStock: EstadoStock = { entradas: 0, error: null };
+export const getEstadoStock = (): EstadoStock => estadoStock;
+
 export const getStock = async (): Promise<Map<string, number | string>> => {
   if (stockCache.datos && Date.now() < stockCache.expira) return stockCache.datos;
   const mapa = new Map<string, number | string>();
+  let error: string | null = null;
   try {
     const data = await peticion<{ items?: Array<{ mpn: string; quantity: number | string }> }>(
       '/api/stock'
@@ -236,14 +247,29 @@ export const getStock = async (): Promise<Map<string, number | string>> => {
       const clave = normalizar(item?.mpn);
       if (clave) mapa.set(clave, item.quantity);
     }
-  } catch {
-    // El stock sale de Google Sheets y puede fallar por su cuenta. No es motivo
-    // para tumbar una consulta de precios: se devuelve vacio y las lineas
-    // quedan con stock null.
+    if (mapa.size === 0) error = 'El endpoint /api/stock respondio sin items.';
+  } catch (fallo) {
+    // El stock sale de Google Sheets y puede fallar por su cuenta: no se tumba
+    // la consulta de precios, pero el fallo SI se reporta.
+    error = fallo instanceof Error ? fallo.message : 'Error desconocido leyendo stock';
   }
+  estadoStock = { entradas: mapa.size, error };
   stockCache.datos = mapa;
   stockCache.expira = Date.now() + STOCK_TTL_MS;
   return mapa;
+};
+
+// La app reemplaza el plazo de entrega por el stock cuando lo hay:
+//   tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
+// El MCP tiene que decir lo mismo, o daria "8-10 semanas" para algo que esta
+// en bodega listo para despachar.
+export const SUFIJO_ENTREGA_STOCK = 'unidades disponible en entrega inmediata, salvo venta previa';
+
+export const textoEntrega = (producto: Producto, stock: number | string | null): string => {
+  if (stock === null || stock === undefined || stock === '') return producto.tiempo_entrega || '';
+  const cantidad = String(stock).trim();
+  if (!cantidad) return producto.tiempo_entrega || '';
+  return `${cantidad} ${SUFIJO_ENTREGA_STOCK}`;
 };
 
 /**

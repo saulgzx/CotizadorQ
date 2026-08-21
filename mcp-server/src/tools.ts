@@ -6,6 +6,8 @@ import {
   getCatalogo,
   getCotizacion,
   getStock,
+  getEstadoStock,
+  textoEntrega,
   buscarProductoTolerante,
   resolverItems,
   type LineaResuelta,
@@ -53,8 +55,12 @@ const tablaLineas = (lineas: LineaResuelta[]): string => {
   const filas = lineas.map((l) => {
     const stock = l.stock === null || l.stock === '' ? 's/d' : String(l.stock);
     const marca = MARCA_COINCIDENCIA[l.coincidencia] ?? '';
-    return `| ${l.producto.sku}${marca} | ${l.producto.descripcion.slice(0, 45)} | ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} | ${stock} | ${l.producto.tiempo_entrega || 's/d'} |`;
+    return `| ${l.producto.sku}${marca} | ${l.producto.descripcion.slice(0, 45)} | ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} | ${stock} | ${textoEntrega(l.producto, l.stock) || 's/d'} |`;
   });
+  const estado = getEstadoStock();
+  const avisoStock = estado.error
+    ? `\n\n⚠️ **Stock no disponible**: ${estado.error} Los plazos vienen del catalogo y pueden no reflejar lo que hay en bodega.`
+    : '';
   const aproximadas = lineas.filter((l) => l.coincidencia !== 'exacta');
   const nota =
     aproximadas.length === 0
@@ -67,7 +73,9 @@ const tablaLineas = (lineas: LineaResuelta[]): string => {
       '| SKU | Descripcion | Cant | Unitario | Total | Stock | Entrega |',
       '|---|---|---|---|---|---|---|',
       ...filas
-    ].join('\n') + nota
+    ].join('\n') +
+    nota +
+    avisoStock
   );
 };
 
@@ -111,6 +119,7 @@ export const registrarTools = (server: McpServer): void => {
       }
 
       const cantidad = stock.get(String(producto.mpn || '').trim().toUpperCase()) ?? null;
+      const estado = getEstadoStock();
       const datos = {
         encontrado: true,
         coincidencia: tipo,
@@ -122,7 +131,10 @@ export const registrarTools = (server: McpServer): void => {
         descripcion: producto.descripcion,
         precio_cliente: producto.precio_cliente,
         stock: cantidad,
-        tiempo_entrega: producto.tiempo_entrega
+        // El plazo que corresponde mostrar: si hay stock, entrega inmediata.
+        entrega: textoEntrega(producto, cantidad),
+        tiempo_entrega_catalogo: producto.tiempo_entrega,
+        diagnostico_stock: { entradas_cargadas: estado.entradas, error: estado.error }
       };
 
       const aviso =
@@ -136,7 +148,11 @@ export const registrarTools = (server: McpServer): void => {
         `- MPN: ${producto.mpn}\n` +
         `- Precio: ${USD(producto.precio_cliente)}\n` +
         `- Stock: ${cantidad === null || cantidad === '' ? 'sin dato' : cantidad}\n` +
-        `- Entrega: ${producto.tiempo_entrega || 'sin dato'}` + aviso;
+        `- Entrega: ${textoEntrega(producto, cantidad) || 'sin dato'}\n` +
+        (estado.error
+          ? `\n⚠️ **No se pudo leer el stock**: ${estado.error} El plazo mostrado viene del catalogo y puede no reflejar disponibilidad real.\n`
+          : `_(stock: ${estado.entradas} MPN cargados desde bodega)_\n`) +
+        aviso;
 
       return respuesta(texto, datos);
     }
