@@ -30,15 +30,29 @@ const secretoValido = (candidato: string): boolean => {
   return timingSafeEqual(a, b);
 };
 
-const rechazar = (res: Response) => {
+// Con el header, 401 es correcto: falta o esta mal la credencial.
+const rechazarHeader = (res: Response) => {
   res.status(401).json({ error: 'Secreto invalido o ausente' });
+};
+
+// Con el secreto en la ruta, 401 seria contraproducente: el cliente lo lee como
+// "hay que autenticarse" y arranca un flujo OAuth que este servidor no ofrece,
+// terminando en un error que no apunta a la causa. El secreto es parte de la
+// URL, asi que si no coincide la URL es incorrecta: 404.
+const rechazarRuta = (res: Response) => {
+  res.status(404).json({
+    error: 'URL de conexion incorrecta',
+    detalle:
+      'El secreto incluido en la ruta no coincide con CONNECTOR_SECRET. ' +
+      'Verifica que copiaste la URL completa y que el valor en Railway no tenga comillas ni espacios.'
+  });
 };
 
 /** Via 1: Authorization: Bearer <secreto>. */
 const authPorHeader = (req: Request, res: Response, next: NextFunction) => {
   const header = req.get('authorization') || '';
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  if (!match || !secretoValido(match[1].trim())) return rechazar(res);
+  if (!match || !secretoValido(match[1].trim())) return rechazarHeader(res);
   return next();
 };
 
@@ -49,7 +63,7 @@ const authPorHeader = (req: Request, res: Response, next: NextFunction) => {
  */
 const authPorRuta = (req: Request, res: Response, next: NextFunction) => {
   const desdeRuta = decodeURIComponent(String(req.params[0] || ''));
-  if (!secretoValido(desdeRuta)) return rechazar(res);
+  if (!secretoValido(desdeRuta)) return rechazarRuta(res);
   return next();
 };
 
