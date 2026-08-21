@@ -1,9 +1,12 @@
 # dotenv files
 .env
 .env.*
+# los .env.example solo documentan nombres de variables, sin valores: se versionan
+!.env.example
 
 # node
 node_modules/
 
 # build outputs
 /dist/
+mcp-server/dist/
