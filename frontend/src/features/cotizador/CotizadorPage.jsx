@@ -5118,7 +5118,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         </nav>
 
-        <main className={`${isClient ? 'w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
+        {/* w-[92%] junto a w-full aplicaba dos anchos en conflicto sobre el mismo
+            elemento y cual ganaba dependia del orden del CSS compilado. Se usa
+            max-w, que expresa lo mismo sin competir con w-full. */}
+        <main className={`${isClient ? 'max-w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
