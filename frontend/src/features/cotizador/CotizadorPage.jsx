@@ -2359,7 +2359,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   );
 
   // Guardar cotización
-  const saveCotizacion = async () => {
+  const saveCotizacion = async ({ silent = false } = {}) => {
     try {
       setSaving(true);
       const registroProyecto = {
@@ -2409,9 +2409,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       // Guardamos el número/folio asignado para que el PDF del borrador ya lo muestre.
       const numeroAsignado = created?.cotizacion?.numero ?? null;
       if (numeroAsignado) setCurrentQuoteNumero(numeroAsignado);
-      alert(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
+      if (!silent) alert(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
+      return created?.cotizacion || null;
     } catch (error) {
       alert(error.message || 'Error al guardar cotización');
+      return null;
     } finally {
       setSaving(false);
     }
@@ -2893,11 +2895,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       alert('No hay productos para exportar');
       return;
     }
-    const folio = currentQuoteNumero ? `COT-${currentQuoteNumero}_` : '';
-    const filenameBase = `${folio}${buildExportFilename(new Date(), cliente.proyecto, cliente.empresa)}`;
     try {
       setSaving(true);
+      // Si la cotización aún no tiene folio, la guardamos para asignarle número antes del PDF.
+      let numero = currentQuoteNumero;
+      if (!numero) {
+        const saved = await saveCotizacion({ silent: true });
+        numero = saved?.numero ?? null;
+      }
+      const folio = numero ? `COT-${numero}_` : '';
+      const filenameBase = `${folio}${buildExportFilename(new Date(), cliente.proyecto, cliente.empresa)}`;
       const payload = buildPdfPayloadFromCurrentQuote();
+      payload.numero = numero ?? payload.numero;
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
       alert(error.message || 'Error exportando PDF');
