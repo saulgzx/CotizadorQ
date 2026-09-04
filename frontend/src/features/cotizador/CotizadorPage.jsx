@@ -305,6 +305,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [newProduct, setNewProduct] = useState({ marca: '', sku: '', mpn: '', desc: '', precio: '', gp: '15', tiempo: 'ETA por confirmar' });
   const [searchTerm, setSearchTerm] = useState('');
   const [cotizacion, setCotizacion] = useState([]);
+  const [currentQuoteNumero, setCurrentQuoteNumero] = useState(null);
   const [cliente, setCliente] = useState({
     nombre: '',
     empresa: '',
@@ -2350,6 +2351,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (cotizacion.length === 0) return;
     if (!confirm('Limpiar todos los productos de la cotización?')) return;
     setCotizacion([]);
+    setCurrentQuoteNumero(null);
   };
   const totalCotizacion = useMemo(
     () => cotizacion.reduce((t, i) => t + calcularPrecioClienteItem(i) * i.cant, 0),
@@ -2393,7 +2395,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             cantidad: item.cant
           }));
 
-      await cotizacionesAPI.create({
+      const created = await cotizacionesAPI.create({
         cliente: {
           nombre: clientePayload.nombre,
           empresa: clientePayload.empresa,
@@ -2404,7 +2406,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         total: totalCotizacion
       });
 
-      alert('Cotización guardada correctamente');
+      // Guardamos el número/folio asignado para que el PDF del borrador ya lo muestre.
+      const numeroAsignado = created?.cotizacion?.numero ?? null;
+      if (numeroAsignado) setCurrentQuoteNumero(numeroAsignado);
+      alert(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
     } catch (error) {
       alert(error.message || 'Error al guardar cotización');
     } finally {
@@ -2837,6 +2842,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     });
     return {
       created_at: new Date().toISOString(),
+      numero: currentQuoteNumero ?? null,
       usuario_role: isCotizadorStockAdmin ? COTIZADOR_STOCK_ADMIN_ROLE : (isAdmin ? 'admin' : 'client'),
       cliente: {
         nombre: cliente.nombre || '',
@@ -2853,6 +2859,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const items = Array.isArray(cot?.items) ? cot.items : [];
     return {
       created_at: cot?.created_at || new Date().toISOString(),
+      numero: cot?.numero ?? null,
       usuario_role: cot?.usuario_role || (isCotizadorStockAdmin ? COTIZADOR_STOCK_ADMIN_ROLE : (isAdmin ? 'admin' : 'client')),
       cliente: {
         nombre: cot?.cliente_nombre || '',
@@ -2886,7 +2893,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       alert('No hay productos para exportar');
       return;
     }
-    const filenameBase = buildExportFilename(new Date(), cliente.proyecto, cliente.empresa);
+    const folio = currentQuoteNumero ? `COT-${currentQuoteNumero}_` : '';
+    const filenameBase = `${folio}${buildExportFilename(new Date(), cliente.proyecto, cliente.empresa)}`;
     try {
       setSaving(true);
       const payload = buildPdfPayloadFromCurrentQuote();
@@ -2901,7 +2909,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const exportHistorialPdf = async (cot) => {
     try {
       setSaving(true);
-      const filenameBase = buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa);
+      const folio = cot?.numero ? `COT-${cot.numero}_` : '';
+      const filenameBase = `${folio}${buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa)}`;
       const payload = buildPdfPayloadFromHistorial(cot);
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {

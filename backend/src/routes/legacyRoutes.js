@@ -285,12 +285,14 @@ const getPdfDateKey = (value) => {
   return date.toLocaleDateString('en-CA');
 };
 
-const buildPdfFilename = (dateValue, projectName, integratorName) => {
+const buildPdfFilename = (dateValue, projectName, integratorName, numero = null) => {
   const dateKey = getPdfDateKey(dateValue) || getPdfDateKey(new Date());
   const project = sanitizePdfFilenamePart(projectName);
   const integrator = sanitizePdfFilenamePart(integratorName);
   const namePart = project || integrator || 'cotizacion';
-  return `${dateKey || 'export'}_${namePart}_v1`;
+  // El número de cotización va primero para que los archivos ordenen y se referencien por folio.
+  const folio = numero ? `COT-${numero}_` : '';
+  return `${folio}${dateKey || 'export'}_${namePart}_v1`;
 };
 
 const formatPdfDateEs = (value) => {
@@ -434,6 +436,10 @@ const generateCotizacionPdfBuffer = ({ cotizacion, items, total, isClient, isAxi
     }
     doc.font('Helvetica').fontSize(11).fillColor('#374151')
       .text(`Fecha: ${formatPdfDateEs(cotizacion.fecha)}`, doc.page.margins.left, y + 8, { align: 'right' });
+    if (cotizacion.numero) {
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#0f2f63')
+        .text(`Cotización N° ${cotizacion.numero}`, doc.page.margins.left, y + 26, { align: 'right' });
+    }
     y += 54;
 
     doc.roundedRect(doc.page.margins.left, y, pageWidth, 54, 6).fill('#f3f4f6');
@@ -1496,6 +1502,15 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS vms VARCHAR(100);`);
     await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id);`);
     await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS usuario VARCHAR(50);`);
+
+    // Número/folio de cotización: secuencia que arranca en 65423. La columna se autoasigna
+    // por DEFAULT, así que cada cotización creada obtiene su número sin tocar el INSERT.
+    await pool.query(`CREATE SEQUENCE IF NOT EXISTS cotizacion_numero_seq START 65423;`);
+    await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS numero INTEGER;`);
+    await pool.query(`ALTER TABLE cotizaciones ALTER COLUMN numero SET DEFAULT nextval('cotizacion_numero_seq');`);
+    // Cotizaciones previas al folio: se numeran con su id (todas por debajo de 65423).
+    await pool.query(`UPDATE cotizaciones SET numero = id WHERE numero IS NULL;`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS cotizaciones_numero_idx ON cotizaciones(numero);`);
 
     console.log('Base de datos inicializada correctamente');
   } catch (error) {
@@ -3942,7 +3957,10 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     const total = Number.isFinite(Number(payload?.total))
       ? parseNumber(payload.total, 0)
       : Number(computedTotal.toFixed(2));
+    const numeroRaw = parseInt(payload?.numero, 10);
+    const numero = Number.isFinite(numeroRaw) && numeroRaw > 0 ? numeroRaw : null;
     const cotizacion = {
+      numero,
       nombre: cliente?.nombre || 'N/A',
       empresa: cliente?.empresa || 'N/A',
       pid: cliente?.pid || cliente?.email || 'N/A',
@@ -3952,7 +3970,7 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     const pdfRole = String(payload?.usuario_role || req.user?.role || '').toLowerCase();
     const isClient = pdfRole === 'client';
     const isAxisProfile = pdfRole === COTIZADOR_STOCK_ADMIN_ROLE;
-    const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa);
+    const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa, numero);
 
     const pdfBuffer = await generateCotizacionPdfBuffer({
       cotizacion,
