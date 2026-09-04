@@ -1503,15 +1503,6 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id);`);
     await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS usuario VARCHAR(50);`);
 
-    // Número/folio de cotización: secuencia que arranca en 65423. La columna se autoasigna
-    // por DEFAULT, así que cada cotización creada obtiene su número sin tocar el INSERT.
-    await pool.query(`CREATE SEQUENCE IF NOT EXISTS cotizacion_numero_seq START 65423;`);
-    await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS numero INTEGER;`);
-    await pool.query(`ALTER TABLE cotizaciones ALTER COLUMN numero SET DEFAULT nextval('cotizacion_numero_seq');`);
-    // Cotizaciones previas al folio: se numeran con su id (todas por debajo de 65423).
-    await pool.query(`UPDATE cotizaciones SET numero = id WHERE numero IS NULL;`);
-    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS cotizaciones_numero_idx ON cotizaciones(numero);`);
-
     console.log('Base de datos inicializada correctamente');
   } catch (error) {
     console.error('Error inicializando DB:', error);
@@ -1835,16 +1826,34 @@ const authenticateToken = requireAuth;
 // ==================== RUTAS ====================
 
 // Health check
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
   // commit y deploy los inyecta Railway en cada build. Sirven para saber que
   // codigo esta realmente corriendo sin tener que adivinar por el comportamiento.
-  res.json({
+  const payload = {
     status: 'OK',
     message: 'API Cotizador funcionando',
     version: APP_VERSION,
     commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
     deploy: process.env.RAILWAY_DEPLOYMENT_ID || null
-  });
+  };
+  // Diagnóstico de migración del folio (solo con ?diag=1, para no consultar la DB en cada health-check).
+  if (req.query.diag === '1') {
+    try {
+      const col = await pool.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = 'cotizaciones' AND column_name = 'numero' LIMIT 1`
+      );
+      payload.numero_column = col.rows.length > 0;
+      try {
+        const seq = await pool.query(`SELECT last_value FROM cotizacion_numero_seq`);
+        payload.numero_seq_last = seq.rows[0]?.last_value != null ? String(seq.rows[0].last_value) : null;
+      } catch {
+        payload.numero_seq_last = 'no-seq';
+      }
+    } catch (error) {
+      payload.diag_error = error.message;
+    }
+  }
+  res.json(payload);
 });
 
 // LOGIN
@@ -4018,10 +4027,26 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Migración del folio de cotización, AISLADA de initDB para que corra aunque initDB falle
+// en algún ALTER previo. Idempotente. Cada cotización creada obtiene su número por DEFAULT.
+const ensureCotizacionNumero = async () => {
+  try {
+    await pool.query(`CREATE SEQUENCE IF NOT EXISTS cotizacion_numero_seq START 65423;`);
+    await pool.query(`ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS numero INTEGER;`);
+    await pool.query(`ALTER TABLE cotizaciones ALTER COLUMN numero SET DEFAULT nextval('cotizacion_numero_seq');`);
+    await pool.query(`UPDATE cotizaciones SET numero = id WHERE numero IS NULL;`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS cotizaciones_numero_idx ON cotizaciones(numero);`);
+    console.log('Folio de cotización listo (secuencia 65423).');
+  } catch (error) {
+    console.error('Error preparando el folio de cotización:', error);
+  }
+};
+
 const startServer = async (port = PORT) => {
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
+    await ensureCotizacionNumero();
     try {
       const initialQnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'boot' });
       const initialAxis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'boot' });
