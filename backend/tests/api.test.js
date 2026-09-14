@@ -79,6 +79,52 @@ describe('API security and critical endpoints', () => {
     expect(response.body.session?.session_id).toBe('session-login-1');
   });
 
+  test('POST /api/login survives a concurrent login with the same session id (unique violation)', async () => {
+    mockCompare.mockResolvedValue(true);
+    const sesionUpdates = [];
+    mockQuery.mockImplementation((sql, params) => {
+      if (sql.includes('FROM login_logs') && sql.includes('success = false')) {
+        return Promise.resolve({ rows: [{ user_failures: 0, ip_failures: 0 }] });
+      }
+      if (sql.includes('SELECT * FROM usuarios WHERE usuario = $1')) {
+        return Promise.resolve({
+          rows: [{ id: 7, usuario: 'mcp_bot', password: 'hashed', nombre: 'Bot', role: 'client', empresa: '' }]
+        });
+      }
+      if (sql.includes('DELETE FROM sesiones WHERE user_id = $1')) return Promise.resolve({ rows: [] });
+      if (sql.includes('SELECT id FROM sesiones WHERE user_id = $1 AND session_id = $2')) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes('FROM sesiones') && sql.includes('revoked = false')) return Promise.resolve({ rows: [] });
+      if (sql.includes('INSERT INTO sesiones')) {
+        // La otra peticion concurrente inserto primero.
+        const duplicate = new Error('duplicate key value violates unique constraint "sesiones_user_session_idx"');
+        duplicate.code = '23505';
+        return Promise.reject(duplicate);
+      }
+      if (sql.includes('UPDATE sesiones') && sql.includes('WHERE user_id = $1 AND session_id = $2')) {
+        sesionUpdates.push(params);
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes('INSERT INTO login_logs')) return Promise.resolve({ rows: [] });
+      if (sql.includes('UPDATE login_logs') || sql.includes('UPDATE sesiones SET geo_')) {
+        return Promise.resolve({ rows: [] });
+      }
+      throw new Error(`Unhandled SQL in concurrent login test: ${sql}`);
+    });
+
+    const response = await request(app)
+      .post('/api/login')
+      .set('x-session-id', 'mcp-fixed-session')
+      .set('x-device-id', 'mcp-server')
+      .send({ usuario: 'mcp_bot', password: 'password123' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.token).toBeTruthy();
+    expect(sesionUpdates).toHaveLength(1);
+    expect(sesionUpdates[0].slice(0, 2)).toEqual([7, 'mcp-fixed-session']);
+  });
+
   test('GET /api/usuarios returns 403 for non-admin', async () => {
     const token = makeToken({ id: 2, usuario: 'client', role: 'client' });
     mockQuery.mockImplementation((sql) => {

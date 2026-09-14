@@ -7,6 +7,17 @@
 // Regla dura: ni el password ni el token salen nunca en logs ni en errores.
 
 import { randomUUID } from 'node:crypto';
+import {
+  buscarProductoTolerante,
+  normalizarMpn,
+  unidadesDe,
+  type LecturaStock,
+  type Producto,
+  type TipoCoincidencia
+} from './dominio.js';
+import { guardarSnapshot, leerSnapshot } from './snapshot.js';
+
+export type { LecturaStock, Producto, TipoCoincidencia } from './dominio.js';
 
 const API_URL = (process.env.COTIZADOR_API_URL || '').replace(/\/+$/, '');
 const USER = process.env.COTIZADOR_USER || '';
@@ -34,17 +45,22 @@ const TIMEOUT_MS = Number(process.env.COTIZADOR_TIMEOUT_MS || 30000);
 const MAX_RETRIES = Number(process.env.COTIZADOR_MAX_RETRIES || 3);
 const CATALOGO_TTL_MS = Number(process.env.CATALOGO_TTL_MIN || 10) * 60 * 1000;
 const STOCK_TTL_MS = Number(process.env.STOCK_TTL_MIN || 5) * 60 * 1000;
+// Una lectura fallida se recuerda poco: cachearla 5 min dejaba el stock caido
+// aunque el backend ya se hubiera recuperado.
+const STOCK_FALLO_TTL_MS = Number(process.env.STOCK_FALLO_TTL_SEG || 30) * 1000;
+// Tras un login fallido no se reintenta de inmediato: cada intento cuenta para
+// el rate limit del backend (5 fallos en 15 min bloquean la cuenta).
+const LOGIN_ENFRIAMIENTO_MS = Number(process.env.LOGIN_ENFRIAMIENTO_SEG || 60) * 1000;
 
-export interface Producto {
-  id: number;
-  origen: string;
-  marca: string;
-  sku: string;
-  mpn: string;
-  descripcion: string;
-  tiempo_entrega: string;
-  precio_cliente: number;
-}
+export const DIAS_CREACION_SKU = Math.max(0, Math.trunc(Number(process.env.DIAS_CREACION_SKU ?? 7)));
+
+// MPN EOL adicionales a src/datos/eol.ts, coma-separados.
+export const EOL_EXTRA: ReadonlySet<string> = new Set(
+  (process.env.MCP_EOL_MPN || '')
+    .split(',')
+    .map((valor) => valor.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+    .filter(Boolean)
+);
 
 export interface LineaResuelta {
   /** Como se llego al producto: exacta, parcial o por descripcion. */
@@ -82,6 +98,15 @@ export const verificarConfig = (): void => {
         'Cargalas en Railway > servicio mcp-server > Variables.'
     );
   }
+  // Diagnostico T0.1: comillas o espacios pegados junto al valor en Railway
+  // producen un login fallido que parece "contraseña incorrecta".
+  for (const [nombre, valor] of [
+    ['COTIZADOR_USER', USER],
+    ['COTIZADOR_PASS', PASS]
+  ] as const) {
+    if (valor !== valor.trim()) console.warn(`[config] ${nombre} tiene espacios al inicio o al final.`);
+    if (/^["'].*["']$/.test(valor)) console.warn(`[config] ${nombre} viene envuelta en comillas.`);
+  }
 };
 
 const dormir = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,22 +121,102 @@ const leerRetryAfter = (valor: string | null): number | null => {
   return null;
 };
 
-let tokenCache: string | null = null;
+// ------------------------------------------------------------------- login
 
-const login = async (): Promise<string> => {
+const MAX_CUERPO_LOG = 2048;
+const CABECERAS_OMITIDAS = new Set(['set-cookie', 'authorization', 'cookie']);
+
+/** Quita cualquier aparicion de las credenciales antes de loguear. */
+const censurar = (texto: string) => {
+  let limpio = texto;
+  for (const secreto of [PASS, USER]) {
+    if (secreto && secreto.length >= 3) limpio = limpio.split(secreto).join('[censurado]');
+  }
+  return limpio.replace(/"token"\s*:\s*"[^"]*"/g, '"token":"[censurado]"');
+};
+
+export interface FalloLogin {
+  status: number | null;
+  /** Mensaje de error que devolvio el backend, si vino en JSON. */
+  error_backend: string | null;
+  en: string;
+}
+let ultimoFalloLogin: FalloLogin | null = null;
+export const getUltimoFalloLogin = () => ultimoFalloLogin;
+
+/**
+ * Diagnostico T0.1: el status solo no distingue una credencial rota (401) de
+ * un error de aplicacion (500 con "Error del servidor"), un bloqueo (429) o
+ * una pagina HTML de un proxy. Se loguea cuerpo y cabeceras, truncados y sin
+ * credenciales.
+ */
+const registrarFalloLogin = async (response: Response): Promise<FalloLogin> => {
+  let cuerpo = '';
+  try {
+    cuerpo = await response.text();
+  } catch {
+    /* sin cuerpo legible */
+  }
+  let errorBackend: string | null = null;
+  try {
+    errorBackend = (JSON.parse(cuerpo) as { error?: string })?.error || null;
+  } catch {
+    /* no era JSON: probablemente HTML de un proxy o del runtime */
+  }
+  const cabeceras = Object.fromEntries(
+    [...response.headers.entries()].filter(([nombre]) => !CABECERAS_OMITIDAS.has(nombre.toLowerCase()))
+  );
+  console.error(
+    '[login] fallo',
+    JSON.stringify({
+      status: response.status,
+      cabeceras,
+      cuerpo: censurar(cuerpo.slice(0, MAX_CUERPO_LOG)),
+      cuerpo_truncado: cuerpo.length > MAX_CUERPO_LOG
+    })
+  );
+  const fallo: FalloLogin = {
+    status: response.status,
+    error_backend: errorBackend ? censurar(errorBackend).slice(0, 200) : null,
+    en: new Date().toISOString()
+  };
+  ultimoFalloLogin = fallo;
+  return fallo;
+};
+
+const pistaPorStatus = (status: number) => {
+  if (status === 401) return 'Credencial rechazada: revisa COTIZADOR_USER y COTIZADOR_PASS.';
+  if (status === 429) return 'Cuenta o IP bloqueada por intentos fallidos: espera 15 min antes de reintentar.';
+  if (status >= 500) return 'Error del lado de CotizadorQ, no de la credencial: revisa los logs del backend.';
+  return 'Revisa COTIZADOR_USER y COTIZADOR_PASS.';
+};
+
+let tokenCache: string | null = null;
+let loginEnCurso: Promise<string> | null = null;
+let errorLoginReciente: { error: CotizadorError; hasta: number } | null = null;
+
+const loginReal = async (): Promise<string> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const response = await fetch(`${API_URL}/api/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...cabecerasSesion() },
-      body: JSON.stringify({ usuario: USER, password: PASS }),
-      signal: controller.signal
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...cabecerasSesion() },
+        body: JSON.stringify({ usuario: USER, password: PASS }),
+        signal: controller.signal
+      });
+    } catch {
+      ultimoFalloLogin = { status: null, error_backend: null, en: new Date().toISOString() };
+      throw new CotizadorError('No se pudo contactar a CotizadorQ para el login.');
+    }
     if (!response.ok) {
-      // Deliberadamente sin cuerpo ni credenciales en el mensaje.
+      const fallo = await registrarFalloLogin(response);
+      // El mensaje lleva el error del backend (nunca credenciales) y una pista.
       throw new CotizadorError(
-        `Login contra CotizadorQ fallo (HTTP ${response.status}). Revisa COTIZADOR_USER y COTIZADOR_PASS.`,
+        `Login contra CotizadorQ fallo (HTTP ${response.status}` +
+          `${fallo.error_backend ? `: ${fallo.error_backend}` : ''}). ${pistaPorStatus(response.status)}`,
         response.status
       );
     }
@@ -120,13 +225,49 @@ const login = async (): Promise<string> => {
       throw new CotizadorError('El login no devolvio token.');
     }
     tokenCache = data.token;
+    ultimoFalloLogin = null;
     return data.token;
   } finally {
     clearTimeout(timer);
   }
 };
 
+/**
+ * Un solo login a la vez. Antes, consultar_producto pedia catalogo y stock en
+ * paralelo y, sin token, disparaba DOS logins simultaneos con el mismo
+ * X-Session-Id. El backend inserta la sesion con un indice unico
+ * (user_id, session_id): el segundo INSERT chocaba y el login respondia 500.
+ * El catalogo se llevaba el token y el stock se quedaba con el error.
+ */
+export const login = (): Promise<string> => {
+  if (loginEnCurso) return loginEnCurso;
+  if (errorLoginReciente && Date.now() < errorLoginReciente.hasta) {
+    return Promise.reject(errorLoginReciente.error);
+  }
+  loginEnCurso = loginReal()
+    .then((token) => {
+      errorLoginReciente = null;
+      return token;
+    })
+    .catch((error: unknown) => {
+      const fallo = error instanceof CotizadorError ? error : new CotizadorError('Login fallo.');
+      errorLoginReciente = { error: fallo, hasta: Date.now() + LOGIN_ENFRIAMIENTO_MS };
+      throw fallo;
+    })
+    .finally(() => {
+      loginEnCurso = null;
+    });
+  return loginEnCurso;
+};
+
 const getToken = async (): Promise<string> => (tokenCache ? tokenCache : login());
+
+/** Para el chequeo periodico: fuerza un login nuevo, saltando token y enfriamiento. */
+export const loginForzado = (): Promise<string> => {
+  tokenCache = null;
+  errorLoginReciente = null;
+  return login();
+};
 
 interface PeticionOpts {
   method?: string;
@@ -162,7 +303,11 @@ const peticion = async <T>(ruta: string, opts: PeticionOpts = {}): Promise<T> =>
       if (response.status === 401 && !reintentoPorAuth) {
         // El JWT dura 24h; si expiro, un solo re-login y se reintenta.
         reintentoPorAuth = true;
-        tokenCache = null;
+        // Solo se descarta si nadie lo renovo mientras tanto.
+        if (tokenCache === token) tokenCache = null;
+        // El re-login no gasta un intento: con MAX_RETRIES=0 el loop terminaba
+        // aca y el error real del login quedaba tapado por uno generico.
+        intento -= 1;
         continue;
       }
 
@@ -211,9 +356,7 @@ interface Cache<T> {
 }
 
 const catalogoCache: Cache<Producto[]> = { datos: null, expira: 0 };
-const stockCache: Cache<Map<string, number | string>> = { datos: null, expira: 0 };
-
-const normalizar = (valor: unknown) => String(valor ?? '').trim().toUpperCase();
+const stockCache: Cache<LecturaStock> = { datos: null, expira: 0 };
 
 export const getCatalogo = async (): Promise<Producto[]> => {
   if (catalogoCache.datos && Date.now() < catalogoCache.expira) return catalogoCache.datos;
@@ -225,120 +368,64 @@ export const getCatalogo = async (): Promise<Producto[]> => {
   return productos;
 };
 
-// Estado de la ultima lectura de stock. Existe porque tragarse el error dejaba
-// todo en null sin distinguir "no hay unidades" de "no pude leer el stock", que
-// son dos cosas muy distintas para quien cotiza.
-export interface EstadoStock {
-  entradas: number;
-  error: string | null;
-}
-let estadoStock: EstadoStock = { entradas: 0, error: null };
-export const getEstadoStock = (): EstadoStock => estadoStock;
+// ------------------------------------------------------------------- stock
 
-export const getStock = async (): Promise<Map<string, number | string>> => {
-  if (stockCache.datos && Date.now() < stockCache.expira) return stockCache.datos;
+/** Lee /api/stock en vivo. Lanza si falla o si viene vacio. */
+export const leerStockVivo = async (): Promise<Map<string, number | string>> => {
+  const data = await peticion<{ items?: Array<{ mpn: string; quantity: number | string }> }>('/api/stock');
   const mapa = new Map<string, number | string>();
-  let error: string | null = null;
-  try {
-    const data = await peticion<{ items?: Array<{ mpn: string; quantity: number | string }> }>(
-      '/api/stock'
-    );
-    for (const item of data?.items || []) {
-      const clave = normalizar(item?.mpn);
-      if (clave) mapa.set(clave, item.quantity);
-    }
-    if (mapa.size === 0) error = 'El endpoint /api/stock respondio sin items.';
-  } catch (fallo) {
-    // El stock sale de Google Sheets y puede fallar por su cuenta: no se tumba
-    // la consulta de precios, pero el fallo SI se reporta.
-    error = fallo instanceof Error ? fallo.message : 'Error desconocido leyendo stock';
+  for (const item of data?.items || []) {
+    const clave = normalizarMpn(item?.mpn);
+    if (clave) mapa.set(clave, item.quantity);
   }
-  estadoStock = { entradas: mapa.size, error };
-  stockCache.datos = mapa;
-  stockCache.expira = Date.now() + STOCK_TTL_MS;
+  if (mapa.size === 0) throw new CotizadorError('El endpoint /api/stock respondio sin items.');
   return mapa;
 };
 
-// La app reemplaza el plazo de entrega por el stock cuando lo hay:
-//   tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
-// El MCP tiene que decir lo mismo, o daria "8-10 semanas" para algo que esta
-// en bodega listo para despachar.
-export const SUFIJO_ENTREGA_STOCK = 'unidades disponible en entrega inmediata, salvo venta previa';
-
-export const textoEntrega = (producto: Producto, stock: number | string | null): string => {
-  if (stock === null || stock === undefined || stock === '') return producto.tiempo_entrega || '';
-  const cantidad = String(stock).trim();
-  if (!cantidad) return producto.tiempo_entrega || '';
-  return `${cantidad} ${SUFIJO_ENTREGA_STOCK}`;
-};
-
 /**
- * Clave de comparacion: solo letras y numeros, en mayuscula. Asi "rail b02",
- * "RAIL-B02" y "Rail_B02" colapsan al mismo valor RAILB02.
+ * Stock con respaldo (T0.3). Una lectura en vivo que funciona se guarda como
+ * snapshot; si falla, se sirve el ultimo snapshot con su fecha y marcado como
+ * NO verificado. Nunca tumba la consulta de precios.
  */
-const clavear = (valor: unknown) =>
-  String(valor ?? '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
+export const getStock = async (): Promise<LecturaStock> => {
+  if (stockCache.datos && Date.now() < stockCache.expira) return stockCache.datos;
 
-export type TipoCoincidencia = 'exacta' | 'parcial' | 'descripcion';
-
-export interface ResultadoBusqueda {
-  producto: Producto | null;
-  tipo: TipoCoincidencia | null;
-  /** Se llena cuando hay mas de un candidato: no se elige por el usuario. */
-  candidatos: Producto[];
-}
-
-const MAX_CANDIDATOS = 10;
-
-/**
- * Busqueda tolerante en tres niveles. Deliberadamente NO usa distancia de
- * edicion sobre los codigos: dos productos reales pueden diferir en un solo
- * caracter (RAIL-B02 / RAIL-B03) y elegir "el mas parecido" pondria el
- * articulo equivocado en una cotizacion real. Ante ambiguedad se devuelven los
- * candidatos para que decida una persona.
- */
-export const buscarProductoTolerante = (
-  catalogo: Producto[],
-  texto: string
-): ResultadoBusqueda => {
-  const vacio: ResultadoBusqueda = { producto: null, tipo: null, candidatos: [] };
-  const clave = clavear(texto);
-  if (!clave) return vacio;
-
-  // Nivel 1: coincidencia exacta ignorando guiones, espacios y mayusculas.
-  const exacta =
-    catalogo.find((p) => clavear(p.sku) === clave) ||
-    catalogo.find((p) => clavear(p.mpn) === clave);
-  if (exacta) return { producto: exacta, tipo: 'exacta', candidatos: [] };
-
-  // Nivel 2: el codigo contiene lo escrito (sirve para codigos incompletos).
-  const parciales = catalogo.filter(
-    (p) => clavear(p.sku).includes(clave) || clavear(p.mpn).includes(clave)
-  );
-  if (parciales.length === 1) return { producto: parciales[0], tipo: 'parcial', candidatos: [] };
-  if (parciales.length > 1) {
-    return { producto: null, tipo: null, candidatos: parciales.slice(0, MAX_CANDIDATOS) };
+  let lectura: LecturaStock;
+  try {
+    const mapa = await leerStockVivo();
+    const leidoEn = new Date().toISOString();
+    await guardarSnapshot(mapa, leidoEn);
+    lectura = { mapa, verificado: true, origen: 'vivo', leido_en: leidoEn, error: null };
+  } catch (fallo) {
+    // El stock sale de Google Sheets y puede fallar por su cuenta: no se tumba
+    // la consulta de precios, pero el fallo SI se reporta.
+    const error = fallo instanceof Error ? fallo.message : 'Error desconocido leyendo stock';
+    const snapshot = await leerSnapshot();
+    lectura = snapshot
+      ? {
+          mapa: new Map(Object.entries(snapshot.items)),
+          verificado: false,
+          origen: 'snapshot',
+          leido_en: snapshot.leido_en,
+          error
+        }
+      : { mapa: new Map(), verificado: false, origen: 'ninguno', leido_en: null, error };
   }
 
-  // Nivel 3: todas las palabras aparecen en algun campo del producto.
-  const palabras = String(texto || '')
-    .toLowerCase()
-    .split(/\s+/)
-    .map((palabra) => palabra.trim())
-    .filter((palabra) => palabra.length > 1);
-  if (palabras.length === 0) return vacio;
-
-  const porDescripcion = catalogo.filter((p) => {
-    const campos = `${p.sku} ${p.mpn} ${p.marca} ${p.descripcion}`.toLowerCase();
-    return palabras.every((palabra) => campos.includes(palabra));
-  });
-  if (porDescripcion.length === 1) {
-    return { producto: porDescripcion[0], tipo: 'descripcion', candidatos: [] };
-  }
-  return { producto: null, tipo: null, candidatos: porDescripcion.slice(0, MAX_CANDIDATOS) };
+  stockCache.datos = lectura;
+  stockCache.expira = Date.now() + (lectura.verificado ? STOCK_TTL_MS : STOCK_FALLO_TTL_MS);
+  return lectura;
 };
+
+/** Diagnostico compacto para el JSON de las tools. */
+export const diagnosticoStock = (lectura: LecturaStock) => ({
+  origen: lectura.origen,
+  verificado: lectura.verificado,
+  leido_en: lectura.leido_en,
+  entradas_cargadas: lectura.mapa.size,
+  error: lectura.error,
+  ultimo_fallo_login: getUltimoFalloLogin()
+});
 
 /** Compatibilidad: devuelve solo el producto cuando la busqueda es concluyente. */
 export const buscarProducto = (catalogo: Producto[], sku: string): Producto | null =>
@@ -350,8 +437,15 @@ export const buscarProducto = (catalogo: Producto[], sku: string): Producto | nu
  */
 export const resolverItems = async (
   items: Array<{ sku: string; cantidad: number }>
-): Promise<{ lineas: LineaResuelta[]; noResueltos: SkuNoResuelto[]; total: number }> => {
-  const [catalogo, stock] = await Promise.all([getCatalogo(), getStock()]);
+): Promise<{
+  lineas: LineaResuelta[];
+  noResueltos: SkuNoResuelto[];
+  total: number;
+  lectura: LecturaStock;
+}> => {
+  // Secuencial a proposito: el catalogo trae el token y el stock lo reusa.
+  const catalogo = await getCatalogo();
+  const lectura = await getStock();
 
   // Se agrupa por producto_id y no por el texto pedido: un mismo producto puede
   // llegar dos veces, por SKU y por MPN, o repetido en la misma lista. Sin esto
@@ -385,7 +479,7 @@ export const resolverItems = async (
       coincidencia: tipo || 'exacta',
       producto,
       cantidad,
-      stock: stock.get(normalizar(producto.mpn)) ?? null,
+      stock: unidadesDe(lectura, producto),
       precio_unitario: Number(precioUnitario.toFixed(2)),
       precio_total: Number((precioUnitario * cantidad).toFixed(2))
     });
@@ -394,7 +488,7 @@ export const resolverItems = async (
   const lineas = [...porProducto.values()];
 
   const total = Number(lineas.reduce((suma, l) => suma + l.precio_total, 0).toFixed(2));
-  return { lineas, noResueltos, total };
+  return { lineas, noResueltos, total, lectura };
 };
 
 // ------------------------------------------------------------ cotizaciones

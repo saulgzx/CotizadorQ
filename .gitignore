@@ -10,3 +10,6 @@ node_modules/
 # build outputs
 /dist/
 mcp-server/dist/
+mcp-server/dist-test/
+# el Dockerfile del MCP usa npm install sin lockfile a proposito
+mcp-server/package-lock.json

@@ -4,6 +4,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { NextFunction, Request, Response } from 'express';
 import { verificarConfig } from './cotizador.js';
+import { estadoMonitor, iniciarMonitor } from './monitor.js';
 import { registrarTools } from './tools.js';
 
 const PORT = Number(process.env.PORT || 8080);
@@ -96,7 +97,20 @@ const node = toNodeHandler(handler);
 const servirMcp = (req: Request, res: Response) => void node(req, res, req.body);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'OK', service: 'cotizadorq-mcp', commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null });
+  // /health es publico: del monitor solo sale el semaforo, nunca el error.
+  const monitor = estadoMonitor();
+  res.json({
+    status: 'OK',
+    service: 'cotizadorq-mcp',
+    commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
+    stock: monitor
+      ? {
+          ok: monitor.ok,
+          fallos_consecutivos: monitor.fallos_consecutivos,
+          ultimo_chequeo: monitor.ultimo_chequeo
+        }
+      : null
+  });
 });
 
 // Este servidor no usa OAuth. Si un cliente cae aca es porque recibio un 401 y
@@ -120,4 +134,5 @@ app.all(/^\/mcp\/(.+)$/, authPorRuta, servirMcp);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`cotizadorq-mcp escuchando en :${PORT}`);
+  iniciarMonitor();
 });
