@@ -44,6 +44,19 @@ const cotizacionSchema = z.object({
   total: z.union([z.number(), z.string()]).optional()
 }).passthrough();
 
+// Edicion completa desde el editor (solo admin). Las lineas se normalizan en
+// services/cotizacionItems; aca solo se exige la forma.
+const cotizacionEditSchema = z.object({
+  cliente: z.object({}).passthrough().optional(),
+  estado: z.enum(['enviada', 'revision', 'rechazada', 'aprobada']).optional(),
+  expected_version: z.coerce.number().int().positive().optional(),
+  nota: z.string().max(500).optional(),
+  items: z.array(z.object({
+    cantidad: z.union([z.number(), z.string()]),
+    precio_unitario: z.union([z.number(), z.string()])
+  }).passthrough()).min(1, 'La cotizacion debe tener al menos una linea')
+}).passthrough();
+
 const validate = (schema, pick = 'body') => (req, res, next) => {
   const result = schema.safeParse(req[pick] || {});
   if (!result.success) {
@@ -62,8 +75,10 @@ const validateBulkProductosInput = validate(bulkProductosSchema);
 const validatePasswordInput = validate(passwordSchema);
 const validateCreateUserInput = validate(createUserSchema);
 const validateCotizacionInput = validate(cotizacionSchema);
+const validateCotizacionEditInput = validate(cotizacionEditSchema);
 
 module.exports = {
+  validateCotizacionEditInput,
   validateLoginInput,
   validateProductoInput,
   validateBulkProductosInput,

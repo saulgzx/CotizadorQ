@@ -262,8 +262,26 @@ export const cotizacionesAPI = {
           detail = text;
         }
       }
-      throw new Error(`Error actualizando cotización (${response.status})${detail ? `: ${detail}` : ''}`);
+      const error = new Error(
+        response.status === 409 && detail
+          ? detail
+          : `Error actualizando cotización (${response.status})${detail ? `: ${detail}` : ''}`
+      );
+      error.status = response.status;
+      throw error;
     }
+    return response.json();
+  },
+  getVersiones: async (id) => {
+    const response = await fetchWithAuth(`/api/cotizaciones/${encodeURIComponent(id)}/versiones`);
+    if (!response.ok) throw new Error('Error obteniendo versiones');
+    return response.json();
+  },
+  getVersion: async (id, version) => {
+    const response = await fetchWithAuth(
+      `/api/cotizaciones/${encodeURIComponent(id)}/versiones/${encodeURIComponent(version)}`
+    );
+    if (!response.ok) throw new Error('Error obteniendo la versión');
     return response.json();
   },
   getFunnel: async ({ days = 30, empresa = '', from = '', to = '' } = {}) => {

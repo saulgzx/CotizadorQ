@@ -17,7 +17,8 @@ const {
   validateBulkProductosInput,
   validatePasswordInput,
   validateCreateUserInput,
-  validateCotizacionInput
+  validateCotizacionInput,
+  validateCotizacionEditInput
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
 
@@ -85,8 +86,17 @@ const SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.read
 const SHEETS_SCOPE_RW = 'https://www.googleapis.com/auth/spreadsheets';
 const DEFAULT_ORIGIN = 'QNAP';
 const SHEETS_SYNC_HOURS = parseFloat(process.env.GOOGLE_SHEETS_SYNC_HOURS || '12');
-const QNAP_CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12 };
-const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
+const {
+  QNAP_CONSTANTS,
+  AXIS_CONSTANTS,
+  costoFinal,
+  normalizarLineaAdmin,
+  serializarItems,
+  resumen: resumenCotizacion,
+  insertarItems,
+  ensureCotizacionEdicion,
+  esAdminCompleto
+} = require('../services/cotizacionItems');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
 const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
@@ -3549,8 +3559,9 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
         const origenValue = producto.origen || DEFAULT_ORIGIN;
         const precioDisty = parseNumber(producto.precio_disty, 0);
         const gpUsed = origenValue === 'AXIS' ? gpAxis : gpQnap;
+        const partnerRebate = origenValue === 'AXIS' ? getAxisPartnerRebate(producto, partnerCategory) : null;
         const precioUnitario = origenValue === 'AXIS'
-          ? calcularPrecioClienteAxis(precioDisty, gpUsed, getAxisPartnerRebate(producto, partnerCategory), 0)
+          ? calcularPrecioClienteAxis(precioDisty, gpUsed, partnerRebate, 0)
           : calcularPrecioClienteQnap(precioDisty, gpUsed);
         const precioTotal = precioUnitario * cantidad;
         totalSum += precioTotal;
@@ -3560,7 +3571,12 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
           sku: producto.sku || '',
           mpn: producto.mpn || '',
           descripcion: producto.descripcion || '',
+          origen: origenValue,
           precio_disty: precioDisty,
+          rebate_partner: partnerRebate,
+          partner_category: origenValue === 'AXIS' ? partnerCategory : null,
+          // Mismo calculo que el precio: el costo queda guardado para el margen del admin.
+          costo_unitario: costoFinal({ origen: origenValue, precio_disty: precioDisty, rebate_partner: partnerRebate }),
           gp: gpUsed,
           cantidad,
           precio_unitario: Number(precioUnitario.toFixed(2)),
@@ -3607,35 +3623,11 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     
     const cotizacionId = cotResult.rows[0].id;
     
-    // Insertar items en batch
-    const rowsToInsert = Array.isArray(itemsFinal) ? itemsFinal : [];
-    if (rowsToInsert.length > 0) {
-      const values = [];
-      const placeholders = rowsToInsert.map((item, index) => {
-        const base = index * 12;
-        values.push(
-          cotizacionId,
-          item.producto_id || null,
-          item.marca || '',
-          item.sku || '',
-          item.mpn || '',
-          item.descripcion || '',
-          parseNumber(item.precio_disty, 0),
-          parseNumber(item.gp, 0),
-          parseInt(item.cantidad || item.cant || 1, 10) || 1,
-          parseNumber(item.precio_unitario, 0),
-          parseNumber(item.precio_total, 0),
-          item.tiempo_entrega || ''
-        );
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12})`;
-      });
-      await client.query(
-        `INSERT INTO cotizacion_items
-         (cotizacion_id, producto_id, marca, sku, mpn, descripcion, precio_disty, gp, cantidad, precio_unitario, precio_total, tiempo_entrega)
-         VALUES ${placeholders.join(', ')}`,
-        values
-      );
-    }
+    // Insertar items en batch, con costo y rebate para el margen del admin.
+    const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
+      normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
+    );
+    await insertarItems(client, cotizacionId, rowsToInsert);
 
     await client.query('COMMIT');
     
@@ -3684,89 +3676,160 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
 });
 
 // COTIZACIONES - Actualizar (solo admin)
-app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, async (req, res) => {
+app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotizacionEditInput, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { cliente, items, total } = req.body;
-    const totalValue = Number.isFinite(Number(total)) ? Number(total) : null;
-    const normalizeDate = (value) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Id invalido' });
+    const { cliente, items, estado, expected_version: expectedVersion, nota } = req.body;
+    const textoONull = (value) => {
       if (value === undefined || value === null) return null;
       const trimmed = String(value).trim();
       return trimmed === '' ? null : trimmed;
     };
+
     await client.query('BEGIN');
-    const result = await client.query(
+    // FOR UPDATE: dos pestañas guardando a la vez no pueden pisarse la version.
+    const actualResult = await client.query('SELECT * FROM cotizaciones WHERE id = $1 FOR UPDATE', [id]);
+    if (actualResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cotizacion no encontrada' });
+    }
+    const actual = actualResult.rows[0];
+    const versionActual = Number(actual.version) || 1;
+    if (expectedVersion && Number(expectedVersion) !== versionActual) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `La cotizacion cambio mientras la editabas (version ${versionActual}). Recarga para ver los cambios.`,
+        version_actual: versionActual
+      });
+    }
+
+    // La version vigente se guarda completa antes de sobrescribirla.
+    const itemsActuales = await client.query(
+      'SELECT * FROM cotizacion_items WHERE cotizacion_id = $1 ORDER BY id',
+      [id]
+    );
+    await client.query(
+      `INSERT INTO cotizacion_versiones (cotizacion_id, version, snapshot, total, nota, creado_por)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (cotizacion_id, version) DO NOTHING`,
+      [
+        id,
+        versionActual,
+        JSON.stringify({ cotizacion: actual, items: itemsActuales.rows }),
+        actual.total,
+        textoONull(nota),
+        req.user?.usuario || null
+      ]
+    );
+
+    const lineas = items.map((item, index) => normalizarLineaAdmin(item, index));
+    const total = Number(lineas.reduce((sum, linea) => sum + linea.precio_total, 0).toFixed(2));
+    const c = cliente && typeof cliente === 'object' ? cliente : {};
+    const campo = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? (c[clave] ?? '') : actual[columna]);
+    const fecha = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? textoONull(c[clave]) : actual[columna]);
+
+    const updated = await client.query(
       `UPDATE cotizaciones
-       SET cliente_nombre = COALESCE($1, cliente_nombre),
-           cliente_empresa = COALESCE($2, cliente_empresa),
-           cliente_email = COALESCE($3, cliente_email),
-           cliente_telefono = COALESCE($4, cliente_telefono),
-           cliente_final = COALESCE($5, cliente_final),
-           fecha_ejecucion = COALESCE($6, fecha_ejecucion),
-           fecha_implementacion = COALESCE($7, fecha_implementacion),
-           vms = COALESCE($8, vms),
-           total = COALESCE($9, total)
-       WHERE id = $10
+       SET cliente_nombre = $1,
+           cliente_empresa = $2,
+           cliente_email = $3,
+           cliente_telefono = $4,
+           cliente_final = $5,
+           fecha_ejecucion = $6,
+           fecha_implementacion = $7,
+           vms = $8,
+           total = $9,
+           estado = COALESCE($10, estado),
+           version = $11,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $12
+       WHERE id = $13
        RETURNING *`,
       [
-        cliente?.nombre ?? null,
-        cliente?.empresa ?? null,
-        cliente?.email ?? null,
-        cliente?.telefono ?? null,
-        cliente?.cliente_final ?? null,
-        normalizeDate(cliente?.fecha_ejecucion),
-        normalizeDate(cliente?.fecha_implementacion),
-        cliente?.vms ?? null,
-        totalValue,
+        String(campo('nombre', 'cliente_nombre') ?? '').slice(0, 100),
+        String(campo('empresa', 'cliente_empresa') ?? '').slice(0, 100),
+        String(campo('email', 'cliente_email') ?? '').slice(0, 100),
+        String(campo('telefono', 'cliente_telefono') ?? '').slice(0, 50),
+        textoONull(campo('cliente_final', 'cliente_final')),
+        fecha('fecha_ejecucion', 'fecha_ejecucion'),
+        fecha('fecha_implementacion', 'fecha_implementacion'),
+        textoONull(campo('vms', 'vms')),
+        total,
+        estado || null,
+        versionActual + 1,
+        req.user?.usuario || null,
         id
       ]
     );
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
-    }
-    if (Array.isArray(items)) {
-      await client.query('DELETE FROM cotizacion_items WHERE cotizacion_id = $1', [id]);
-      for (const item of items) {
-        const cantidad = parseInt(item.cantidad || 1, 10);
-        const precioUnitario = parseNumber(item.precio_unitario, 0);
-        const precioTotal = Number.isFinite(Number(item.precio_total))
-          ? Number(item.precio_total)
-          : (precioUnitario * (Number.isNaN(cantidad) ? 1 : cantidad));
-        await client.query(
-          `INSERT INTO cotizacion_items
-           (cotizacion_id, producto_id, marca, sku, mpn, descripcion, precio_disty, gp, cantidad, precio_unitario, precio_total, tiempo_entrega)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [
-            id,
-            item.producto_id || null,
-            item.marca || '',
-            item.sku || '',
-            item.mpn || '',
-            item.descripcion || '',
-            parseNumber(item.precio_disty, 0),
-            parseNumber(item.gp, 0),
-            Number.isNaN(cantidad) ? 1 : cantidad,
-            precioUnitario,
-            precioTotal,
-            item.tiempo_entrega || ''
-          ]
-        );
-      }
-    }
+
+    await client.query('DELETE FROM cotizacion_items WHERE cotizacion_id = $1', [id]);
+    await insertarItems(client, id, lineas);
+    const nuevosItems = await client.query(
+      'SELECT * FROM cotizacion_items WHERE cotizacion_id = $1 ORDER BY id',
+      [id]
+    );
     await client.query('COMMIT');
-    res.json(result.rows[0]);
+
+    res.json({
+      ...updated.rows[0],
+      items: serializarItems(nuevosItems.rows, req.user?.role),
+      resumen: resumenCotizacion(nuevosItems.rows, req.user?.role)
+    });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
       console.error('Error haciendo rollback:', rollbackError);
     }
-    console.error('Error actualizando cotizaciÃ³n:', error);
+    logError(req, error, 'cotizacion_update_failed');
     res.status(500).json({ error: 'Error del servidor' });
   } finally {
     client.release();
+  }
+});
+
+// COTIZACIONES - Versiones anteriores (admin)
+app.get('/api/cotizaciones/:id/versiones', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT version, total, nota, creado_por, creado_en
+       FROM cotizacion_versiones
+       WHERE cotizacion_id = $1
+       ORDER BY version DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    logError(req, error, 'cotizacion_versiones_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+app.get('/api/cotizaciones/:id/versiones/:version', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT version, total, nota, creado_por, creado_en, snapshot
+       FROM cotizacion_versiones
+       WHERE cotizacion_id = $1 AND version = $2`,
+      [req.params.id, req.params.version]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Version no encontrada' });
+    const row = result.rows[0];
+    const snapshot = row.snapshot || {};
+    res.json({
+      version: row.version,
+      total: row.total,
+      nota: row.nota,
+      creado_por: row.creado_por,
+      creado_en: row.creado_en,
+      cotizacion: snapshot.cotizacion || null,
+      items: serializarItems(snapshot.items || [], req.user?.role)
+    });
+  } catch (error) {
+    logError(req, error, 'cotizacion_version_failed');
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -3838,11 +3901,13 @@ app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
       if (!includeItems) return rows;
       const ids = rows.map(row => row.id);
       if (ids.length === 0) return rows;
+      // El SELECT restringido es defensa extra; la garantia es serializarItems.
       const itemsResult = await pool.query(
-        `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items WHERE cotizacion_id = ANY($1::int[])`,
+        `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items
+         WHERE cotizacion_id = ANY($1::int[]) ORDER BY id`,
         [ids]
       );
-      const itemsByCotizacion = itemsResult.rows.reduce((acc, item) => {
+      const itemsByCotizacion = serializarItems(itemsResult.rows, req.user?.role).reduce((acc, item) => {
         if (!acc[item.cotizacion_id]) acc[item.cotizacion_id] = [];
         acc[item.cotizacion_id].push(item);
         return acc;
@@ -4013,13 +4078,15 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
     }
     
     const items = await pool.query(
-      `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items WHERE cotizacion_id = $1`,
+      `SELECT ${isAdmin ? '*' : COTIZACION_ITEM_PUBLIC_COLUMNS} FROM cotizacion_items
+       WHERE cotizacion_id = $1 ORDER BY id`,
       [id]
     );
-    
+
     res.json({
       ...cotizacion.rows[0],
-      items: items.rows
+      items: serializarItems(items.rows, req.user?.role),
+      resumen: resumenCotizacion(items.rows, req.user?.role)
     });
   } catch (error) {
     console.error('Error obteniendo cotizaci?n:', error);
@@ -4047,6 +4114,7 @@ const startServer = async (port = PORT) => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
     await ensureCotizacionNumero();
+    await ensureCotizacionEdicion(pool);
     try {
       const initialQnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'boot' });
       const initialAxis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'boot' });
