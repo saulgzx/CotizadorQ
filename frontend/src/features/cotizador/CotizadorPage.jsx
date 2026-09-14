@@ -1779,7 +1779,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       items.forEach(item => {
         const key = normalizeLookupKey(item?.mpn);
         if (!key) return;
-        map[key] = item?.quantity ?? '';
+        // Solo lo realmente disponible entra al mapa: 0 se trata igual que sin stock.
+        if (!(Number(item?.quantity) > 0)) return;
+        map[key] = item.quantity;
       });
       setStockByMpn(map);
       setCotizacion(prev => prev.map(item => {
@@ -4740,6 +4742,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const tokens = buildSearchTokens(stockCatalogQuery);
     const originFilter = isCotizadorStockAdmin ? 'AXIS' : stockCatalogOrigin;
     const filtrados = stockCatalog.filter(item => {
+      // 0 disponible (sin bodega o todo asignado en OSO) cuenta como sin stock: no se lista.
+      if (!(Number(item.quantity) > 0)) return false;
       if (originFilter !== 'all' && (item.origin || '').toUpperCase() !== originFilter) return false;
       if (tokens.length === 0) return true;
       const haystack = [
@@ -4753,9 +4757,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (!globalQuery) return true;
       return [item.sku, item.mpn, item.name, item.brand].some(v => (v || '').toLowerCase().includes(globalQuery));
     });
-    // Lo que hay en bodega primero; sin unidades al final (sort estable).
-    const sinUnidades = (item) => !(Number(item.quantity) > 0);
-    return [...filtrados].sort((a, b) => Number(sinUnidades(a)) - Number(sinUnidades(b)));
+    return filtrados;
   }, [stockCatalog, stockCatalogQuery, stockCatalogOrigin, globalQuery, isCotizadorStockAdmin]);
 
   const unassignedUsuarios = useMemo(

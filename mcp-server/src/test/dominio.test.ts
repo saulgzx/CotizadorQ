@@ -9,6 +9,7 @@ import {
   textoEntrega,
   textoGarantia,
   textoStock,
+  unidadesDe,
   type LecturaStock,
   type Producto
 } from '../dominio.js';
@@ -62,6 +63,13 @@ describe('T0.2 · no afirmar un plazo que no se verifico', () => {
   test('stock verificado con unidades: entrega inmediata', () => {
     const info = infoEntrega(nas, vivo({ 'TS-435XEU-4G-US': 3 }), 7);
     assert.match(info.entrega || '', /^3 unidades disponible en entrega inmediata/);
+  });
+
+  test('0 disponible cuenta como sin stock: sin unidades y plazo de catalogo', () => {
+    const lectura = vivo({ 'TS-435XEU-4G-US': 0 });
+    assert.equal(unidadesDe(lectura, nas), null);
+    assert.equal(textoStock(lectura, unidadesDe(lectura, nas)), 'sin unidades');
+    assert.equal(infoEntrega(nas, lectura, 7).entrega, '8 - 10 semanas tras OC');
   });
 
   test('stock verificado sin unidades: el plazo de catalogo pasa a ser el real', () => {

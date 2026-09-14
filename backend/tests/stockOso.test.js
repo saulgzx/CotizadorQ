@@ -82,8 +82,8 @@ describe('stock disponible neto de lo asignado en OSO', () => {
     const porMpn = Object.fromEntries(response.body.items.map((i) => [i.mpn, i]));
     expect(porMpn['03181-001']).toEqual({ mpn: '03181-001', quantity: 3, stock_bodega: 9, asignado: 6 });
     expect(porMpn['RAIL-B02']).toMatchObject({ quantity: 15, asignado: 0 });
-    // Asignado mayor que bodega: disponible 0, nunca negativo.
-    expect(porMpn['TS-435XeU-4G-US']).toMatchObject({ quantity: 0, stock_bodega: 2, asignado: 5 });
+    // Todo asignado (5 sobre 2 en bodega): cuenta como sin stock y no se envía.
+    expect(porMpn['TS-435XeU-4G-US']).toBeUndefined();
   });
 
   test('/api/stock/catalog muestra el disponible neto', async () => {
@@ -92,5 +92,7 @@ describe('stock disponible neto de lo asignado en OSO', () => {
     expect(response.status).toBe(200);
     const axis = response.body.items.find((i) => i.mpn === '03181-001');
     expect(axis).toMatchObject({ sku: 'ES006AXS92', quantity: 3, stock_bodega: 9, asignado: 6, origin: 'AXIS' });
+    // El catálogo mantiene la fila (con su desglose) para auditoría; la app no la lista.
+    expect(response.body.items.find((i) => i.mpn === 'TS-435XeU-4G-US')).toMatchObject({ quantity: 0, stock_bodega: 2, asignado: 5 });
   });
 });

@@ -3100,6 +3100,9 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
       const sku = idxSku >= 0 ? String(row[idxSku] || '').trim() : '';
       const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
       const { stock_bodega, asignado, disponible } = aplicarAsignacion(cantidadBodega(rawQty), asignadoPara(asignaciones, { mpn, sku }));
+      // 0 disponible (sin bodega o todo asignado en OSO) es "sin stock": no se envía,
+      // y quien consume este feed usa el plazo del catálogo, igual que un equipo sin stock.
+      if (!(disponible > 0)) continue;
       // quantity es lo disponible: es lo que se usa para prometer entrega inmediata.
       items.push({ mpn, quantity: disponible, stock_bodega, asignado });
     }

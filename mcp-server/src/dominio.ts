@@ -48,6 +48,9 @@ export const SUFIJO_ENTREGA_STOCK = 'unidades disponible en entrega inmediata, s
 export const unidadesDe = (lectura: LecturaStock, producto: Producto): number | string | null => {
   const valor = lectura.mapa.get(normalizarMpn(producto.mpn));
   if (valor === undefined || valor === null || String(valor).trim() === '') return null;
+  // 0 disponible (todo asignado en OSO, o bodega vacia) cuenta como sin stock.
+  const numero = Number(String(valor).replace(',', '.'));
+  if (Number.isFinite(numero) && numero <= 0) return null;
   return valor;
 };
 
