@@ -82,6 +82,7 @@ const pool = new Pool({
 const SHEETS_TAB_QNAP = (process.env.GOOGLE_SHEETS_TAB_QNAP || 'Hoja 1').trim();
 const SHEETS_TAB_AXIS = (process.env.GOOGLE_SHEETS_TAB_AXIS || 'Hoja 2').trim();
 const SHEETS_TAB_STOCK = (process.env.GOOGLE_SHEETS_TAB_STOCK || 'Stock').trim();
+const SHEETS_TAB_ETA = (process.env.GOOGLE_SHEETS_TAB_ETA || 'ETA').trim();
 const SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 const SHEETS_SCOPE_RW = 'https://www.googleapis.com/auth/spreadsheets';
 const DEFAULT_ORIGIN = 'QNAP';
@@ -98,6 +99,7 @@ const {
   esAdminCompleto
 } = require('../services/cotizacionItems');
 const { calcularAsignaciones, asignadoPara, aplicarAsignacion } = require('../services/stockDisponible');
+const { construirMapaEta, textoEta, SEMANAS_ADICIONALES_DEFAULT } = require('../services/etaAxis');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
 const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
@@ -1114,6 +1116,19 @@ const runProductosSync = async (options = {}) => {
 
   const idx = getSheetColumnIndexes(origen, headers);
 
+  // Plazo AXIS desde la pestaña ETA completa. La columna J de LP_AXIS hace lo mismo
+  // pero su VLOOKUP termina en la fila 1711 y deja sin plazo a los productos de abajo.
+  // Si ETA no se puede leer, el sync sigue con la columna J como respaldo.
+  let etaPorMpn = null;
+  if (origen === 'AXIS') {
+    try {
+      const eta = await getSheetData(sheets, sheetId, SHEETS_TAB_ETA);
+      etaPorMpn = construirMapaEta(eta.rows);
+    } catch (error) {
+      logger.warn({ event: 'eta_read_failed', err: compactErrorForLog(error) }, 'No se pudo leer la pestaña ETA; se usa LP_AXIS columna J');
+    }
+  }
+
   // Guarda: si más de la mitad de las filas no son legibles con el mapeo de columnas
   // actual, lo más probable es que el layout de la hoja cambió — abortar antes de corromper.
   const readableRows = dataRows.filter((row) => {
@@ -1157,7 +1172,13 @@ const runProductosSync = async (options = {}) => {
         skipped += 1;
         continue;
       }
-      const axisTiempoEntrega = origen === 'AXIS' ? String(row[9] || '').trim() : '';
+      // Semanas extra = misma regla que LP_AXIS columna J (+4), configurable por ETA_SEMANAS_ADICIONALES.
+      const semanasExtra = Number.isFinite(parseFloat(process.env.ETA_SEMANAS_ADICIONALES))
+        ? parseFloat(process.env.ETA_SEMANAS_ADICIONALES)
+        : SEMANAS_ADICIONALES_DEFAULT;
+      const axisTiempoEntrega = origen === 'AXIS'
+        ? (textoEta(etaPorMpn, mpn, semanasExtra) || String(row[9] || '').trim())
+        : '';
       const activo = parseActivoValue(idx.activo >= 0 ? row[idx.activo] : true);
       const producto = {
         origen,
