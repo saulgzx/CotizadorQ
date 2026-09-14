@@ -1741,11 +1741,25 @@ const upsertSession = async (user, req) => {
     await pool.query('UPDATE sesiones SET revoked = true WHERE id = $1', [oldest.id]);
   }
 
-  await pool.query(
-    `INSERT INTO sesiones (user_id, session_id, device_id, ip_address, user_agent)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [user.id, sessionId, deviceId || null, ip || null, userAgent || null]
-  );
+  try {
+    await pool.query(
+      `INSERT INTO sesiones (user_id, session_id, device_id, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.id, sessionId, deviceId || null, ip || null, userAgent || null]
+    );
+  } catch (error) {
+    // Dos peticiones concurrentes con el mismo X-Session-Id (logins en paralelo
+    // del MCP, o varias rutas autenticadas a la vez) pasan ambas el SELECT de
+    // arriba y la segunda choca con sesiones_user_session_idx. Antes eso salia
+    // como HTTP 500 en /api/login; la sesion ya existe, asi que basta refrescarla.
+    if (error?.code !== '23505') throw error;
+    await pool.query(
+      `UPDATE sesiones
+       SET device_id = $3, ip_address = $4, user_agent = $5, last_seen = CURRENT_TIMESTAMP, revoked = false
+       WHERE user_id = $1 AND session_id = $2`,
+      [user.id, sessionId, deviceId || null, ip || null, userAgent || null]
+    );
+  }
 
   enrichSessionGeo(user.id, sessionId, ip);
   return { sessionId, revokedSessions };

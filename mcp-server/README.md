@@ -8,7 +8,8 @@ backend, dentro del mismo repo.
 
 | Tool | Escribe? | Que hace |
 |---|---|---|
-| `consultar_producto` | No | Precio, stock y plazo de un SKU o MPN |
+| `consultar_producto` | No | Precio, stock, plazo, estado del SKU y garantia de un SKU o MPN |
+| `buscar_productos` | No | Busqueda por texto, ordenada por coincidencia y stock |
 | `simular_cotizacion` | No | Calcula el total sin guardar nada. **Es el camino por defecto** |
 | `generar_cotizacion` | **Si** | Graba la cotizacion y devuelve su id |
 | `emitir_pdf` | No | PDF en base64 de una cotizacion existente |
@@ -105,11 +106,42 @@ Sin secreto valido, `/mcp` responde `401`.
 **Guardar y emitir** (pide confirmacion)
 > "Ya validé la simulación, guardala para Acme Corp y emití el PDF"
 
+## Stock, plazos y rotulos
+
+- **`entrega` solo se afirma con stock leido en vivo.** Si la lectura falla,
+  `entrega` es `null`, `stock_verificado` es `false` y el texto dice «plazo no
+  verificado». El plazo de catalogo va aparte en `entrega_catalogo`, rotulado
+  como referencial.
+- **Ultima lectura buena.** Cada lectura exitosa se guarda en
+  `STOCK_SNAPSHOT_PATH`. Si el stock se cae, se muestra ese dato con su fecha:
+  `12 u. al 12-sep 09:40 · no verificado hoy`. Para que sobreviva deploys, monta
+  un volumen en Railway.
+- **Aviso de caida.** Cada `MONITOR_INTERVALO_MIN` se hace un login nuevo y se
+  lee el stock. Al segundo fallo seguido se avisa a `ALERTA_WEBHOOK_URL` (una
+  vez por caida, y otra al recuperarse). `/health` muestra el semaforo.
+- **`sku_estado`**: `por_crear` cuando el SKU es «To Create»; el plazo suma
+  `DIAS_CREACION_SKU`.
+- **Garantia**: solo la de `src/datos/garantias.ts`, validada a mano. Un modelo
+  sin fila responde «sin validar»; nunca se hereda de la familia.
+- **Busqueda**: ordena MPN exacto → prefijo de MPN → SKU → texto y, dentro de
+  cada grupo, con stock primero. EOL (`src/datos/eol.ts` + `MCP_EOL_MPN`) y
+  «por crear» se rotulan y bajan dentro de su grupo, sin ocultarse.
+
+## Tests
+
+```bash
+npm test
+```
+
 ## Notas
 
 - El catalogo se cachea 10 min y el stock 5 min (`CATALOGO_TTL_MIN`,
   `STOCK_TTL_MIN`). El backend no tiene endpoint de busqueda, asi que se trae el
   catalogo completo y se filtra en memoria.
+- Hay un solo login en vuelo a la vez. Dos logins simultaneos con el mismo
+  `X-Session-Id` chocaban con el indice unico de `sesiones` y el backend
+  respondia 500. Es la causa mas probable de la caida de stock del 14-sep-2026
+  (el catalogo cargaba y el stock no).
 - El stock se cruza por **MPN**, no por SKU.
 - Un SKU inexistente se reporta aparte y no tumba la corrida.
 - El JWT se cachea; ante un `401` se re-loguea una vez y reintenta.

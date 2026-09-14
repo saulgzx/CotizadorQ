@@ -2,17 +2,30 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import {
   crearCotizacion,
+  diagnosticoStock,
+  DIAS_CREACION_SKU,
+  EOL_EXTRA,
   generarPdf,
   getCatalogo,
   getCotizacion,
   getStock,
-  getEstadoStock,
-  textoEntrega,
-  buscarProductoTolerante,
   resolverItems,
+  type LecturaStock,
   type LineaResuelta,
   type SkuNoResuelto
 } from './cotizador.js';
+import {
+  buscarProductoTolerante,
+  esEol,
+  garantiaDe,
+  infoEntrega,
+  rankearBusqueda,
+  rotulos,
+  textoEntrega,
+  textoGarantia,
+  textoStock,
+  unidadesDe
+} from './dominio.js';
 
 const USD = (valor: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(valor);
@@ -50,17 +63,35 @@ const MARCA_COINCIDENCIA: Record<string, string> = {
   descripcion: ' ⚠️'
 };
 
-const tablaLineas = (lineas: LineaResuelta[]): string => {
+/** Aviso comun cuando el stock no se leyo en vivo. */
+const avisoStock = (lectura: LecturaStock): string => {
+  if (lectura.verificado) return '';
+  if (lectura.origen === 'snapshot') {
+    return (
+      `\n\n⚠️ **Stock no verificado**: ${lectura.error} Se muestra la ultima lectura buena con su fecha. ` +
+      'El plazo queda como «no verificado» hasta que el stock vuelva a leerse.'
+    );
+  }
+  return (
+    `\n\n⚠️ **Stock no disponible**: ${lectura.error} No hay lectura previa guardada. ` +
+    'El plazo queda como «no verificado»: no uses el plazo de catalogo como plazo comprometido.'
+  );
+};
+
+const celda = (texto: string) => texto.replace(/\|/g, '/');
+
+const tablaLineas = (lineas: LineaResuelta[], lectura: LecturaStock): string => {
   if (lineas.length === 0) return '_Sin lineas resueltas._';
   const filas = lineas.map((l) => {
-    const stock = l.stock === null || l.stock === '' ? 's/d' : String(l.stock);
+    const entrega = infoEntrega(l.producto, lectura, DIAS_CREACION_SKU);
     const marca = MARCA_COINCIDENCIA[l.coincidencia] ?? '';
-    return `| ${l.producto.sku}${marca} | ${l.producto.descripcion.slice(0, 45)} | ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} | ${stock} | ${textoEntrega(l.producto, l.stock) || 's/d'} |`;
+    const rotulo = rotulos({ eol: esEol(l.producto, EOL_EXTRA), sku_estado: entrega.sku_estado });
+    return (
+      `| ${l.producto.sku}${marca}${rotulo ? ` (${rotulo})` : ''} | ${celda(l.producto.descripcion.slice(0, 45))} ` +
+      `| ${l.cantidad} | ${USD(l.precio_unitario)} | ${USD(l.precio_total)} ` +
+      `| ${textoStock(lectura, l.stock)} | ${celda(textoEntrega(entrega))} |`
+    );
   });
-  const estado = getEstadoStock();
-  const avisoStock = estado.error
-    ? `\n\n⚠️ **Stock no disponible**: ${estado.error} Los plazos vienen del catalogo y pueden no reflejar lo que hay en bodega.`
-    : '';
   const aproximadas = lineas.filter((l) => l.coincidencia !== 'exacta');
   const nota =
     aproximadas.length === 0
@@ -75,9 +106,23 @@ const tablaLineas = (lineas: LineaResuelta[]): string => {
       ...filas
     ].join('\n') +
     nota +
-    avisoStock
+    avisoStock(lectura)
   );
 };
+
+const lineasJson = (lineas: LineaResuelta[], lectura: LecturaStock) =>
+  lineas.map((l) => ({
+    producto_id: l.producto.id,
+    sku: l.producto.sku,
+    mpn: l.producto.mpn,
+    descripcion: l.producto.descripcion,
+    cantidad: l.cantidad,
+    precio_unitario: l.precio_unitario,
+    precio_total: l.precio_total,
+    stock: l.stock,
+    eol: esEol(l.producto, EOL_EXTRA),
+    ...infoEntrega(l.producto, lectura, DIAS_CREACION_SKU)
+  }));
 
 const bloqueNoResueltos = (noResueltos: SkuNoResuelto[]): string =>
   noResueltos.length === 0
@@ -90,11 +135,14 @@ export const registrarTools = (server: McpServer): void => {
     'consultar_producto',
     {
       description:
-        'Consulta precio, stock y plazo de entrega de un producto por SKU o MPN. Solo lectura.',
+        'Consulta precio, stock, plazo de entrega, estado del SKU y garantia validada de un producto por SKU o MPN. ' +
+        'Si stock_verificado es false, "entrega" viene null: no presentes entrega_catalogo como plazo comprometido. Solo lectura.',
       inputSchema: z.object({ sku: z.string().describe('SKU o MPN a consultar') })
     },
     async ({ sku }) => {
-      const [catalogo, stock] = await Promise.all([getCatalogo(), getStock()]);
+      // Secuencial: el catalogo obtiene el token y el stock lo reusa.
+      const catalogo = await getCatalogo();
+      const lectura = await getStock();
       const { producto, tipo, candidatos } = buscarProductoTolerante(catalogo, sku);
 
       if (!producto) {
@@ -103,7 +151,8 @@ export const registrarTools = (server: McpServer): void => {
         // el articulo equivocado en una cotizacion real.
         if (candidatos.length > 0) {
           const filas = candidatos.map(
-            (c) => `| ${c.sku} | ${c.mpn} | ${c.descripcion.slice(0, 45)} | ${USD(c.precio_cliente)} |`
+            (c) =>
+              `| ${c.sku} | ${c.mpn} | ${celda(c.descripcion.slice(0, 45))} | ${USD(c.precio_cliente)} |`
           );
           return respuesta(
             `\`${sku}\` coincide con ${candidatos.length} productos. Especifica cual:\n\n` +
@@ -118,8 +167,10 @@ export const registrarTools = (server: McpServer): void => {
         });
       }
 
-      const cantidad = stock.get(String(producto.mpn || '').trim().toUpperCase()) ?? null;
-      const estado = getEstadoStock();
+      const unidades = unidadesDe(lectura, producto);
+      const entrega = infoEntrega(producto, lectura, DIAS_CREACION_SKU);
+      const garantia = garantiaDe(producto);
+      const eol = esEol(producto, EOL_EXTRA);
       const datos = {
         encontrado: true,
         coincidencia: tipo,
@@ -130,11 +181,12 @@ export const registrarTools = (server: McpServer): void => {
         origen: producto.origen,
         descripcion: producto.descripcion,
         precio_cliente: producto.precio_cliente,
-        stock: cantidad,
-        // El plazo que corresponde mostrar: si hay stock, entrega inmediata.
-        entrega: textoEntrega(producto, cantidad),
-        tiempo_entrega_catalogo: producto.tiempo_entrega,
-        diagnostico_stock: { entradas_cargadas: estado.entradas, error: estado.error }
+        stock: unidades,
+        stock_leido_en: lectura.leido_en,
+        eol,
+        ...entrega,
+        ...garantia,
+        diagnostico_stock: diagnosticoStock(lectura)
       };
 
       const aviso =
@@ -142,16 +194,25 @@ export const registrarTools = (server: McpServer): void => {
           ? ''
           : `\n\n⚠️ Coincidencia **${tipo}**, no exacta: buscaste \`${sku}\`. Verifica que sea el producto correcto.`;
 
+      const lineaSku =
+        entrega.sku_estado === 'por_crear'
+          ? `- SKU: **por crear** (suma ${entrega.dias_creacion_sku} dias de creacion al plazo)\n`
+          : '';
+
       const texto =
         `**${producto.sku}** — ${producto.descripcion}\n` +
         `- Marca: ${producto.marca} (${producto.origen})\n` +
-        `- MPN: ${producto.mpn}\n` +
+        `- MPN: ${producto.mpn}${eol ? ' · **EOL**' : ''}\n` +
+        lineaSku +
         `- Precio: ${USD(producto.precio_cliente)}\n` +
-        `- Stock: ${cantidad === null || cantidad === '' ? 'sin dato' : cantidad}\n` +
-        `- Entrega: ${textoEntrega(producto, cantidad) || 'sin dato'}\n` +
-        (estado.error
-          ? `\n⚠️ **No se pudo leer el stock**: ${estado.error} El plazo mostrado viene del catalogo y puede no reflejar disponibilidad real.\n`
-          : `_(stock: ${estado.entradas} MPN cargados desde bodega)_\n`) +
+        `- Stock: ${textoStock(lectura, unidades)}\n` +
+        `- Entrega: ${textoEntrega(entrega)}\n` +
+        (entrega.stock_verificado
+          ? ''
+          : `- Plazo de catalogo (referencial, no comprometido): ${entrega.entrega_catalogo || 'sin dato'}\n`) +
+        `- Garantia: ${textoGarantia(garantia)}\n` +
+        (lectura.verificado ? `_(stock: ${lectura.mapa.size} MPN cargados desde bodega)_` : '') +
+        avisoStock(lectura) +
         aviso;
 
       return respuesta(texto, datos);
@@ -162,7 +223,8 @@ export const registrarTools = (server: McpServer): void => {
     'buscar_productos',
     {
       description:
-        'Busca productos del catalogo por texto parcial en SKU, MPN, marca o descripcion. Usalo cuando no sepas el SKU exacto, o para explorar que hay disponible. Solo lectura.',
+        'Busca productos del catalogo por texto parcial en SKU, MPN, marca o descripcion. Ordena por calidad de coincidencia ' +
+        '(MPN exacto, prefijo de MPN, SKU, texto) y, dentro de cada grupo, con stock primero. EOL y "por crear" se rotulan, no se ocultan. Solo lectura.',
       inputSchema: z.object({
         texto: z
           .string()
@@ -174,30 +236,33 @@ export const registrarTools = (server: McpServer): void => {
     },
     async ({ texto, origen, limite }) => {
       const catalogo = await getCatalogo();
-      const busqueda = String(texto || '').trim().toLowerCase();
+      const lectura = await getStock();
+      const delOrigen = origen
+        ? catalogo.filter((p) => String(p.origen || '').toUpperCase() === origen)
+        : catalogo;
 
-      const filtrados = catalogo.filter((p) => {
-        if (origen && String(p.origen || '').toUpperCase() !== origen) return false;
-        if (!busqueda) return true;
-        return [p.sku, p.mpn, p.marca, p.descripcion]
-          .map((campo) => String(campo || '').toLowerCase())
-          .some((campo) => campo.includes(busqueda));
-      });
-
-      const pagina = filtrados.slice(0, limite);
+      const rankeados = rankearBusqueda(delOrigen, String(texto || '').trim(), lectura, EOL_EXTRA);
+      const pagina = rankeados.slice(0, limite);
       const datos = {
         total_catalogo: catalogo.length,
-        coincidencias: filtrados.length,
+        coincidencias: rankeados.length,
         mostrados: pagina.length,
-        productos: pagina.map((p) => ({
-          sku: p.sku,
-          mpn: p.mpn,
-          marca: p.marca,
-          origen: p.origen,
-          descripcion: p.descripcion,
-          precio_cliente: p.precio_cliente,
-          tiempo_entrega: p.tiempo_entrega
-        }))
+        stock: diagnosticoStock(lectura),
+        productos: pagina.map((r) => {
+          const entrega = infoEntrega(r.producto, lectura, DIAS_CREACION_SKU);
+          return {
+            sku: r.producto.sku,
+            mpn: r.producto.mpn,
+            marca: r.producto.marca,
+            origen: r.producto.origen,
+            descripcion: r.producto.descripcion,
+            precio_cliente: r.producto.precio_cliente,
+            coincidencia: r.grupo,
+            stock: r.unidades,
+            eol: r.eol,
+            ...entrega
+          };
+        })
       };
 
       if (catalogo.length === 0) {
@@ -213,17 +278,23 @@ export const registrarTools = (server: McpServer): void => {
         );
       }
 
-      const filas = pagina.map(
-        (p) =>
-          `| ${p.sku} | ${p.mpn} | ${p.marca} | ${p.descripcion.slice(0, 40)} | ${USD(p.precio_cliente)} |`
-      );
-      const texto_salida = [
-        `**${filtrados.length}** coincidencias de ${catalogo.length} productos (mostrando ${pagina.length}):`,
-        '',
-        '| SKU | MPN | Marca | Descripcion | Precio |',
-        '|---|---|---|---|---|',
-        ...filas
-      ].join('\n');
+      const filas = pagina.map((r) => {
+        const rotulo = rotulos(r);
+        const entrega = infoEntrega(r.producto, lectura, DIAS_CREACION_SKU);
+        return (
+          `| ${r.producto.sku} | ${r.producto.mpn}${rotulo ? ` (${rotulo})` : ''} | ${r.producto.marca} ` +
+          `| ${celda(r.producto.descripcion.slice(0, 40))} | ${USD(r.producto.precio_cliente)} ` +
+          `| ${textoStock(lectura, r.unidades)} | ${celda(textoEntrega(entrega))} |`
+        );
+      });
+      const texto_salida =
+        [
+          `**${rankeados.length}** coincidencias de ${catalogo.length} productos (mostrando ${pagina.length}):`,
+          '',
+          '| SKU | MPN | Marca | Descripcion | Precio | Stock | Entrega |',
+          '|---|---|---|---|---|---|---|',
+          ...filas
+        ].join('\n') + avisoStock(lectura);
 
       return respuesta(texto_salida, datos);
     }
@@ -240,26 +311,18 @@ export const registrarTools = (server: McpServer): void => {
       })
     },
     async ({ datos_cliente, items }) => {
-      const { lineas, noResueltos, total } = await resolverItems(items);
+      const { lineas, noResueltos, total, lectura } = await resolverItems(items);
       const texto =
-        `### Simulacion (NO guardada)\n\n${tablaLineas(lineas)}\n\n**Total: ${USD(total)}**` +
+        `### Simulacion (NO guardada)\n\n${tablaLineas(lineas, lectura)}\n\n**Total: ${USD(total)}**` +
         bloqueNoResueltos(noResueltos);
 
       return respuesta(texto, {
         guardado: false,
         cliente: datos_cliente || null,
-        lineas: lineas.map((l) => ({
-          producto_id: l.producto.id,
-          sku: l.producto.sku,
-          descripcion: l.producto.descripcion,
-          cantidad: l.cantidad,
-          precio_unitario: l.precio_unitario,
-          precio_total: l.precio_total,
-          stock: l.stock,
-          tiempo_entrega: l.producto.tiempo_entrega
-        })),
+        lineas: lineasJson(lineas, lectura),
         no_resueltos: noResueltos,
-        total
+        total,
+        stock: diagnosticoStock(lectura)
       });
     }
   );
@@ -275,7 +338,7 @@ export const registrarTools = (server: McpServer): void => {
       })
     },
     async ({ datos_cliente, items }) => {
-      const { lineas, noResueltos, total } = await resolverItems(items);
+      const { lineas, noResueltos, total, lectura } = await resolverItems(items);
       if (lineas.length === 0) {
         return respuesta(
           'No se guardo nada: ningun SKU se pudo resolver contra el catalogo.' +
@@ -287,7 +350,7 @@ export const registrarTools = (server: McpServer): void => {
       const { id, total: totalBackend } = await crearCotizacion(datos_cliente, lineas);
 
       const texto =
-        `### Cotizacion **#${id}** guardada\n\n${tablaLineas(lineas)}\n\n` +
+        `### Cotizacion **#${id}** guardada\n\n${tablaLineas(lineas, lectura)}\n\n` +
         `**Total segun el backend: ${USD(totalBackend)}** (estimado local: ${USD(total)})` +
         bloqueNoResueltos(noResueltos);
 
@@ -296,7 +359,9 @@ export const registrarTools = (server: McpServer): void => {
         cotizacion_id: id,
         total: totalBackend,
         total_estimado_local: total,
-        no_resueltos: noResueltos
+        lineas: lineasJson(lineas, lectura),
+        no_resueltos: noResueltos,
+        stock: diagnosticoStock(lectura)
       });
     }
   );
@@ -346,7 +411,7 @@ export const registrarTools = (server: McpServer): void => {
       })
     },
     async ({ datos_cliente, items }) => {
-      const { lineas, noResueltos } = await resolverItems(items);
+      const { lineas, noResueltos, lectura } = await resolverItems(items);
       if (lineas.length === 0) {
         return respuesta(
           'No se guardo nada: ningun SKU se pudo resolver.' + bloqueNoResueltos(noResueltos),
@@ -364,7 +429,7 @@ export const registrarTools = (server: McpServer): void => {
           {
             type: 'text' as const,
             text:
-              `### Cotizacion **#${id}** guardada y PDF emitido\n\n${tablaLineas(lineas)}\n\n` +
+              `### Cotizacion **#${id}** guardada y PDF emitido\n\n${tablaLineas(lineas, lectura)}\n\n` +
               `**Total: ${USD(total)}** — archivo \`${nombre}\`` +
               bloqueNoResueltos(noResueltos)
           },

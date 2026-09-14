@@ -35,6 +35,24 @@ jobs:
       - name: Audit
         run: npm audit --audit-level=critical
 
+  mcp-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Igual que el Dockerfile; node --test con glob requiere >= 21.
+          node-version: 22
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
