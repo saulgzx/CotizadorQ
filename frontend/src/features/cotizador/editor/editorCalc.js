@@ -34,9 +34,11 @@ export const costoXCL = (origen, precioDisty) => {
   return ((numero(precioDisty) * c.INBOUND_FREIGHT) / c.IC) * (1 + c.INT);
 };
 
-export const costoFinal = ({ origen, precio_disty, rebate_partner, rebate_proyecto }) => {
+// costo_xcl_real: "OH Unit USD" de la hoja Stock. Si viene, reemplaza al costo Chile calculado.
+export const costoFinal = ({ origen, precio_disty, rebate_partner, rebate_proyecto, costo_xcl_real }) => {
   const rebates = origen === 'AXIS' ? numero(rebate_partner) + numero(rebate_proyecto) : 0;
-  return Math.max(costoXCL(origen, precio_disty) - rebates, 0);
+  const base = numero(costo_xcl_real) > 0 ? numero(costo_xcl_real) : costoXCL(origen, precio_disty);
+  return Math.max(base - rebates, 0);
 };
 
 export const precioDesdeGp = (costo, gpPct) => {
@@ -127,7 +129,8 @@ export const lineaDesdeProducto = (producto, { gpPct = CONSTANTS.DEFAULT_GP * 10
     precio_disty: numero(producto.precio),
     origen,
     rebate_partner: rebatePartner,
-    rebate_proyecto: origen === 'AXIS' ? 0 : null
+    rebate_proyecto: origen === 'AXIS' ? 0 : null,
+    costo_xcl_real: numero(producto.costoChile) > 0 ? numero(producto.costoChile) : null
   };
   // El precio sale del costo sin redondear, igual que en el cotizador.
   const costoExacto = costoFinal(base);
@@ -189,6 +192,8 @@ export const aplicarCambio = (linea, campo, valor, modo = MODO_COSTO.MANTENER_PR
       const gpAntes = gpDe(linea);
       next[campo] = Math.max(0, numero(valor));
       if (campo !== 'precio_disty') next.rebate_inferido = false;
+      // Editar el disty a mano deja de usar el costo real de stock.
+      if (campo === 'precio_disty') next.costo_xcl_real = null;
       const costoExacto = costoFinal(next);
       next.costo_unitario = redondear(costoExacto);
       if (modo === MODO_COSTO.MANTENER_MARGEN && gpAntes !== null) {

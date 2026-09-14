@@ -7,6 +7,7 @@ import {
   aplicarCambio,
   buscarEnCatalogo,
   cambiosDeLinea,
+  costoFinal,
   gpDe,
   huella,
   lineaAPayload,
@@ -452,6 +453,17 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
         return l;
       }
       let actualizada = aplicarCambio(l, 'precio_disty', Number(producto.precio) || 0, modoCosto);
+      // Con stock disponible, el costo Chile real (OH Unit USD) manda sobre el calculado.
+      const real = Number(producto.costoChile) > 0 ? Number(producto.costoChile) : null;
+      if ((real ?? null) !== (l.costo_xcl_real ?? null)) {
+        const conReal = { ...actualizada, costo_xcl_real: real };
+        const gpAntes = gpDe(actualizada);
+        const costoNuevo = Math.round(costoFinal(conReal) * 100) / 100;
+        actualizada = { ...conReal, costo_unitario: costoNuevo };
+        if (modoCosto === MODO_COSTO.MANTENER_MARGEN && gpAntes !== null && costoNuevo !== null) {
+          actualizada.precio_unitario = Math.round((costoNuevo / (1 - gpAntes / 100)) * 100) / 100;
+        }
+      }
       if (l.origen === 'AXIS' && l.partner_category) {
         actualizada = aplicarCambio(actualizada, 'rebate_partner', rebatePartnerDeProducto(producto, l.partner_category), modoCosto);
       }

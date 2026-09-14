@@ -53,9 +53,14 @@ const costoXCL = (origen, precioDisty) => {
   return ((numero(precioDisty) * c.INBOUND_FREIGHT) / c.IC) * (1 + c.INT);
 };
 
-/** Costo final unitario: costo XCL menos rebates, nunca negativo. */
-const costoFinal = ({ origen, precio_disty, rebate_partner, rebate_proyecto }) =>
-  Math.max(costoXCL(origen, precio_disty) - numero(rebate_partner) - numero(rebate_proyecto), 0);
+/**
+ * Costo final unitario: costo XCL menos rebates, nunca negativo. costo_xcl es el
+ * costo Chile real de stock (OH Unit USD); si viene, reemplaza al calculado.
+ */
+const costoFinal = ({ origen, precio_disty, rebate_partner, rebate_proyecto, costo_xcl }) => {
+  const base = numero(costo_xcl) > 0 ? numero(costo_xcl) : costoXCL(origen, precio_disty);
+  return Math.max(base - numero(rebate_partner) - numero(rebate_proyecto), 0);
+};
 
 // gp es DECIMAL(5,4): un margen negativo muy grande no cabe, se acota.
 const acotarGp = (gp) => Math.min(Math.max(gp, -9.9999), 0.9999);

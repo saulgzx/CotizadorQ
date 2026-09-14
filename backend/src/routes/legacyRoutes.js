@@ -98,7 +98,8 @@ const {
   ensureCotizacionEdicion,
   esAdminCompleto
 } = require('../services/cotizacionItems');
-const { calcularAsignaciones, asignadoPara, aplicarAsignacion } = require('../services/stockDisponible');
+const { calcularAsignaciones } = require('../services/stockDisponible');
+const { agregarStock, mapaCostosChile, costoChilePara } = require('../services/stockAgregado');
 const { construirMapaEta, textoEta, SEMANAS_ADICIONALES_DEFAULT } = require('../services/etaAxis');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
 const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
@@ -783,10 +784,12 @@ const addDaysToIso = (isoDate, days) => {
   return date.toISOString().slice(0, 10);
 };
 
-const calcularPrecioClienteQnap = (precioDisty, gp = 0.15) => {
+// costoChileReal: "OH Unit USD" de la hoja Stock cuando hay unidades disponibles.
+// Reemplaza al costo Chile calculado desde el disty.
+const calcularPrecioClienteQnap = (precioDisty, gp = 0.15, costoChileReal = null) => {
   const costoXUS = precioDisty * QNAP_CONSTANTS.INBOUND_FREIGHT;
   const costoFinalXUS = costoXUS / QNAP_CONSTANTS.IC;
-  const costoXCL = costoFinalXUS * (1 + QNAP_CONSTANTS.INT);
+  const costoXCL = costoChileReal > 0 ? costoChileReal : costoFinalXUS * (1 + QNAP_CONSTANTS.INT);
   return costoXCL / (1 - gp);
 };
 
@@ -798,10 +801,10 @@ const getAxisPartnerRebate = (producto, category) => {
   return parseNumber(producto.rebate_partner_autorizado, 0);
 };
 
-const calcularPrecioClienteAxis = (precioDisty, gp, partnerRebate, projectRebate) => {
+const calcularPrecioClienteAxis = (precioDisty, gp, partnerRebate, projectRebate, costoChileReal = null) => {
   const costoXUS = precioDisty * AXIS_CONSTANTS.INBOUND_FREIGHT;
   const costoFinalXUS = costoXUS / AXIS_CONSTANTS.IC;
-  const costoXCL = costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
+  const costoXCL = costoChileReal > 0 ? costoChileReal : costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
   const rebateTotal = (partnerRebate || 0) + (projectRebate || 0);
   const costoFinalXCL = Math.max(costoXCL - rebateTotal, 0);
   return costoFinalXCL / (1 - gp);
@@ -3084,12 +3087,68 @@ const leerAsignacionesOso = async (sheets, spreadsheetId) => {
   return asignaciones;
 };
 
-const cantidadBodega = (rawQty) => {
-  const parsed = parseNumber(rawQty, NaN);
-  return Number.isNaN(parsed) ? String(rawQty || '').trim() : parsed;
+// Stock agregado por producto (todas las filas del mismo MPN suman), neto de OSO y
+// con el costo real "OH Unit USD" (columna I). Se lee una vez y lo usan los dos
+// endpoints de stock y el cálculo de precios. El costo NUNCA sale en /api/stock*.
+const CACHE_KEY_STOCK_AGREGADO = 'cache:stock:agregado';
+const leerStockAgregado = async () => {
+  const cached = cacheGet(CACHE_KEY_STOCK_AGREGADO);
+  if (cached) return cached;
+  const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+  if (!spreadsheetId) {
+    const error = new Error('GOOGLE_SHEETS_ID no configurado');
+    error.status = 400;
+    throw error;
+  }
+  const sheets = getSheetsClient(true);
+  // UNFORMATTED: cantidades y costos llegan como número, sin separadores ni moneda.
+  const { rows, headers } = await getSheetData(sheets, spreadsheetId, SHEETS_TAB_STOCK, 'UNFORMATTED_VALUE');
+  if (rows.length <= 1) {
+    cacheSet(CACHE_KEY_STOCK_AGREGADO, [], STOCK_CACHE_TTL_MS);
+    return [];
+  }
+  const base = getStockCatalogColumnIndexes(headers);
+  const idxCosto = findHeaderIndex(headers, ['OH Unit USD', 'OH Unit Cost', 'Unit USD']);
+  const idx = { ...base, costo: idxCosto >= 0 ? idxCosto : 8 };
+  const asignaciones = await leerAsignacionesOso(sheets, spreadsheetId);
+  const items = agregarStock(rows, idx, asignaciones).map((item) => ({ ...item, origin: deriveStockOrigin(item.brand) }));
+  cacheSet(CACHE_KEY_STOCK_AGREGADO, items, STOCK_CACHE_TTL_MS);
+  return items;
 };
 
-// STOCK - Leer hoja Stock (MPN / OH Quantity), neto de lo asignado en OSO
+/**
+ * Costos Chile reales para calcular precios. Si la hoja no se puede leer, se
+ * cotiza con el costo calculado (null): el catálogo no debe caerse por el stock.
+ */
+const COSTOS_CHILE_TIMEOUT_MS = 4000;
+const CACHE_KEY_COSTOS_CHILE_FALLO = 'cache:stock:costos-fallo';
+const leerCostosChile = async () => {
+  // Tras un fallo reciente no se reintenta en cada request: el catálogo no espera a Sheets.
+  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) return null;
+  const lectura = leerStockAgregado();
+  let timer;
+  const limite = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), COSTOS_CHILE_TIMEOUT_MS);
+  });
+  try {
+    const resultado = await Promise.race([lectura, limite]);
+    if (resultado === 'timeout') {
+      // La lectura sigue en segundo plano y llena la cache para el próximo request.
+      lectura.catch(() => {});
+      logger.warn({ event: 'costo_chile_timeout' }, 'Stock lento; se cotiza con el costo calculado');
+      return null;
+    }
+    return mapaCostosChile(resultado);
+  } catch (error) {
+    cacheSet(CACHE_KEY_COSTOS_CHILE_FALLO, true, 60 * 1000);
+    logger.warn({ event: 'costo_chile_read_failed', err: compactErrorForLog(error) }, 'Sin costo real de stock; se usa el costo calculado');
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+// STOCK - disponible por MPN para entrega inmediata (neto de OSO, filas sumadas)
 app.get('/api/stock', authenticateToken, async (req, res) => {
   try {
     const cached = cacheGet(CACHE_KEY_STOCK);
@@ -3097,48 +3156,24 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
       res.set('X-Cache', 'HIT');
       return res.json(cached);
     }
-    const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
-    if (!spreadsheetId) return res.status(400).json({ error: 'GOOGLE_SHEETS_ID no configurado' });
-
-    const sheets = getSheetsClient(true);
-    const { rows, headers } = await getSheetData(sheets, spreadsheetId, SHEETS_TAB_STOCK, 'FORMATTED_VALUE');
-    if (rows.length <= 1) {
-      const payload = { items: [] };
-      cacheSet(CACHE_KEY_STOCK, payload, STOCK_CACHE_TTL_MS);
-      res.set('X-Cache', 'MISS');
-      return res.json(payload);
-    }
-
-    const idx = getStockColumnIndexes(headers);
-    const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
-    const asignaciones = await leerAsignacionesOso(sheets, spreadsheetId);
-    const items = [];
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i] || [];
-      const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
-      if (!mpn) continue;
-      const sku = idxSku >= 0 ? String(row[idxSku] || '').trim() : '';
-      const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
-      const { stock_bodega, asignado, disponible } = aplicarAsignacion(cantidadBodega(rawQty), asignadoPara(asignaciones, { mpn, sku }));
-      // 0 disponible (sin bodega o todo asignado en OSO) es "sin stock": no se envía,
-      // y quien consume este feed usa el plazo del catálogo, igual que un equipo sin stock.
-      if (!(disponible > 0)) continue;
-      // quantity es lo disponible: es lo que se usa para prometer entrega inmediata.
-      items.push({ mpn, quantity: disponible, stock_bodega, asignado });
-    }
-
+    const agregado = await leerStockAgregado();
+    // 0 disponible (sin bodega o todo asignado en OSO) es "sin stock": no se envía,
+    // y quien consume este feed usa el plazo del catálogo (ETA), igual que un equipo sin stock.
+    const items = agregado
+      .filter((item) => item.mpn && item.disponible > 0)
+      .map((item) => ({ mpn: item.mpn, quantity: item.disponible, stock_bodega: item.stock_bodega, asignado: item.asignado }));
     const payload = { items };
     cacheSet(CACHE_KEY_STOCK, payload, STOCK_CACHE_TTL_MS);
     res.set('X-Cache', 'MISS');
     res.json(payload);
   } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
     logger.error({ event: 'stock_read_failed', err: compactErrorForLog(error) }, 'Error leyendo stock');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo stock') });
   }
 });
 
-// STOCK - Catalogo disponible (imagen, marca, descripcion, SKU, MPN, cantidad)
+// STOCK - Catalogo disponible (imagen, marca, descripcion, SKU, MPN, cantidad). Sin costos.
 app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
   try {
     const cached = cacheGet(CACHE_KEY_STOCK_CATALOG);
@@ -3146,51 +3181,24 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
       res.set('X-Cache', 'HIT');
       return res.json(cached);
     }
-    const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
-    if (!spreadsheetId) return res.status(400).json({ error: 'GOOGLE_SHEETS_ID no configurado' });
-
-    const sheets = getSheetsClient(true);
-    const { rows, headers } = await getSheetData(sheets, spreadsheetId, SHEETS_TAB_STOCK, 'FORMATTED_VALUE');
-    if (rows.length <= 1) {
-      const payload = { items: [] };
-      cacheSet(CACHE_KEY_STOCK_CATALOG, payload, STOCK_CATALOG_CACHE_TTL_MS);
-      res.set('X-Cache', 'MISS');
-      return res.json(payload);
-    }
-
-    const idx = getStockCatalogColumnIndexes(headers);
-    const asignaciones = await leerAsignacionesOso(sheets, spreadsheetId);
-    const items = [];
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i] || [];
-      const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
-      const sku = idx.sku >= 0 ? String(row[idx.sku] || '').trim() : '';
-      const name = idx.name >= 0 ? String(row[idx.name] || '').trim() : '';
-      if (!mpn && !sku && !name) continue;
-      const brand = idx.brand >= 0 ? String(row[idx.brand] || '').trim() : '';
-      const imageUrl = idx.image >= 0 ? String(row[idx.image] || '').trim() : '';
-      const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
-      const { stock_bodega, asignado, disponible } = aplicarAsignacion(cantidadBodega(rawQty), asignadoPara(asignaciones, { mpn, sku }));
-      const origin = deriveStockOrigin(brand);
-      items.push({
-        imageUrl,
-        brand,
-        name,
-        sku,
-        mpn,
-        quantity: disponible,
-        stock_bodega,
-        asignado,
-        origin
-      });
-    }
-
+    const agregado = await leerStockAgregado();
+    const items = agregado.map((item) => ({
+      imageUrl: item.imageUrl,
+      brand: item.brand,
+      name: item.name,
+      sku: item.sku,
+      mpn: item.mpn,
+      quantity: item.disponible,
+      stock_bodega: item.stock_bodega,
+      asignado: item.asignado,
+      origin: item.origin
+    }));
     const payload = { items };
     cacheSet(CACHE_KEY_STOCK_CATALOG, payload, STOCK_CATALOG_CACHE_TTL_MS);
     res.set('X-Cache', 'MISS');
     res.json(payload);
   } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
     logger.error({ event: 'stock_catalog_read_failed', err: compactErrorForLog(error) }, 'Error leyendo stock catalogo');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo stock catalogo') });
   }
@@ -3289,8 +3297,9 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
         `SELECT * FROM productos ${whereSql} ORDER BY id DESC LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`,
         pageParams
       );
+      const costosPagina = await leerCostosChile();
       return res.json({
-        data: pagedResult.rows,
+        data: pagedResult.rows.map((producto) => ({ ...producto, costo_chile_real: costoChilePara(costosPagina, producto) })),
         meta: {
           page,
           pageSize,
@@ -3304,8 +3313,11 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
       `SELECT * FROM productos ${whereSql} ORDER BY id DESC`,
       params
     );
+    // Costo Chile real (OH Unit USD) de lo que hay en bodega. Solo el admin lo ve;
+    // al cliente le llega ya aplicado dentro de precio_cliente.
+    const costosChile = await leerCostosChile();
     if (isAdmin) {
-      return res.json(result.rows);
+      return res.json(result.rows.map((producto) => ({ ...producto, costo_chile_real: costoChilePara(costosChile, producto) })));
     }
     const userResult = await pool.query('SELECT gp, gp_qnap, gp_axis, partner_category FROM usuarios WHERE id = $1', [req.user.id]);
     const userRow = userResult.rows[0] || {};
@@ -3315,9 +3327,10 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
     const payload = result.rows.map((producto) => {
       const origenValue = producto.origen || DEFAULT_ORIGIN;
       const precioDisty = parseNumber(producto.precio_disty, 0);
+      const costoReal = costoChilePara(costosChile, producto);
       const precioCliente = origenValue === 'AXIS'
-        ? calcularPrecioClienteAxis(precioDisty, gpAxis, getAxisPartnerRebate(producto, partnerCategory), 0)
-        : calcularPrecioClienteQnap(precioDisty, gpQnap);
+        ? calcularPrecioClienteAxis(precioDisty, gpAxis, getAxisPartnerRebate(producto, partnerCategory), 0, costoReal)
+        : calcularPrecioClienteQnap(precioDisty, gpQnap, costoReal);
       return {
         id: producto.id,
         origen: origenValue,
@@ -3605,6 +3618,8 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
         ? await client.query('SELECT * FROM productos WHERE id = ANY($1::int[])', [requestedProductIds])
         : { rows: [] };
       const productById = new Map(productsResult.rows.map(producto => [Number(producto.id), producto]));
+      // Mismo costo Chile real que usa el catálogo del cliente: el precio guardado coincide con el mostrado.
+      const costosChile = await leerCostosChile();
       for (const item of requestedItems) {
         const productoId = parseInt(item?.producto_id, 10);
         if (!Number.isFinite(productoId)) {
@@ -3623,9 +3638,10 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
         const precioDisty = parseNumber(producto.precio_disty, 0);
         const gpUsed = origenValue === 'AXIS' ? gpAxis : gpQnap;
         const partnerRebate = origenValue === 'AXIS' ? getAxisPartnerRebate(producto, partnerCategory) : null;
+        const costoReal = costoChilePara(costosChile, producto);
         const precioUnitario = origenValue === 'AXIS'
-          ? calcularPrecioClienteAxis(precioDisty, gpUsed, partnerRebate, 0)
-          : calcularPrecioClienteQnap(precioDisty, gpUsed);
+          ? calcularPrecioClienteAxis(precioDisty, gpUsed, partnerRebate, 0, costoReal)
+          : calcularPrecioClienteQnap(precioDisty, gpUsed, costoReal);
         const precioTotal = precioUnitario * cantidad;
         totalSum += precioTotal;
         computedItems.push({
@@ -3639,7 +3655,7 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
           rebate_partner: partnerRebate,
           partner_category: origenValue === 'AXIS' ? partnerCategory : null,
           // Mismo calculo que el precio: el costo queda guardado para el margen del admin.
-          costo_unitario: costoFinal({ origen: origenValue, precio_disty: precioDisty, rebate_partner: partnerRebate }),
+          costo_unitario: costoFinal({ origen: origenValue, precio_disty: precioDisty, rebate_partner: partnerRebate, costo_xcl: costoReal }),
           gp: gpUsed,
           cantidad,
           precio_unitario: Number(precioUnitario.toFixed(2)),

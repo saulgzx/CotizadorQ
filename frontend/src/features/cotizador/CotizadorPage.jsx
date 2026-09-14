@@ -1497,8 +1497,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }));
   };
 
-  const calcularPrecioClienteLocal = (precioDisty, gp = 0.15) =>
-    calcularPrecioCliente(precioDisty, gp, calcParams);
+  // costoChile = "OH Unit USD" de la hoja Stock (costo real con que ingresó a Chile).
+  // Si el producto tiene unidades disponibles, reemplaza al costo Chile calculado.
+  const calcularPrecioClienteLocal = (precioDisty, gp = 0.15, costoChile = null) =>
+    costoChile > 0 ? costoChile / (1 - gp) : calcularPrecioCliente(precioDisty, gp, calcParams);
 
   const getAxisPartnerRebate = (item, category) => {
     const selected = category || DEFAULT_AXIS_PARTNER;
@@ -1508,10 +1510,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return item.rebate_partner_autorizado || 0;
   };
 
-  const calcularPrecioClienteAxis = (precioDisty, gp, partnerRebate, projectRebate) => {
+  const calcularPrecioClienteAxis = (precioDisty, gp, partnerRebate, projectRebate, costoChile = null) => {
     const costoXUS = precioDisty * AXIS_CONSTANTS.INBOUND_FREIGHT;
     const costoFinalXUS = costoXUS / AXIS_CONSTANTS.IC;
-    const costoXCL = costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
+    const costoXCL = costoChile > 0 ? costoChile : costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
     const rebateTotal = (partnerRebate || 0) + (projectRebate || 0);
     const costoFinalXCL = Math.max(costoXCL - rebateTotal, 0);
     return costoFinalXCL / (1 - gp);
@@ -1524,14 +1526,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const baseGp = (item.origen || 'QNAP') === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap;
     const gpEffective = item.gpOverride ?? baseGp;
     if ((item.origen || 'QNAP') !== 'AXIS') {
-      return calcularPrecioClienteLocal(item.precio, gpEffective);
+      return calcularPrecioClienteLocal(item.precio, gpEffective, item.costoChile);
     }
     const effectivePartnerCategory = isAdmin
       ? (item.partnerCategory || cotizacionPartnerCategory)
       : cotizacionPartnerCategory;
     const partnerRebate = getAxisPartnerRebate(item, effectivePartnerCategory);
     const projectRebate = parseFloat(item.rebateProject) || 0;
-    return calcularPrecioClienteAxis(item.precio, gpEffective, partnerRebate, projectRebate);
+    return calcularPrecioClienteAxis(item.precio, gpEffective, partnerRebate, projectRebate, item.costoChile);
   };
 
   const calcularPrecioCatalogo = (producto) => {
@@ -1539,10 +1541,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return Number(producto.precio_cliente ?? producto.precio ?? 0);
     }
     if ((producto.origen || 'QNAP') !== 'AXIS') {
-      return calcularPrecioClienteLocal(producto.precio, cotizacionGpGlobalQnap);
+      return calcularPrecioClienteLocal(producto.precio, cotizacionGpGlobalQnap, producto.costoChile);
     }
     const partnerRebate = getAxisPartnerRebate(producto, DEFAULT_AXIS_PARTNER);
-    return calcularPrecioClienteAxis(producto.precio, cotizacionGpGlobalAxis, partnerRebate, 0);
+    return calcularPrecioClienteAxis(producto.precio, cotizacionGpGlobalAxis, partnerRebate, 0, producto.costoChile);
   };
 
   const getDateKey = (value) => {
@@ -1696,10 +1698,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const calcularPrecioAdmin = (producto) => {
     if ((producto.origen || 'QNAP') !== 'AXIS') {
-      return calcularPrecioClienteLocal(producto.precio, calcParams.DEFAULT_GP);
+      return calcularPrecioClienteLocal(producto.precio, calcParams.DEFAULT_GP, producto.costoChile);
     }
     const partnerRebate = getAxisPartnerRebate(producto, DEFAULT_AXIS_PARTNER);
-    return calcularPrecioClienteAxis(producto.precio, calcParams.DEFAULT_GP, partnerRebate, 0);
+    return calcularPrecioClienteAxis(producto.precio, calcParams.DEFAULT_GP, partnerRebate, 0, producto.costoChile);
   };
 
   // Verificar sesin al cargar
@@ -1757,6 +1759,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         rebate_partner_silver: isAdminForLoad ? (parseFloat(p.rebate_partner_silver) || 0) : undefined,
         rebate_partner_gold: isAdminForLoad ? (parseFloat(p.rebate_partner_gold) || 0) : undefined,
         rebate_partner_multiregional: isAdminForLoad ? (parseFloat(p.rebate_partner_multiregional) || 0) : undefined,
+        // Costo Chile real (OH Unit USD) si hay stock disponible; solo llega al admin.
+        costoChile: isAdminForLoad && Number(p.costo_chile_real) > 0 ? Number(p.costo_chile_real) : null,
         tiempo: p.tiempo_entrega || 'ETA por confirmar'
       }));
       setProductos(mapped);
@@ -2321,7 +2325,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return {
         ...item,
         precio: Number.isFinite(Number(match.precio)) ? Number(match.precio) : item.precio,
-        precio_cliente: Number.isFinite(Number(match.precio_cliente)) ? Number(match.precio_cliente) : item.precio_cliente
+        precio_cliente: Number.isFinite(Number(match.precio_cliente)) ? Number(match.precio_cliente) : item.precio_cliente,
+        costoChile: match.costoChile ?? null
       };
     }));
   };
@@ -8341,7 +8346,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   const rebateTotal = partnerRebate + projectRebate;
                   const costoXUS = item.precio * AXIS_CONSTANTS.INBOUND_FREIGHT;
                   const costoFinalXUS = costoXUS / AXIS_CONSTANTS.IC;
-                  const costoXCL = costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
+                  const costoXCL = item.costoChile > 0 ? item.costoChile : costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
                   const costoTotalXCL = Math.max(costoXCL - rebateTotal, 0);
                   const descuentoPorcentualAxis = item.precio > 0 ? (rebateTotal / item.precio) * 100 : 0;
                   return (
@@ -8357,6 +8362,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <p className="text-xs font-medium truncate">Modelo: {item.desc}</p>
                           )}
                           <p className="text-xs text-gray-500">SKU: {item.sku} | MPN: {item.mpn || 'N/A'} | {item.tiempo}</p>
+                          {isAdmin && item.costoChile > 0 && (
+                            <p className="text-xs text-emerald-700 dark:text-emerald-300" title="OH Unit USD de la hoja Stock: reemplaza al costo Chile calculado">
+                              Costo Chile real (stock): {formatCurrency(item.costoChile)}
+                            </p>
+                          )}
                         </div>
                         <button onClick={() => removeItem(item.id)} className="text-red-500 hover:bg-red-50 px-2 py-0.5 rounded text-xs">Quitar</button>
                       </div>

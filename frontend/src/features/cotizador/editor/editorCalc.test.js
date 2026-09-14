@@ -28,6 +28,19 @@ describe('editorCalc', () => {
     expect(linea.costo_unitario).toBeCloseTo(costoXCL('AXIS', 1000) - 60, 2);
   });
 
+  test('con costo Chile real de stock (OH Unit USD), la linea nueva lo usa en vez del calculado', () => {
+    const qnap = lineaDesdeProducto({ id: 5, origen: 'QNAP', precio: 90, costoChile: 107.5, desc: 'Rail' }, { gpPct: 20 });
+    expect(qnap.costo_unitario).toBe(107.5);
+    expect(qnap.precio_unitario).toBeCloseTo(134.38, 2);
+    // AXIS: el rebate se descuenta del costo real.
+    const axis = lineaDesdeProducto({ id: 6, origen: 'AXIS', precio: 400, costoChile: 480, rebate_partner_autorizado: 30, desc: 'Cam' }, { gpPct: 13 });
+    expect(axis.costo_unitario).toBe(450);
+    // Editar el disty a mano vuelve al costo calculado.
+    const editada = aplicarCambio(qnap, 'precio_disty', 100);
+    expect(editada.costo_xcl_real).toBeNull();
+    expect(editada.costo_unitario).toBeCloseTo(costoXCL('QNAP', 100), 2);
+  });
+
   test('AXIS antigua sin rebate guardado: se infiere desde el costo y se marca', () => {
     const costo = Math.round((costoXCL('AXIS', 500) - 25) * 100) / 100;
     const linea = lineaDesdeItem({ id: 9, origen: 'AXIS', precio_disty: 500, costo_unitario: costo, precio_unitario: 700, cantidad: 1 });
