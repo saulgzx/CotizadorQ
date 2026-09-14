@@ -1784,8 +1784,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setStockByMpn(map);
       setCotizacion(prev => prev.map(item => {
         const stockText = getStockEntregaText(item.mpn, map);
-        if (!stockText) return item;
-        return { ...item, tiempo: stockText };
+        if (stockText) return { ...item, tiempo: stockText };
+        // Si ya no hay disponible (p. ej. quedó asignado en OSO), la línea vuelve al plazo del catálogo.
+        if (String(item.tiempo || '').endsWith(STOCK_DELIVERY_SUFFIX)) {
+          const catalogo = productos.find(p => p.id === item.id);
+          return { ...item, tiempo: catalogo?.tiempo || 'ETA por confirmar' };
+        }
+        return item;
       }));
     } catch (error) {
       console.error('Error cargando stock:', error);
@@ -2277,6 +2282,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!key) return '';
     const qty = lookup[key];
     if (qty === undefined || qty === null || qty === '') return '';
+    // El backend ya descuenta lo asignado en OSO: 0 disponible no es entrega inmediata.
+    const qtyNum = Number(qty);
+    if (!Number.isFinite(qtyNum) || qtyNum <= 0) return '';
     const qtyText = formatStockQuantity(qty);
     if (!qtyText) return '';
     return `${qtyText} ${STOCK_DELIVERY_SUFFIX}`;
@@ -3171,7 +3179,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       item.origin || '',
       item.imageUrl || ''
     ]));
-    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Cantidad', 'Origen', 'Imagen'];
+    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Disponible', 'Origen', 'Imagen'];
     const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -5400,7 +5408,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               <div className="p-4 border-b bg-gray-50 flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h3 className="font-semibold text-gray-800">Stock disponible</h3>
-                  <p className="text-xs text-gray-500">Disponible para entrega inmediata según inventario.</p>
+                  <p className="text-xs text-gray-500">Disponible para entrega inmediata: stock en bodega menos lo ya asignado a clientes (OSO).</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
@@ -5498,7 +5506,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <td className="px-4 py-3">{item.brand || 'N/A'}</td>
                         <td className="px-4 py-3">{item.sku || 'N/A'}</td>
                         <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-slate-700 tabular-nums">{formatStockQuantity(item.quantity) || '0'}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          <div className="font-semibold text-slate-700">{formatStockQuantity(item.quantity) || '0'}</div>
+                          {Number(item.asignado) > 0 && (
+                            <div className="text-xs text-gray-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
+                              {formatStockQuantity(item.asignado)} asignada{Number(item.asignado) === 1 ? '' : 's'} de {formatStockQuantity(item.stock_bodega)}
+                            </div>
+                          )}
+                        </td>
                         {canViewCotizador && (
                           <td className="px-4 py-3 text-right" data-html2canvas-ignore="true">
                             {(() => {

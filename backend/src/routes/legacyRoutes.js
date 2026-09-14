@@ -97,6 +97,7 @@ const {
   ensureCotizacionEdicion,
   esAdminCompleto
 } = require('../services/cotizacionItems');
+const { calcularAsignaciones, asignadoPara, aplicarAsignacion } = require('../services/stockDisponible');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
 const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
@@ -3048,7 +3049,26 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, as
   }
 });
 
-// STOCK - Leer hoja Stock (MPN / OH Quantity)
+// Unidades ya asignadas a clientes (pestaña OSO: C=SKU, D=MPN, H=cantidad alocada).
+// Se descuentan del stock: una unidad alocada no es entrega inmediata. Si OSO no
+// se puede leer, el error se propaga a propósito: mostrar el stock sin descontar
+// prometería unidades que ya tienen dueño.
+const CACHE_KEY_OSO_ASIGNACIONES = 'cache:oso:asignaciones';
+const leerAsignacionesOso = async (sheets, spreadsheetId) => {
+  const cached = cacheGet(CACHE_KEY_OSO_ASIGNACIONES);
+  if (cached) return cached;
+  const { rows } = await getSheetData(sheets, spreadsheetId, 'OSO');
+  const asignaciones = calcularAsignaciones(rows);
+  cacheSet(CACHE_KEY_OSO_ASIGNACIONES, asignaciones, STOCK_CACHE_TTL_MS);
+  return asignaciones;
+};
+
+const cantidadBodega = (rawQty) => {
+  const parsed = parseNumber(rawQty, NaN);
+  return Number.isNaN(parsed) ? String(rawQty || '').trim() : parsed;
+};
+
+// STOCK - Leer hoja Stock (MPN / OH Quantity), neto de lo asignado en OSO
 app.get('/api/stock', authenticateToken, async (req, res) => {
   try {
     const cached = cacheGet(CACHE_KEY_STOCK);
@@ -3069,16 +3089,19 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
     }
 
     const idx = getStockColumnIndexes(headers);
+    const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
+    const asignaciones = await leerAsignacionesOso(sheets, spreadsheetId);
     const items = [];
 
     for (let i = 1; i < rows.length; i += 1) {
       const row = rows[i] || [];
       const mpn = idx.mpn >= 0 ? String(row[idx.mpn] || '').trim() : '';
       if (!mpn) continue;
+      const sku = idxSku >= 0 ? String(row[idxSku] || '').trim() : '';
       const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
-      const parsedQty = parseNumber(rawQty, NaN);
-      const quantity = Number.isNaN(parsedQty) ? String(rawQty || '').trim() : parsedQty;
-      items.push({ mpn, quantity });
+      const { stock_bodega, asignado, disponible } = aplicarAsignacion(cantidadBodega(rawQty), asignadoPara(asignaciones, { mpn, sku }));
+      // quantity es lo disponible: es lo que se usa para prometer entrega inmediata.
+      items.push({ mpn, quantity: disponible, stock_bodega, asignado });
     }
 
     const payload = { items };
@@ -3112,6 +3135,7 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
     }
 
     const idx = getStockCatalogColumnIndexes(headers);
+    const asignaciones = await leerAsignacionesOso(sheets, spreadsheetId);
     const items = [];
 
     for (let i = 1; i < rows.length; i += 1) {
@@ -3123,8 +3147,7 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
       const brand = idx.brand >= 0 ? String(row[idx.brand] || '').trim() : '';
       const imageUrl = idx.image >= 0 ? String(row[idx.image] || '').trim() : '';
       const rawQty = idx.qty >= 0 ? row[idx.qty] : '';
-      const parsedQty = parseNumber(rawQty, NaN);
-      const quantity = Number.isNaN(parsedQty) ? String(rawQty || '').trim() : parsedQty;
+      const { stock_bodega, asignado, disponible } = aplicarAsignacion(cantidadBodega(rawQty), asignadoPara(asignaciones, { mpn, sku }));
       const origin = deriveStockOrigin(brand);
       items.push({
         imageUrl,
@@ -3132,7 +3155,9 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
         name,
         sku,
         mpn,
-        quantity,
+        quantity: disponible,
+        stock_bodega,
+        asignado,
         origin
       });
     }
