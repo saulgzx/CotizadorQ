@@ -496,18 +496,7 @@ export const sesionesAPI = {
     const response = await fetchWithAuth('/api/security/connections');
     if (!response.ok) throw new Error('Error obteniendo mapa de conexiones');
     return response.json();
-  },
-  setLocation: async ({ lat, lon, accuracy }) => {
-    const response = await fetchWithAuth('/api/session/location', {
-      method: 'POST',
-      body: JSON.stringify({ lat, lon, accuracy }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || 'Error registrando ubicación');
-    }
-    return response.json().catch(() => ({}));
-  },
+  }
 };
 
 
