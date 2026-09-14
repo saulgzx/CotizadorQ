@@ -63,6 +63,7 @@ import ThemeToggle from '../theme/ThemeToggle';
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
+const CotizacionEditor = lazy(() => import('./editor/CotizacionEditor'));
 import LocationGate from './views/LocationGate';
 
 const NAV_ICON_PATHS = {
@@ -1406,8 +1407,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   });
   const [showProjectRegistro, setShowProjectRegistro] = useState(false);
   const [projectRegistroModal, setProjectRegistroModal] = useState(null);
-  const [editingCotizacionId, setEditingCotizacionId] = useState(null);
-  const [editingCotizacionForm, setEditingCotizacionForm] = useState(null);
+  // Id de la cotización abierta en el editor (solo admin); null = cerrado.
+  const [editorCotizacionId, setEditorCotizacionId] = useState(null);
   const userCardRefs = useRef({});
   const nuevoUsuarioFormRef = useRef(null);
 
@@ -2377,19 +2378,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         ...(hasRegistroProyecto ? registroProyecto : {})
       };
       const items = isAdmin
-        ? cotizacion.map(item => ({
-            producto_id: item.id,
-            marca: item.marca,
-            sku: item.sku,
-            mpn: item.mpn,
-            descripcion: item.desc,
-            precio_disty: item.precio,
-            gp: item.gpOverride ?? ((item.origen || 'QNAP') === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap),
-            cantidad: item.cant,
-            precio_unitario: calcularPrecioClienteItem(item),
-            precio_total: calcularPrecioClienteItem(item) * item.cant,
-            tiempo_entrega: item.tiempo
-          }))
+        ? cotizacion.map(item => {
+            const origen = item.origen || 'QNAP';
+            const gp = item.gpOverride ?? (origen === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap);
+            const precioUnitario = calcularPrecioClienteItem(item);
+            const isAxisItem = origen === 'AXIS';
+            const partnerCategory = isAxisItem ? (item.partnerCategory || cotizacionPartnerCategory) : null;
+            return {
+              producto_id: item.id,
+              marca: item.marca,
+              sku: item.sku,
+              mpn: item.mpn,
+              descripcion: item.desc,
+              origen,
+              precio_disty: item.precio,
+              gp,
+              rebate_partner: isAxisItem ? getAxisPartnerRebate(item, partnerCategory) : null,
+              rebate_proyecto: isAxisItem ? (parseFloat(item.rebateProject) || 0) : null,
+              partner_category: partnerCategory,
+              // precio = costo / (1 - gp): se guarda el costo para ver el margen al editar.
+              costo_unitario: precioUnitario * (1 - gp),
+              cantidad: item.cant,
+              precio_unitario: precioUnitario,
+              precio_total: precioUnitario * item.cant,
+              tiempo_entrega: item.tiempo
+            };
+          })
         : cotizacion.map(item => ({
             producto_id: item.id,
             cantidad: item.cant
@@ -3702,93 +3716,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const startEditCotizacion = (cot) => {
-    setEditingCotizacionId(cot.id);
-    setEditingCotizacionForm({
-      cliente_nombre: cot.cliente_nombre || '',
-      cliente_empresa: cot.cliente_empresa || '',
-      cliente_email: cot.cliente_email || '',
-      cliente_telefono: cot.cliente_telefono || '',
-      cliente_final: cot.cliente_final || '',
-      fecha_ejecucion: cot.fecha_ejecucion || '',
-      fecha_implementacion: cot.fecha_implementacion || '',
-      vms: cot.vms || '',
-      items: (cot.items || []).map(item => ({
-        id: item.id,
-        producto_id: item.producto_id,
-        marca: item.marca || '',
-        sku: item.sku || '',
-        mpn: item.mpn || '',
-        descripcion: item.descripcion || '',
-        precio_unitario: Number(item.precio_unitario) || 0,
-        cantidad: Number(item.cantidad) || 1,
-        tiempo_entrega: item.tiempo_entrega || ''
-      }))
-    });
-  };
-
-  const cancelEditCotizacion = () => {
-    setEditingCotizacionId(null);
-    setEditingCotizacionForm(null);
-  };
-
-  const updateEditingItem = (index, field, value) => {
-    setEditingCotizacionForm(prev => {
-      if (!prev) return prev;
-      const items = [...prev.items];
-      const next = { ...items[index], [field]: value };
-      if (field === 'precio_unitario' || field === 'cantidad') {
-        const precio = Number(field === 'precio_unitario' ? value : next.precio_unitario) || 0;
-        const cant = Number(field === 'cantidad' ? value : next.cantidad) || 0;
-        next.precio_unitario = precio;
-        next.cantidad = cant;
-      }
-      items[index] = next;
-      return { ...prev, items };
-    });
-  };
-
-  const saveEditedCotizacion = async (cotId) => {
-    if (!editingCotizacionForm) return;
-    try {
-      setSaving(true);
-      const items = (editingCotizacionForm.items || []).map(item => ({
-        id: item.id,
-        producto_id: item.producto_id,
-        marca: item.marca,
-        sku: item.sku,
-        mpn: item.mpn,
-        descripcion: item.descripcion,
-        precio_disty: 0,
-        gp: 0,
-        cantidad: Number(item.cantidad) || 1,
-        precio_unitario: Number(item.precio_unitario) || 0,
-        precio_total: (Number(item.precio_unitario) || 0) * (Number(item.cantidad) || 1),
-        tiempo_entrega: item.tiempo_entrega
-      }));
-      const total = items.reduce((sum, i) => sum + (Number(i.precio_total) || 0), 0);
-      await cotizacionesAPI.update(cotId, {
-        cliente: {
-          nombre: editingCotizacionForm.cliente_nombre,
-          empresa: editingCotizacionForm.cliente_empresa,
-          email: editingCotizacionForm.cliente_email,
-          telefono: editingCotizacionForm.cliente_telefono,
-          cliente_final: editingCotizacionForm.cliente_final,
-          fecha_ejecucion: editingCotizacionForm.fecha_ejecucion,
-          fecha_implementacion: editingCotizacionForm.fecha_implementacion,
-          vms: editingCotizacionForm.vms
-        },
-        items,
-        total
-      });
-      setHistorial(prev => prev.map(c => (c.id === cotId ? { ...c, ...editingCotizacionForm, total, items } : c)));
-      cancelEditCotizacion();
-      alert('Cotización actualizada');
-    } catch (error) {
-      alert(error.message || 'Error actualizando cotización');
-    } finally {
-      setSaving(false);
-    }
+  // El guardado vive en el editor (CotizacionEditor): aca solo se refleja el resultado.
+  const handleCotizacionEditada = (actualizada) => {
+    if (!actualizada?.id) return;
+    setHistorial(prev => prev.map(c => (c.id === actualizada.id ? { ...c, ...actualizada } : c)));
   };
 
   const getCompraOrigenLabel = (cot) => {
@@ -5102,6 +5033,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           onLogout={handleLogout}
         />
 
+        {isFullAdmin && editorCotizacionId && (
+          <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 text-white">Abriendo editor…</div>}>
+            <CotizacionEditor
+              cotizacionId={editorCotizacionId}
+              productos={productos}
+              getStockText={(mpn) => getStockEntregaText(mpn)}
+              onClose={() => setEditorCotizacionId(null)}
+              onSaved={handleCotizacionEditada}
+              onExportPdf={exportHistorialPdf}
+            />
+          </Suspense>
+        )}
+
         <nav
           aria-label="Navegación principal móvil"
           className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]"
@@ -6402,62 +6346,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       </div>
                                     </div>
                                   )}
-                                  {isAdmin && (
-                                    <div className="md:col-span-2">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-xs text-gray-500">Edición</div>
-                                        {editingCotizacionId === cot.id ? (
-                                          <div className="flex gap-2">
-                                            <button
-                                              onClick={(e) => { e.stopPropagation(); saveEditedCotizacion(cot.id); }}
-                                              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                                            >
-                                              Guardar cambios
-                                            </button>
-                                            <button
-                                              onClick={(e) => { e.stopPropagation(); cancelEditCotizacion(); }}
-                                              className="px-2 py-1 text-xs bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
-                                            >
-                                              Cancelar
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); startEditCotizacion(cot); }}
-                                            className="px-2 py-1 text-xs bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
-                                          >
-                                            Editar cotización
-                                          </button>
-                                        )}
+                                  {isFullAdmin && (
+                                    <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <div className="text-xs text-gray-600">
+                                        Cambia cantidades, precios, costos o productos. Cada guardado conserva la versión anterior.
+                                        {cot.version > 1 && <span className="ml-1 font-semibold">v{cot.version}</span>}
                                       </div>
-                                      {editingCotizacionId === cot.id && editingCotizacionForm && (
-                                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                          <input
-                                            value={editingCotizacionForm.cliente_nombre}
-                                            onChange={e => setEditingCotizacionForm(f => ({ ...f, cliente_nombre: e.target.value }))}
-                                            placeholder="Nombre"
-                                            className="px-2 py-1 border rounded"
-                                          />
-                                          <input
-                                            value={editingCotizacionForm.cliente_empresa}
-                                            onChange={e => setEditingCotizacionForm(f => ({ ...f, cliente_empresa: e.target.value }))}
-                                            placeholder="Empresa"
-                                            className="px-2 py-1 border rounded"
-                                          />
-                                          <input
-                                            value={editingCotizacionForm.cliente_email}
-                                            onChange={e => setEditingCotizacionForm(f => ({ ...f, cliente_email: e.target.value }))}
-                                            placeholder="PID"
-                                            className="px-2 py-1 border rounded"
-                                          />
-                                          <input
-                                            value={editingCotizacionForm.cliente_telefono}
-                                            onChange={e => setEditingCotizacionForm(f => ({ ...f, cliente_telefono: e.target.value }))}
-                                            placeholder="Proyecto"
-                                            className="px-2 py-1 border rounded"
-                                          />
-                                        </div>
-                                      )}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setEditorCotizacionId(cot.id); }}
+                                        className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                                      >
+                                        Editar cotización
+                                      </button>
                                     </div>
                                   )}
                                   <div>
@@ -6511,50 +6411,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   )}
                                   <div className="md:col-span-2">
                                     <div className="text-xs text-gray-500 mb-1">Productos</div>
-                                    {editingCotizacionId === cot.id && editingCotizacionForm ? (
-                                      <div className="space-y-2 text-xs text-gray-600">
-                                        {editingCotizacionForm.items.map((item, idx) => (
-                                          <div key={`${cot.id}-edit-${item.id || idx}`} className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                                            <input
-                                              value={item.descripcion}
-                                              onChange={e => updateEditingItem(idx, 'descripcion', e.target.value)}
-                                              placeholder="Descripción"
-                                              className="px-2 py-1 border rounded md:col-span-2"
-                                            />
-                                            <input
-                                              value={item.sku}
-                                              onChange={e => updateEditingItem(idx, 'sku', e.target.value)}
-                                              placeholder="SKU"
-                                              className="px-2 py-1 border rounded"
-                                            />
-                                            <input
-                                              value={item.mpn}
-                                              onChange={e => updateEditingItem(idx, 'mpn', e.target.value)}
-                                              placeholder="MPN"
-                                              className="px-2 py-1 border rounded"
-                                            />
-                                            <input
-                                              type="number"
-                                              value={item.cantidad}
-                                              onChange={e => updateEditingItem(idx, 'cantidad', e.target.value)}
-                                              placeholder="Cant."
-                                              className="px-2 py-1 border rounded"
-                                            />
-                                            <input
-                                              type="number"
-                                              value={item.precio_unitario}
-                                              onChange={e => updateEditingItem(idx, 'precio_unitario', e.target.value)}
-                                              placeholder="P. Unit."
-                                              className="px-2 py-1 border rounded"
-                                            />
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : Array.isArray(cot.items) && cot.items.length > 0 ? (
+                                    {Array.isArray(cot.items) && cot.items.length > 0 ? (
                                       <div className="space-y-1 text-xs text-gray-600">
                                         {cot.items.map(item => (
-                                          <div key={`${cot.id}-${item.id}`} className="truncate">
-                                            {(item.sku || item.mpn || 'SKU')} - {item.descripcion || 'Sin descripción'}
+                                          <div key={`${cot.id}-${item.id}`} className="flex justify-between gap-3">
+                                            <span className="truncate">
+                                              {Number(item.cantidad) || 1}× {(item.sku || item.mpn || 'SKU')} - {item.descripcion || 'Sin descripción'}
+                                            </span>
+                                            <span className="shrink-0 tabular-nums">{formatCurrency(Number(item.precio_total) || 0)}</span>
                                           </div>
                                         ))}
                                       </div>
