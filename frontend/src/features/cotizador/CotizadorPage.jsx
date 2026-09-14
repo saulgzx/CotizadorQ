@@ -1661,11 +1661,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             img.onerror = reject;
             img.src = logoMeta.src;
           });
+          // Los logos pueden ser SVG (marca MyQuote): se rasterizan a PNG a 4x
+          // respetando la proporción, como object-contain alineado a la izquierda.
+          const naturalW = logoImage.naturalWidth || logoImage.width || logoMeta.w;
+          const naturalH = logoImage.naturalHeight || logoImage.height || logoMeta.h;
+          const fit = Math.min(logoMeta.w / naturalW, logoMeta.h / naturalH) || 1;
+          const drawW = naturalW * fit;
+          const drawH = naturalH * fit;
+          const raster = document.createElement('canvas');
+          raster.width = Math.max(1, Math.round(drawW * 4));
+          raster.height = Math.max(1, Math.round(drawH * 4));
+          raster.getContext('2d')?.drawImage(logoImage, 0, 0, raster.width, raster.height);
           const logoX = logoMeta.x * domToPdfScale;
-          const logoY = logoMeta.y * domToPdfScale;
-          const logoW = logoMeta.w * domToPdfScale;
-          const logoH = logoMeta.h * domToPdfScale;
-          pdf.addImage(logoImage, 'PNG', logoX, logoY, logoW, logoH);
+          const logoY = (logoMeta.y + (logoMeta.h - drawH) / 2) * domToPdfScale;
+          const logoW = drawW * domToPdfScale;
+          const logoH = drawH * domToPdfScale;
+          pdf.addImage(raster.toDataURL('image/png'), 'PNG', logoX, logoY, logoW, logoH);
         }
       }
       heightLeft -= pageHeight;
@@ -4879,10 +4890,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <div className="view-enter w-full max-w-5xl grid md:grid-cols-[1.1fr_0.9fr] rounded-[28px] overflow-hidden border border-slate-200/80 dark:border-white/15 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.9)]">
             <div className="hidden md:flex flex-col justify-between p-10 text-slate-900 dark:text-white bg-white/40 dark:bg-white/5">
               <div>
-                {/* Logo blanco-sobre-transparente: en claro se proyecta como silueta oscura */}
-                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-28 w-28 object-contain brightness-0 opacity-75 dark:brightness-100 dark:opacity-100" />
-                <p className="font-display text-2xl mt-4">myquote</p>
-                <p className="text-sm text-slate-500 dark:text-blue-200/70 mt-3">Cotización Axis / Qnap - Intcomex</p>
+                {/* Logo MyQuote negro; en modo oscuro se invierte a blanco */}
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-16 w-auto dark:invert" />
+                <p className="text-sm text-slate-500 dark:text-blue-200/70 mt-5">Cotización Axis / Qnap - Intcomex</p>
               </div>
               <div className="space-y-3 text-sm text-slate-600 dark:text-blue-100/70">
                 <div className="flex items-start gap-2">
@@ -4901,7 +4911,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
             <div className="p-6 sm:p-10 bg-white/60 dark:bg-white/10 backdrop-blur-2xl">
               <div className="flex flex-col items-center gap-2 text-center mb-8">
-                <img src="/2-removebg-preview.png" alt="MyQuote" className="h-24 w-24 object-contain md:hidden brightness-0 opacity-75 dark:brightness-100 dark:opacity-100" />
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-12 w-auto mb-2 md:hidden dark:invert" />
                 <p className="text-slate-600 dark:text-blue-100/80 text-sm">Cotización Axis / Qnap - Intcomex</p>
                 <p className="text-slate-500 dark:text-blue-100/60 text-xs">Ingrese sus credenciales</p>
               </div>
@@ -5123,15 +5133,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         aria-label="Barra lateral de navegación"
       >
         <div className={`flex items-center gap-3 py-5 border-b border-slate-100/80 dark:border-slate-800 ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'}`}>
-          {user?.logo_url ? (
-            <img src={user.logo_url} alt="Logo" className="w-9 h-9 rounded-xl object-contain bg-white shadow-sm shrink-0" />
+          {sidebarCollapsed ? (
+            <img src="/brand/myquote-app-icon-dark.svg" alt="MyQuote" className="w-10 h-10 shrink-0" />
           ) : (
-            <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-bold shrink-0">M</div>
-          )}
-          {!sidebarCollapsed && (
-            <div className="min-w-0">
-              <div className="text-sm font-display font-semibold text-slate-900 leading-tight">myquote</div>
-              <div className="text-xs text-slate-500 truncate">Cotización Axis / Qnap</div>
+            <div className="min-w-0 flex-1">
+              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-9 w-auto dark:invert" />
+              <div className="mt-1.5 text-xs text-slate-500 truncate">Cotización Axis / Qnap</div>
             </div>
           )}
         </div>
@@ -5179,9 +5186,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
           </div>
           <div className={`flex items-center gap-3 py-2 ${sidebarCollapsed ? 'justify-center' : 'px-3'}`}>
-            <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-semibold uppercase shrink-0">
-              {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-            </div>
+            {/* El logo de la empresa del usuario (si tiene) vive aquí; arriba va la marca MyQuote. */}
+            {user?.logo_url ? (
+              <img src={user.logo_url} alt={user?.empresa || 'Empresa'} className="w-8 h-8 rounded-lg object-contain bg-white shadow-sm shrink-0" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-semibold uppercase shrink-0">
+                {(user?.nombre || user?.usuario || '?').slice(0, 1)}
+              </div>
+            )}
             {!sidebarCollapsed && (
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
@@ -5225,18 +5237,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         <header className="lg:hidden bg-white/80 backdrop-blur-xl border-b border-white/60 dark:border-slate-800/60 sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3 gap-y-2">
             <div className="flex items-center gap-3 min-w-0">
-              {user?.logo_url ? (
-                <img
-                  src={user.logo_url}
-                  alt="Logo"
-                  className="w-12 h-12 rounded-xl object-contain bg-white shadow-sm"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-xl bg-white/60 border border-white" />
-              )}
               <div className="min-w-0">
-                <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase">myquote</div>
-                <h1 className="text-base sm:text-lg md:text-xl font-display text-slate-900 truncate">Cotización Axis / Qnap - Intcomex</h1>
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
+                <h1 className="mt-1 text-sm sm:text-base font-display text-slate-700 truncate">Cotización Axis / Qnap - Intcomex</h1>
                 <p className="text-xs text-slate-500 truncate">Bienvenido, {user?.nombre || user?.usuario}</p>
               </div>
             </div>
@@ -5265,7 +5268,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'myquote'}</div>
+                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'MyQuote'}</div>
                   </div>
                 </div>
                 <button
@@ -7780,7 +7783,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="flex items-center justify-between border-b pb-3 mb-3">
               <div className="flex items-center gap-3">
                 <img src="/logo.png" alt="Logo" data-pdf-logo="1" className="h-10 w-auto object-contain" />
-                <img src="/2-removebg-preview.png" alt="Logo Intcomex" data-pdf-logo="1" className="h-10 w-auto object-contain" />
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" data-pdf-logo="1" className="h-10 w-auto object-contain" />
               </div>
               <div className="text-right">
                 <div className="text-sm font-semibold">Informe de órdenes activas</div>
