@@ -13,7 +13,10 @@ export default function DashboardView() {
     invoiceMonthOptions,
     dashboardBilling,
     setCurrentView,
-    syncStatus
+    syncStatus,
+    seguimiento = [],
+    abrirCotizacionEnHistorial,
+    isFullAdmin
   } = useCotizador();
 
   const formatSyncAge = (createdAt) => {
@@ -41,14 +44,53 @@ export default function DashboardView() {
         </div>
       )}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 stagger-children">
-        {dashboardKpis.map((kpi) => (
-          <div key={kpi.label} className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)] transition hover:-translate-y-0.5 hover:shadow-lg">
-            <div className="text-xs text-slate-500 dark:text-slate-400">{kpi.label}</div>
-            <div className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mt-1 tabular-nums">{kpi.value}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{kpi.hint}</div>
-          </div>
-        ))}
+        {dashboardKpis.map((kpi) => {
+          const Tag = kpi.onClick ? 'button' : 'div';
+          return (
+            <Tag
+              key={kpi.label}
+              {...(kpi.onClick ? { type: 'button', onClick: kpi.onClick } : {})}
+              className="glass-card text-left rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)] transition hover:-translate-y-0.5 hover:shadow-lg"
+            >
+              <div className="text-xs text-slate-500 dark:text-slate-400">{kpi.label}</div>
+              <div className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mt-1 tabular-nums">{kpi.value}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{kpi.hint}</div>
+            </Tag>
+          );
+        })}
       </div>
+      {isFullAdmin && seguimiento.length > 0 && (
+        <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Para hacer seguimiento</h2>
+            <span className="text-xs text-slate-500 dark:text-slate-400">Enviadas hace más de 7 días, sin aprobar ni rechazar</span>
+          </div>
+          <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+            {seguimiento.slice(0, 8).map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  onClick={() => abrirCotizacionEnHistorial(item.id)}
+                  className="w-full flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-left text-sm rounded-lg px-2 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                >
+                  <span className="min-w-0">
+                    <span className="font-mono text-xs text-slate-500 mr-2">N° {item.folio}</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{item.empresa}</span>
+                    {item.proyecto && <span className="text-slate-500 dark:text-slate-400"> · {item.proyecto}</span>}
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className={`text-xs font-semibold ${item.dias > 21 ? 'text-rose-600 dark:text-rose-400' : 'text-amber-700 dark:text-amber-400'}`}>{item.dias} días</span>
+                    <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{formatCurrency(item.total)}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {seguimiento.length > 8 && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Y {seguimiento.length - 8} más en el historial.</p>
+          )}
+        </div>
+      )}
       {isAdmin && syncStatus?.syncs?.length > 0 && (
         <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -98,15 +140,15 @@ export default function DashboardView() {
               <div className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Estimado restante ({dashboardBilling.monthLabel})</div>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="rounded-lg border border-emerald-200 bg-white/80 dark:border-emerald-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Axis</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Axis</div>
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.remainingAxis)}</div>
                 </div>
                 <div className="rounded-lg border border-sky-200 bg-white/80 dark:border-sky-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Intcomex</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Intcomex</div>
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.remainingIntcomex)}</div>
                 </div>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 BO: {dashboardBilling.remainingBos} (con monto: {dashboardBilling.remainingWithAmounts})
               </div>
               <div className="mt-3 space-y-2">
@@ -117,7 +159,7 @@ export default function DashboardView() {
                   const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
                   return (
                     <div key={`remaining-${row.week}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-[11px] text-slate-600 dark:text-slate-400 mb-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-slate-600 dark:text-slate-400 mb-1">
                         <span>{row.week}</span>
                         <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
                       </div>
@@ -129,12 +171,12 @@ export default function DashboardView() {
                       </div>
                       {row.boSummaries.length > 0 && (
                         <details className="mt-1.5 rounded-md border border-emerald-100 bg-white/80 dark:border-emerald-500/20 dark:bg-slate-900/40 px-2 py-1 max-w-full overflow-hidden">
-                          <summary className="cursor-pointer text-[11px] text-emerald-800 dark:text-emerald-300 font-medium select-none">
+                          <summary className="cursor-pointer text-xs text-emerald-800 dark:text-emerald-300 font-medium select-none">
                             Ver resumen BO ({row.boSummaries.length})
                           </summary>
                           <div className="mt-1 max-h-40 overflow-y-auto overflow-x-hidden divide-y divide-emerald-50 dark:divide-emerald-500/10">
                             {row.boSummaries.map((item) => (
-                              <div key={`remaining-week-detail-${row.week}-${item.bo}`} className="py-1 text-[11px] text-slate-700 dark:text-slate-300">
+                              <div key={`remaining-week-detail-${row.week}-${item.bo}`} className="py-1 text-xs text-slate-700 dark:text-slate-300">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="font-medium">BO {item.bo || 'N/A'}</span>
                                   <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(item.total)}</span>
@@ -154,15 +196,15 @@ export default function DashboardView() {
               <div className="text-sm font-semibold text-blue-800 dark:text-blue-300">Ya facturado reportado ({dashboardBilling.monthLabel})</div>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="rounded-lg border border-blue-200 bg-white/80 dark:border-blue-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Axis</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Axis</div>
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.invoicedAxis)}</div>
                 </div>
                 <div className="rounded-lg border border-cyan-200 bg-white/80 dark:border-cyan-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Intcomex</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Intcomex</div>
                   <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.invoicedIntcomex)}</div>
                 </div>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 BO: {dashboardBilling.invoicedBos} (con monto: {dashboardBilling.invoicedWithAmounts})
               </div>
               <div className="mt-3 space-y-2">
@@ -173,7 +215,7 @@ export default function DashboardView() {
                   const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
                   return (
                     <div key={`invoiced-${row.week}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-[11px] text-slate-600 dark:text-slate-400 mb-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-slate-600 dark:text-slate-400 mb-1">
                         <span>{row.week}</span>
                         <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
                       </div>
@@ -185,12 +227,12 @@ export default function DashboardView() {
                       </div>
                       {row.boSummaries.length > 0 && (
                         <details className="mt-1.5 rounded-md border border-blue-100 bg-white/80 dark:border-blue-500/20 dark:bg-slate-900/40 px-2 py-1 max-w-full overflow-hidden">
-                          <summary className="cursor-pointer text-[11px] text-blue-800 dark:text-blue-300 font-medium select-none">
+                          <summary className="cursor-pointer text-xs text-blue-800 dark:text-blue-300 font-medium select-none">
                             Ver resumen BO ({row.boSummaries.length})
                           </summary>
                           <div className="mt-1 max-h-40 overflow-y-auto overflow-x-hidden divide-y divide-blue-50 dark:divide-blue-500/10">
                             {row.boSummaries.map((item) => (
-                              <div key={`invoiced-week-detail-${row.week}-${item.bo}`} className="py-1 text-[11px] text-slate-700 dark:text-slate-300">
+                              <div key={`invoiced-week-detail-${row.week}-${item.bo}`} className="py-1 text-xs text-slate-700 dark:text-slate-300">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="font-medium">BO {item.bo || 'N/A'}</span>
                                   <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(item.total)}</span>
@@ -211,7 +253,7 @@ export default function DashboardView() {
       )}
       <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Accesos rápidos</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Atajos de teclado: Alt+1 Dashboard, Alt+2 Cotizador, Alt+3 Historial.</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Atajos: Alt+1 Dashboard · Alt+2 Cotizador · Alt+3 Historial · Alt+4 Stock · / buscar producto · ? todos los atajos.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={() => setCurrentView('cotizador')} className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">Ir a cotizador</button>
           <button onClick={() => setCurrentView('historial')} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Ver historial</button>
