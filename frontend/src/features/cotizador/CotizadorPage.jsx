@@ -67,6 +67,7 @@ import { pareceLista } from './listaPegada';
 import PegarListaModal from './PegarListaModal';
 import AtajosAyuda from './AtajosAyuda';
 import RevisionEnvioModal from './RevisionEnvioModal';
+import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
 const margenCotizacion = (cot) => {
@@ -1421,7 +1422,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [atajosAbiertos, setAtajosAbiertos] = useState(false);
   const [revisionAbierta, setRevisionAbierta] = useState(false);
   const [catalogActivo, setCatalogActivo] = useState(0);
-  const [configMargen, setConfigMargen] = useConfigMargen();
+  // Solo lectura aquí: se edita y guarda en SemaforoMargenAjustes.
+  const [configMargen] = useConfigMargen();
   // Pila de líneas quitadas para Deshacer (Ctrl+Z o el botón del aviso).
   const quitadasRef = useRef([]);
   const userCardRefs = useRef({});
@@ -8177,38 +8179,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <option>Partner Multiregional</option>
                           </select>
                         </label>
-                        {isFullAdmin && (
-                          <div className="flex w-full flex-wrap items-center gap-2 border-t border-slate-200 pt-2 text-xs text-gray-500 dark:border-slate-700">
-                            <span className="font-semibold text-gray-600" title="Objetivo: GP con que cotizas. Piso: mínimo antes de pedir revisión.">Semáforo de margen</span>
-                            {['QNAP', 'AXIS'].map(marca => (
-                              <span key={marca} className="flex items-center gap-1">
-                                {marca}
-                                <label className="flex items-center gap-1">
-                                  objetivo
-                                  <input
-                                    id={`margen-objetivo-${marca}`}
-                                    type="number"
-                                    step="0.5"
-                                    value={configMargen[marca].objetivo}
-                                    onChange={e => setConfigMargen({ ...configMargen, [marca]: { ...configMargen[marca], objetivo: e.target.value } })}
-                                    className="w-14 px-2 py-0.5 border rounded text-xs"
-                                  />
-                                </label>
-                                <label className="flex items-center gap-1">
-                                  piso
-                                  <input
-                                    id={`margen-piso-${marca}`}
-                                    type="number"
-                                    step="0.5"
-                                    value={configMargen[marca].piso}
-                                    onChange={e => setConfigMargen({ ...configMargen, [marca]: { ...configMargen[marca], piso: e.target.value } })}
-                                    className="w-14 px-2 py-0.5 border rounded text-xs"
-                                  />
-                                </label>
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {isFullAdmin && <SemaforoMargenAjustes />}
                       </div>
                     )}
                     {isVentasUser && (

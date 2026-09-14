@@ -1,4 +1,22 @@
 import { estadoMargen, MARGEN_DEFAULTS, umbralesPara } from './margen';
+import { validarBorrador } from './SemaforoMargenAjustes';
+
+describe('ajustes del semaforo', () => {
+  const borrador = (qnap, axis) => ({ QNAP: qnap, AXIS: axis });
+
+  test('acepta subir o bajar el minimo mientras no pase el objetivo', () => {
+    expect(validarBorrador(borrador({ objetivo: '15', piso: '8' }, { objetivo: '13', piso: '12,5' }))).toBeNull();
+  });
+
+  test('rechaza un minimo mayor que el objetivo', () => {
+    expect(validarBorrador(borrador({ objetivo: '15', piso: '16' }, { objetivo: '13', piso: '10' }))).toMatch(/QNAP: el mínimo aceptable/);
+  });
+
+  test('rechaza campos vacios o fuera de rango', () => {
+    expect(validarBorrador(borrador({ objetivo: '', piso: '10' }, { objetivo: '13', piso: '10' }))).toMatch(/objetivo/);
+    expect(validarBorrador(borrador({ objetivo: '15', piso: '10' }, { objetivo: '100', piso: '10' }))).toMatch(/AXIS/);
+  });
+});
 
 describe('semaforo de margen', () => {
   const config = { QNAP: { objetivo: 15, piso: 10 }, AXIS: { objetivo: 13, piso: 8 } };
