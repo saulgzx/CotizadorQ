@@ -60,6 +60,29 @@ import {
 import { CotizadorContext } from './cotizadorContext';
 import useTheme from '../theme/useTheme';
 import ThemeToggle from '../theme/ThemeToggle';
+import { notify, Toaster } from '../ui/toast';
+import MargenChip from './MargenChip';
+import { estadoMargen, formatoPct, useConfigMargen } from './margen';
+import { pareceLista } from './listaPegada';
+import PegarListaModal from './PegarListaModal';
+import AtajosAyuda from './AtajosAyuda';
+import RevisionEnvioModal from './RevisionEnvioModal';
+
+// Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
+const margenCotizacion = (cot) => {
+  const items = Array.isArray(cot?.items) ? cot.items : [];
+  let venta = 0;
+  let margen = 0;
+  let conCosto = 0;
+  for (const item of items) {
+    if (item.margen_total === null || item.margen_total === undefined) continue;
+    conCosto += 1;
+    venta += Number(item.precio_total) || 0;
+    margen += Number(item.margen_total) || 0;
+  }
+  if (conCosto === 0 || venta <= 0) return null;
+  return { venta, margen, gpPct: (margen / venta) * 100, origenes: items.map(i => i.origen || 'QNAP'), parcial: conCosto < items.length };
+};
 
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
@@ -194,7 +217,7 @@ function CommandPalette({ open, onClose, navItems, currentView, onNavigate, prod
             placeholder="Buscar vistas, productos o acciones…"
             className="flex-1 py-3.5 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 border-0"
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-400 shrink-0">Esc</kbd>
+          <kbd className="text-xs px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-400 shrink-0">Esc</kbd>
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {results.length === 0 ? (
@@ -209,7 +232,7 @@ function CommandPalette({ open, onClose, navItems, currentView, onNavigate, prod
               >
                 <NavIcon name={r.icon} className="w-4 h-4 shrink-0" />
                 <span className="flex-1 truncate">{r.label}</span>
-                <span className={`text-[10px] uppercase tracking-wide shrink-0 ${i === activeIndex ? 'opacity-70' : 'text-slate-400'}`}>{r.hint}</span>
+                <span className={`text-xs uppercase tracking-wide shrink-0 ${i === activeIndex ? 'opacity-70' : 'text-slate-400'}`}>{r.hint}</span>
               </button>
             ))
           )}
@@ -1112,7 +1135,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         }));
     }
     if (!rows.length) {
-      alert('No hay datos para exportar.');
+      notify('No hay datos para exportar.');
       return;
     }
     const XLSX = await getXLSX();
@@ -1129,7 +1152,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const exportOsoReport = async () => {
     const orders = filteredOsoOrders;
     if (!orders.length) {
-      alert('No hay órdenes para exportar con los filtros actuales.');
+      notify('No hay órdenes para exportar con los filtros actuales.');
       return;
     }
 
@@ -1309,7 +1332,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const copyOsoExecutiveSummary = () => {
     const orders = filteredOsoOrders;
     if (!orders.length) {
-      alert('No hay órdenes para resumir con los filtros actuales.');
+      notify('No hay órdenes para resumir con los filtros actuales.');
       return;
     }
     const stats = computeOsoStats(orders);
@@ -1337,7 +1360,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     ].join('\n');
 
     navigator.clipboard?.writeText?.(summary);
-    alert('Resumen ejecutivo copiado.');
+    notify('Resumen ejecutivo copiado.');
   };
 
   const togglePinnedBo = (bo) => {
@@ -1393,12 +1416,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [projectRegistroModal, setProjectRegistroModal] = useState(null);
   // Id de la cotización abierta en el editor (solo admin); null = cerrado.
   const [editorCotizacionId, setEditorCotizacionId] = useState(null);
+  // Rework de uso: lista pegada (null = cerrado), ayuda de atajos, revisión previa.
+  const [pegarListaTexto, setPegarListaTexto] = useState(null);
+  const [atajosAbiertos, setAtajosAbiertos] = useState(false);
+  const [revisionAbierta, setRevisionAbierta] = useState(false);
+  const [catalogActivo, setCatalogActivo] = useState(0);
+  const [configMargen, setConfigMargen] = useConfigMargen();
+  // Pila de líneas quitadas para Deshacer (Ctrl+Z o el botón del aviso).
+  const quitadasRef = useRef([]);
   const userCardRefs = useRef({});
   const nuevoUsuarioFormRef = useRef(null);
 
   const fieldLabelClass = isClient
     ? 'flex flex-col gap-1 text-xs text-gray-500'
-    : 'flex flex-col gap-1 text-[11px] text-gray-500';
+    : 'flex flex-col gap-1 text-xs text-gray-500';
   const fieldInputClass = isClient
     ? 'px-3 py-2 border rounded text-sm text-gray-800'
     : 'px-2 py-1 border rounded text-xs text-gray-800';
@@ -1545,7 +1576,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const downloadPdfFromElement = async (element, filenameBase) => {
     if (!element) {
-      alert('No se pudo generar el PDF.');
+      notify('No se pudo generar el PDF.');
       return;
     }
     const captureElement = element.querySelector('[data-pdf-root="1"]') || element;
@@ -1644,7 +1675,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }
       pdf.save(`${filenameBase}.pdf`);
     } catch (error) {
-      alert(error.message || 'Error generando PDF');
+      notify(error.message || 'Error generando PDF');
     } finally {
       setSaving(false);
     }
@@ -1853,7 +1884,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, user]);
 
   useEffect(() => {
-    if (!isLoggedIn || currentView !== 'historial') return;
+    // El dashboard también lo usa (margen del mes, seguimiento).
+    if (!isLoggedIn || (currentView !== 'historial' && currentView !== 'dashboard')) return;
     let cancelled = false;
     const loadHistorial = async () => {
       setHistorialLoading(true);
@@ -2019,7 +2051,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         '1': canViewDashboard ? 'dashboard' : (isComprasOnlyUser ? 'compras' : 'cotizador'),
         '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
         '3': canViewHistorial ? 'historial' : null,
-        '4': isFullAdmin ? 'usuarios' : null,
+        '4': canViewStock ? 'stock' : null,
         '5': isFullAdmin ? 'ordenes' : null
       };
       const target = keyMap[event.key];
@@ -2029,7 +2061,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoggedIn, isFullAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras]);
+  }, [isLoggedIn, isFullAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras, canViewStock]);
 
   useEffect(() => {
     if (!user || isAdmin) return;
@@ -2080,10 +2112,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         setSaving(true);
         const result = await productosAPI.bulkCreate(nuevosProductos, adminOrigin);
         await loadProductos();
-        alert(`Se importaron ${result.productos.length} productos correctamente`);
+        notify(`Se importaron ${result.productos.length} productos correctamente`);
       } catch (error) {
         console.error('Error:', error);
-        alert('Error al procesar el archivo');
+        notify('Error al procesar el archivo');
       } finally {
         setSaving(false);
       }
@@ -2117,9 +2149,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const summary = result?.inserted !== undefined
         ? `${result.inserted} nuevos, ${result.updated} actualizados, ${result.skipped} omitidos.`
         : 'Sync completado.';
-      alert(`Sync OK (${adminOrigin}): ${summary}`);
+      notify(`Sync OK (${adminOrigin}): ${summary}`);
     } catch (error) {
-      alert(error.message || 'Error sincronizando productos');
+      notify(error.message || 'Error sincronizando productos');
     } finally {
       setSaving(false);
     }
@@ -2127,7 +2159,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // CRUD Productos
   const handleAddProduct = async () => {
-    if (!newProduct.sku && !newProduct.desc) return alert('Ingrese SKU o Descripción');
+    if (!newProduct.sku && !newProduct.desc) return notify('Ingrese SKU o Descripción');
     try {
       setSaving(true);
       const gp = parseGp(newProduct.gp, calcParams.DEFAULT_GP);
@@ -2147,7 +2179,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setNewProduct({ marca: '', sku: '', mpn: '', desc: '', precio: '', gp: '15', tiempo: 'ETA por confirmar' });
       setShowAddForm(false);
     } catch (error) {
-      alert('Error al guardar producto');
+      notify('Error al guardar producto');
     } finally {
       setSaving(false);
     }
@@ -2177,7 +2209,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       await loadProductos();
       setEditingId(null);
     } catch (error) {
-      alert('Error al actualizar producto');
+      notify('Error al actualizar producto');
     } finally {
       setSaving(false);
     }
@@ -2186,7 +2218,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const deleteProductosByIds = async (ids, successMessage) => {
     const validIds = ids.filter(id => id !== undefined && id !== null && id !== '');
     if (validIds.length === 0) {
-      alert('No hay IDs válidos para eliminar.');
+      notify('No hay IDs válidos para eliminar.');
       return;
     }
     setSaving(true);
@@ -2201,13 +2233,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setSelectedIds(new Set());
       if (failed.length > 0) {
         const detail = failedMessages.length > 0 ? ' Detalle: ' + failedMessages[0] : '';
-        alert('Se eliminaron ' + (validIds.length - failed.length) + ' productos. Fallaron ' + failed.length + '.' + detail);
+        notify('Se eliminaron ' + (validIds.length - failed.length) + ' productos. Fallaron ' + failed.length + '.' + detail);
       } else {
-        alert(successMessage);
+        notify(successMessage);
       }
     } catch (error) {
       console.error('Error eliminando productos:', error);
-      alert(error.message || 'Error al eliminar productos');
+      notify(error.message || 'Error al eliminar productos');
     } finally {
       setSaving(false);
     }
@@ -2289,7 +2321,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       syncCotizacionWithCatalogPrices(refreshedCatalog);
     } catch (error) {
       applyPartnerCategoryToAxis(previousCategory);
-      alert(error.message || 'No se pudo actualizar la categoria de partner');
+      notify(error.message || 'No se pudo actualizar la categoria de partner');
     } finally {
       setUpdatingCotizacionPartner(false);
     }
@@ -2331,17 +2363,145 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }));
   };
 
-  const removeItem = (id) => setCotizacion(c => c.filter(x => x.id !== id));
+  // Quitar no pide confirmación: se puede deshacer desde el aviso o con Ctrl+Z.
+  const deshacerQuitada = () => {
+    const ultima = quitadasRef.current.pop();
+    if (!ultima) return false;
+    if (ultima.tipo === 'todo') {
+      setCotizacion(ultima.items);
+      setCurrentQuoteNumero(ultima.numero);
+    } else {
+      setCotizacion(c => {
+        if (c.some(x => x.id === ultima.item.id)) return c;
+        const next = [...c];
+        next.splice(Math.min(ultima.index, next.length), 0, ultima.item);
+        return next;
+      });
+    }
+    notify('Restaurado', { tipo: 'ok', duracion: 2000 });
+    return true;
+  };
+
+  const removeItem = (id) => {
+    const index = cotizacion.findIndex(x => x.id === id);
+    if (index < 0) return;
+    const item = cotizacion[index];
+    quitadasRef.current = [...quitadasRef.current.slice(-19), { tipo: 'linea', item, index }];
+    setCotizacion(c => c.filter(x => x.id !== id));
+    notify(`Quitaste ${item.sku || item.mpn || 'la línea'}`, { tipo: 'info', accion: { label: 'Deshacer', onClick: deshacerQuitada } });
+  };
   const clearCotizacion = () => {
     if (cotizacion.length === 0) return;
-    if (!confirm('Limpiar todos los productos de la cotización?')) return;
+    quitadasRef.current = [...quitadasRef.current.slice(-19), { tipo: 'todo', items: cotizacion, numero: currentQuoteNumero }];
     setCotizacion([]);
     setCurrentQuoteNumero(null);
+    notify(`Carrito vacío (${cotizacion.length} línea${cotizacion.length === 1 ? '' : 's'} quitadas)`, {
+      tipo: 'info',
+      accion: { label: 'Deshacer', onClick: deshacerQuitada }
+    });
+  };
+
+  // Agrega varias líneas de una vez (lista pegada, duplicar). Suma cantidades si ya estaban.
+  const agregarVarios = (entradas) => {
+    setCotizacion(c => {
+      const next = [...c];
+      for (const { producto, cantidad } of entradas) {
+        const cant = Math.max(1, parseInt(cantidad, 10) || 1);
+        const idx = next.findIndex(x => x.id === producto.id);
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], cant: next[idx].cant + cant };
+        } else {
+          next.push({
+            ...producto,
+            cant,
+            partnerCategory: producto.origen === 'AXIS' ? cotizacionPartnerCategory : undefined,
+            rebateProject: producto.origen === 'AXIS' ? 0 : undefined,
+            gpOverride: null,
+            tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
+          });
+        }
+      }
+      return next;
+    });
+  };
+
+  const agregarListaPegada = (entradas, { sinResolver = 0, noEncontradas = [] } = {}) => {
+    agregarVarios(entradas);
+    setPegarListaTexto(null);
+    const partes = [`Agregados ${entradas.length} producto${entradas.length === 1 ? '' : 's'}`];
+    if (sinResolver) partes.push(`${sinResolver} ambiguo${sinResolver === 1 ? '' : 's'} sin elegir`);
+    if (noEncontradas.length) partes.push(`No están en el catálogo: ${noEncontradas.slice(0, 4).join(', ')}${noEncontradas.length > 4 ? '…' : ''}`);
+    notify(partes.join('. '), { tipo: noEncontradas.length || sinResolver ? 'info' : 'ok', duracion: noEncontradas.length ? 9000 : 4000 });
+    catalogInputRef.current?.focus();
+  };
+
+  // Margen de una línea del carrito: precio = costo / (1 - gp), así que costo = precio · (1 - gp).
+  const margenItem = (item) => {
+    const precio = calcularPrecioClienteItem(item);
+    const origen = item.origen || 'QNAP';
+    const gp = item.gpOverride ?? (origen === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap);
+    const costo = precio * (1 - gp);
+    return { precio, costo, gpPct: gp * 100, margenTotal: (precio - costo) * item.cant };
   };
   const totalCotizacion = useMemo(
     () => cotizacion.reduce((t, i) => t + calcularPrecioClienteItem(i) * i.cant, 0),
     [cotizacion, calcParams, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis]
   );
+
+  // Resumen de margen del carrito (solo se muestra a quien ve costos).
+  const resumenMargenCarrito = useMemo(() => {
+    if (!isAdmin || cotizacion.length === 0) return null;
+    let venta = 0;
+    let costo = 0;
+    for (const item of cotizacion) {
+      const m = margenItem(item);
+      venta += m.precio * item.cant;
+      costo += m.costo * item.cant;
+    }
+    return {
+      venta,
+      costo,
+      margen: venta - costo,
+      gpPct: venta > 0 ? ((venta - costo) / venta) * 100 : null,
+      origenes: cotizacion.map(i => i.origen || 'QNAP')
+    };
+  }, [cotizacion, calcParams, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis, isAdmin]);
+
+  // Lo que conviene revisar antes de generar (no bloquea).
+  const problemasEnvio = () => {
+    const nombre = (item) => `${item.sku && item.sku !== 'To Create' ? item.sku : item.mpn} · ${item.desc || ''}`;
+    const bajoPiso = isAdmin
+      ? cotizacion
+        .map(item => ({ item, m: margenItem(item) }))
+        .filter(({ item, m }) => estadoMargen(m.gpPct, item.origen, configMargen) === 'bajo_piso')
+        .map(({ item, m }) => ({ id: item.id, nombre: nombre(item), detalle: formatoPct(m.gpPct) }))
+      : [];
+    const porCrear = cotizacion
+      .filter(item => normalizeLookupKey(item.sku).replace(/\s+/g, '') === 'tocreate' || !String(item.sku || '').trim())
+      .map(item => ({ id: item.id, nombre: nombre(item) }));
+    const hayStock = Object.keys(stockByMpn || {}).length > 0;
+    const sinStock = hayStock
+      ? cotizacion
+        .filter(item => !getStockEntregaText(item.mpn))
+        .map(item => ({ id: item.id, nombre: nombre(item), detalle: `×${item.cant}` }))
+      : [];
+    return { bajoPiso, porCrear, sinStock };
+  };
+
+  const generarCotizacion = ({ saltarRevision = false } = {}) => {
+    if (cotizacion.length === 0) return;
+    if (!saltarRevision) {
+      const p = problemasEnvio();
+      // Sin stock es lo normal en importación: se muestra como contexto, pero solo
+      // abre la revisión un margen bajo el piso o un SKU por crear.
+      if (p.bajoPiso.length || p.porCrear.length) {
+        setRevisionAbierta(true);
+        return;
+      }
+    }
+    setRevisionAbierta(false);
+    setCurrentView('cliente');
+  };
 
   // Guardar cotización
   const saveCotizacion = async ({ silent = false } = {}) => {
@@ -2407,10 +2567,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       // Guardamos el número/folio asignado para que el PDF del borrador ya lo muestre.
       const numeroAsignado = created?.cotizacion?.numero ?? null;
       if (numeroAsignado) setCurrentQuoteNumero(numeroAsignado);
-      if (!silent) alert(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
+      if (!silent) notify(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
       return created?.cotizacion || null;
     } catch (error) {
-      alert(error.message || 'Error al guardar cotización');
+      notify(error.message || 'Error al guardar cotización');
       return null;
     } finally {
       setSaving(false);
@@ -2568,6 +2728,59 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isLoggedIn]);
 
+  // Atajos de uso diario. El manejador se renueva en cada render (ref) para
+  // leer siempre el estado actual sin re-suscribir el listener.
+  const atajosRef = useRef(null);
+  atajosRef.current = (e) => {
+    if (!isLoggedIn || editorCotizacionId || pegarListaTexto !== null || revisionAbierta) return;
+    const el = e.target;
+    const escribiendo = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    if (ctrl && e.key === 'Enter' && currentView === 'cotizador' && cotizacion.length > 0) {
+      e.preventDefault();
+      generarCotizacion();
+      return;
+    }
+    if (escribiendo) return;
+    if (ctrl && String(e.key).toLowerCase() === 'z' && !e.shiftKey && currentView === 'cotizador') {
+      if (deshacerQuitada()) e.preventDefault();
+      return;
+    }
+    if (ctrl || e.altKey) return;
+    if (e.key === '?') {
+      e.preventDefault();
+      setAtajosAbiertos(v => !v);
+      return;
+    }
+    if (e.key === '/' && canViewCotizador) {
+      e.preventDefault();
+      if (currentView !== 'cotizador') setCurrentView('cotizador');
+      setTimeout(() => catalogInputRef.current?.focus(), 50);
+      return;
+    }
+    if (currentView === 'historial' && expandedHistorialId) {
+      const cot = historial.find(c => c.id === expandedHistorialId);
+      if (!cot) return;
+      const tecla = String(e.key).toLowerCase();
+      if (tecla === 'e' && isFullAdmin) {
+        e.preventDefault();
+        setEditorCotizacionId(cot.id);
+      } else if (tecla === 'p') {
+        e.preventDefault();
+        exportHistorialPdf(cot);
+      } else if (tecla === 'd' && canViewCotizador) {
+        e.preventDefault();
+        duplicarCotizacion(cot);
+      }
+    }
+  };
+  useEffect(() => {
+    const onKeyDown = (e) => atajosRef.current?.(e);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const markBoInvoiced = (bo) => {
     if (!bo) return;
     const invoicedAt = new Date().toISOString();
@@ -2679,7 +2892,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       await loadActiveSessions({ silent: true });
       await loadUserActivity(selectedSessionUserId);
     } catch (error) {
-      alert(error.message || 'Error revocando sesión');
+      notify(error.message || 'Error revocando sesión');
     }
   };
 
@@ -2695,9 +2908,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const axisSummary = axis?.inserted !== undefined
         ? `AXIS: ${axis.inserted} nuevos, ${axis.updated} actualizados, ${axis.skipped} omitidos.`
         : 'AXIS: Sync completado.';
-      alert(`Sync OK: ${qnapSummary} ${axisSummary}`);
+      notify(`Sync OK: ${qnapSummary} ${axisSummary}`);
     } catch (error) {
-      alert(error.message || 'Error sincronizando productos');
+      notify(error.message || 'Error sincronizando productos');
     } finally {
       setSaving(false);
     }
@@ -2711,9 +2924,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const summary = result?.inserted !== undefined
         ? `${origin}: ${result.inserted} nuevos, ${result.updated} actualizados, ${result.skipped} omitidos.`
         : `${origin}: Sync completado.`;
-      alert(`Sync OK: ${summary}`);
+      notify(`Sync OK: ${summary}`);
     } catch (error) {
-      alert(error.message || 'Error sincronizando productos');
+      notify(error.message || 'Error sincronizando productos');
     } finally {
       setSaving(false);
     }
@@ -2721,7 +2934,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const exportCotizacionExcel = async () => {
     if (cotizacion.length === 0) {
-      alert('No hay productos para exportar');
+      notify('No hay productos para exportar');
       return;
     }
     const fechaKey = getDateKey(new Date());
@@ -2786,7 +2999,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const exportCotizacionAxis = () => {
     if (cotizacion.length === 0) {
-      alert('No hay productos para exportar');
+      notify('No hay productos para exportar');
       return;
     }
     const payload = buildAxisPayload(cotizacion, {
@@ -2869,7 +3082,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const exportCotizacionPdf = async () => {
     if (cotizacion.length === 0) {
-      alert('No hay productos para exportar');
+      notify('No hay productos para exportar');
       return;
     }
     try {
@@ -2886,7 +3099,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       payload.numero = numero ?? payload.numero;
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
-      alert(error.message || 'Error exportando PDF');
+      notify(error.message || 'Error exportando PDF');
     } finally {
       setSaving(false);
     }
@@ -2900,7 +3113,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const payload = buildPdfPayloadFromHistorial(cot);
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
-      alert(error.message || 'Error exportando PDF');
+      notify(error.message || 'Error exportando PDF');
     } finally {
       setSaving(false);
     }
@@ -3035,10 +3248,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (pidCandidate) {
         setCliente(c => ({ ...c, pid: pidCandidate }));
       }
-      alert(`Carga completa. Agregados: ${added}, omitidos: ${skipped}.`);
+      notify(`Carga completa. Agregados: ${added}, omitidos: ${skipped}.`);
     } catch (error) {
       console.error('Error leyendo proyecto:', error);
-      alert('Error leyendo archivo de proyecto');
+      notify('Error leyendo archivo de proyecto');
     }
   };
 
@@ -3173,12 +3386,62 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return { clienteQuotes, registroQuotes, registroPendientes };
   }, [historial, dismissedRegistroById]);
 
-  const dashboardKpis = useMemo(() => ([
-    { label: 'Cotizaciones', value: historial.length, hint: 'Historial total' },
-    { label: 'Productos', value: productos.length, hint: 'Catálogo activo' },
-    { label: 'Órdenes', value: osoOrders.length, hint: 'Órdenes OSO' },
-    { label: 'Usuarios', value: usuarios.length, hint: 'Usuarios registrados' }
-  ]), [historial.length, productos.length, osoOrders.length, usuarios.length]);
+  // Cotizaciones enviadas que llevan más de 7 días sin respuesta: lo que hay que seguir.
+  const DIAS_SEGUIMIENTO = 7;
+  const seguimiento = useMemo(() => {
+    const limite = Date.now() - DIAS_SEGUIMIENTO * 86400000;
+    return historial
+      .filter(cot => normalizeEstado(cot.estado) === 'enviada' && new Date(cot.created_at).getTime() < limite)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(cot => ({
+        id: cot.id,
+        folio: cot.numero || cot.id,
+        empresa: cot.cliente_empresa || 'Sin empresa',
+        proyecto: cot.cliente_telefono || '',
+        total: Number(cot.total) || 0,
+        dias: Math.floor((Date.now() - new Date(cot.created_at).getTime()) / 86400000)
+      }));
+  }, [historial]);
+
+  const abrirCotizacionEnHistorial = (id) => {
+    setExpandedHistorialId(id);
+    setCurrentView('historial');
+  };
+
+  const dashboardKpis = useMemo(() => {
+    if (!isFullAdmin) {
+      return [
+        { label: 'Cotizaciones', value: historial.length, hint: 'Historial total' },
+        { label: 'Productos', value: productos.length, hint: 'Catálogo activo' },
+        { label: 'Órdenes', value: osoOrders.length, hint: 'Órdenes OSO' },
+        { label: 'Usuarios', value: usuarios.length, hint: 'Usuarios registrados' }
+      ];
+    }
+    const ahora = new Date();
+    const delMes = historial.filter(cot => {
+      const d = new Date(cot.created_at);
+      return d.getFullYear() === ahora.getFullYear() && d.getMonth() === ahora.getMonth();
+    });
+    const montoMes = delMes.reduce((sum, cot) => sum + (Number(cot.total) || 0), 0);
+    let ventaConCosto = 0;
+    let margenMes = 0;
+    for (const cot of delMes) {
+      const m = margenCotizacion(cot);
+      if (!m) continue;
+      margenMes += m.margen;
+      ventaConCosto += m.venta;
+    }
+    const gpMes = ventaConCosto > 0 ? (margenMes / ventaConCosto) * 100 : null;
+    const hace90 = Date.now() - 90 * 86400000;
+    const cerradas = historial.filter(cot => new Date(cot.created_at).getTime() >= hace90 && ['aprobada', 'rechazada'].includes(normalizeEstado(cot.estado)));
+    const aprobadas = cerradas.filter(cot => normalizeEstado(cot.estado) === 'aprobada').length;
+    return [
+      { label: 'Cotizado este mes', value: formatCurrency(montoMes), hint: `${delMes.length} cotizaci${delMes.length === 1 ? 'ón' : 'ones'}` },
+      { label: 'Margen del mes', value: formatCurrency(margenMes), hint: gpMes === null ? 'Sin líneas con costo' : `GP ${formatoPct(gpMes)} sobre lo cotizado con costo` },
+      { label: 'Tasa de aprobación', value: cerradas.length ? `${Math.round((aprobadas / cerradas.length) * 100)}%` : '—', hint: `${aprobadas} de ${cerradas.length} cerradas en 90 días` },
+      { label: 'Sin respuesta', value: seguimiento.length, hint: `Enviadas hace más de ${DIAS_SEGUIMIENTO} días`, onClick: seguimiento.length ? () => setCurrentView('historial') : undefined }
+    ];
+  }, [isFullAdmin, historial, productos.length, osoOrders.length, usuarios.length, seguimiento]);
 
   const dashboardBilling = useMemo(() => {
     const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4', 'Sin sem'];
@@ -3366,10 +3629,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setSelectedHistorialIds(new Set());
       if (failed.length > 0) {
         const firstError = failed[0]?.reason?.message || 'Error eliminando cotizaciones';
-        alert(`Se eliminaron ${ids.length - failed.length}. Fallaron ${failed.length}. ${firstError}`);
+        notify(`Se eliminaron ${ids.length - failed.length}. Fallaron ${failed.length}. ${firstError}`);
       }
     } catch (error) {
-      alert(error.message || 'Error eliminando cotizaciones');
+      notify(error.message || 'Error eliminando cotizaciones');
     } finally {
       setSaving(false);
     }
@@ -3387,7 +3650,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const passwordValue = (passwordFromForm || nuevoUsuario.password || '').toString();
 
     if (!usuarioValue || !passwordValue.trim()) {
-      alert('Usuario y contraseña son requeridos');
+      notify('Usuario y contraseña son requeridos');
       return;
     }
 
@@ -3421,7 +3684,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         role: 'client'
       });
     } catch (error) {
-      alert(error.message || 'Error creando usuario');
+      notify(error.message || 'Error creando usuario');
     } finally {
       setUsuariosLoading(false);
     }
@@ -3464,7 +3727,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       };
       setUsuarios(prev => prev.map(u => (u.id === userId ? updatedNormalized : u)));
     } catch (error) {
-      alert(error.message || 'Error actualizando usuario');
+      notify(error.message || 'Error actualizando usuario');
     } finally {
       setUsuariosLoading(false);
     }
@@ -3472,15 +3735,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const resetUsuarioPassword = async (userId, newPassword) => {
     if (!newPassword) {
-      alert('Ingrese una contraseña');
+      notify('Ingrese una contraseña');
       return;
     }
     try {
       setUsuariosLoading(true);
       await usuariosAPI.updatePassword(userId, newPassword);
-      alert('Contraseña actualizada');
+      notify('Contraseña actualizada');
     } catch (error) {
-      alert(error.message || 'Error actualizando contraseña');
+      notify(error.message || 'Error actualizando contraseña');
     } finally {
       setUsuariosLoading(false);
     }
@@ -3488,11 +3751,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const updateOwnPassword = async () => {
     if (!accountPassword) {
-      alert('Ingrese una contraseña');
+      notify('Ingrese una contraseña');
       return;
     }
     if (accountPassword !== accountPasswordConfirm) {
-      alert('Las contraseñas no coinciden');
+      notify('Las contraseñas no coinciden');
       return;
     }
     try {
@@ -3500,9 +3763,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       await usuariosAPI.updateOwnPassword(accountPassword);
       setAccountPassword('');
       setAccountPasswordConfirm('');
-      alert('Contraseña actualizada');
+      notify('Contraseña actualizada');
     } catch (error) {
-      alert(error.message || 'Error actualizando contraseña');
+      notify(error.message || 'Error actualizando contraseña');
     } finally {
       setSaving(false);
     }
@@ -3521,9 +3784,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         return next;
       });
       setCotizacionPartnerCategory(nextPartnerCategory);
-      alert('Nivel de partner actualizado');
+      notify('Nivel de partner actualizado');
     } catch (error) {
-      alert(error.message || 'Error actualizando nivel de partner');
+      notify(error.message || 'Error actualizando nivel de partner');
     } finally {
       setUpdatingOwnPartnerCategory(false);
     }
@@ -3536,7 +3799,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       await usuariosAPI.delete(userId);
       setUsuarios(prev => prev.filter(u => u.id !== userId));
     } catch (error) {
-      alert(error.message || 'Error eliminando usuario');
+      notify(error.message || 'Error eliminando usuario');
     } finally {
       setUsuariosLoading(false);
     }
@@ -3576,7 +3839,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const saveEmpresaConfig = () => {
     const nombre = empresaForm.nombre.trim();
     if (!nombre) {
-      alert('Ingrese nombre de empresa');
+      notify('Ingrese nombre de empresa');
       return;
     }
     const gpQnap = parseFloat(empresaForm.gp_qnap);
@@ -3658,7 +3921,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         return next;
       });
     } catch (error) {
-      alert(error.message || 'Error eliminando empresa');
+      notify(error.message || 'Error eliminando empresa');
     } finally {
       setUsuariosLoading(false);
     }
@@ -3673,7 +3936,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         cot.id === cotizacionId ? { ...cot, estado: newEstado } : cot
       )));
     } catch (error) {
-      alert(error.message || 'Error actualizando estado');
+      notify(error.message || 'Error actualizando estado');
     } finally {
       setSaving(false);
     }
@@ -3684,6 +3947,64 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!actualizada?.id) return;
     setHistorial(prev => prev.map(c => (c.id === actualizada.id ? { ...c, ...actualizada } : c)));
   };
+
+  // Producto del catálogo que corresponde a una fila de stock (por MPN, luego SKU).
+  const productoDeStock = (item) => productos.find(p =>
+    (item.mpn && normalizeLookupKey(p.mpn) === normalizeLookupKey(item.mpn)) ||
+    (item.sku && normalizeLookupKey(p.sku) === normalizeLookupKey(item.sku))
+  );
+
+  // Duplicar: la cotización pasa al carrito como una nueva, con precios y stock de hoy.
+  const duplicarCotizacion = (cot) => {
+    const items = Array.isArray(cot?.items) ? cot.items : [];
+    const porId = new Map(productos.map(p => [Number(p.id), p]));
+    const porCodigo = (item) => productos.find(p =>
+      (item.mpn && normalizeLookupKey(p.mpn) === normalizeLookupKey(item.mpn)) ||
+      (item.sku && item.sku !== 'To Create' && normalizeLookupKey(p.sku) === normalizeLookupKey(item.sku))
+    );
+    const entradas = [];
+    const faltantes = [];
+    for (const item of items) {
+      const producto = porId.get(Number(item.producto_id)) || porCodigo(item);
+      if (producto) entradas.push({ producto, cantidad: Number(item.cantidad) || 1 });
+      else faltantes.push(item.sku || item.mpn || 'sin código');
+    }
+    if (entradas.length === 0) {
+      notify('No se pudo duplicar: ninguno de sus productos está en el catálogo activo.', { tipo: 'error' });
+      return;
+    }
+    const carritoAnterior = cotizacion;
+    const clienteAnterior = cliente;
+    const numeroAnterior = currentQuoteNumero;
+    setCotizacion([]);
+    agregarVarios(entradas);
+    setCurrentQuoteNumero(null);
+    setCliente(c => ({
+      ...c,
+      ...(isAdmin ? { nombre: cot.cliente_nombre || '', empresa: cot.cliente_empresa || '', pid: cot.cliente_email || '' } : {}),
+      proyecto: cot.cliente_telefono || ''
+    }));
+    setCurrentView('cotizador');
+    const folio = cot.numero ? `N° ${cot.numero}` : `#${cot.id}`;
+    notify(
+      `Cotización ${folio} duplicada con precios de hoy.` +
+        (faltantes.length ? ` Sin catálogo: ${faltantes.slice(0, 4).join(', ')}${faltantes.length > 4 ? '…' : ''}.` : ''),
+      {
+        tipo: faltantes.length ? 'info' : 'ok',
+        duracion: 8000,
+        accion: {
+          label: 'Deshacer',
+          onClick: () => {
+            setCotizacion(carritoAnterior);
+            setCliente(clienteAnterior);
+            setCurrentQuoteNumero(numeroAnterior);
+          }
+        }
+      }
+    );
+  };
+
+
 
   const getCompraOrigenLabel = (cot) => {
     const items = cot.items || [];
@@ -3842,10 +4163,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         axisSaved = true;
       }
       if (!boSaved && !axisSaved) {
-        alert('No hay cambios para guardar.');
+        notify('No hay cambios para guardar.');
       }
     } catch (error) {
-      alert(error.message || 'No se pudo guardar la información del BO');
+      notify(error.message || 'No se pudo guardar la información del BO');
     } finally {
       setBoSaving(prev => ({ ...prev, [bo]: false }));
     }
@@ -3857,13 +4178,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         const blob = new Blob([html], { type: 'text/html' });
         const item = new ClipboardItem({ 'text/html': blob });
         await navigator.clipboard.write([item]);
-        alert('HTML copiado al portapapeles');
+        notify('HTML copiado al portapapeles');
         return;
       }
       await navigator.clipboard.writeText(html);
-      alert('Texto copiado al portapapeles');
+      notify('Texto copiado al portapapeles');
     } catch (error) {
-      alert('No se pudo copiar automáticamente. Selecciona y copia manualmente.');
+      notify('No se pudo copiar automáticamente. Selecciona y copia manualmente.');
     }
   };
 
@@ -4113,14 +4434,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   BO {order.bo}
                 </button>
                 <span className="text-slate-700 break-words">{order.customerName || 'Cliente N/A'}</span>
-                <span className={`whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full ${statusClass}`}>{status}</span>
+                <span className={`whitespace-nowrap text-xs px-2 py-0.5 rounded-full ${statusClass}`}>{status}</span>
               </div>
               {etaBadge && (
-                <span className={`whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full ${etaBadge.className}`}>
+                <span className={`whitespace-nowrap text-xs px-2 py-0.5 rounded-full ${etaBadge.className}`}>
                   {etaBadge.label}
                 </span>
               )}
-              <span className="whitespace-nowrap text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">% {order.allocPct ?? 0}</span>
+              <span className="whitespace-nowrap text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">% {order.allocPct ?? 0}</span>
               <button
                 onClick={() => togglePinnedBo(order.bo)}
                 className={`text-xs px-2 py-1 rounded-full ${pinned ? 'text-amber-700 bg-amber-100' : 'text-slate-700 bg-slate-100'}`}
@@ -4163,7 +4484,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             {mode === 'ordenes' ? (
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">Proyecto</span>
+                  <span className="text-xs text-slate-500">Proyecto</span>
                   <input
                     value={projectValue}
                     onChange={(e) => updateBoDraft(order.bo, { projectName: e.target.value })}
@@ -4172,7 +4493,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   />
                 </label>
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">PO Axis</span>
+                  <span className="text-xs text-slate-500">PO Axis</span>
                   <input
                     value={poAxisValue}
                     onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
@@ -4181,7 +4502,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   />
                 </label>
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">Mes fact.</span>
+                  <span className="text-xs text-slate-500">Mes fact.</span>
                   <select
                     value={invoiceMonthValue}
                     onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceMonth: e.target.value })}
@@ -4196,14 +4517,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </select>
                 </label>
                 <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">Semana</span>
+                  <span className="text-xs text-slate-500">Semana</span>
                   <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5">
                     {[1, 2, 3, 4].map(week => (
                       <button
                         key={`${order.bo}-week-${week}`}
                         type="button"
                         onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: String(week) })}
-                        className={`px-2 py-0.5 text-[10px] rounded-full transition ${invoiceWeekValue === String(week) ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                        className={`px-2 py-0.5 text-xs rounded-full transition ${invoiceWeekValue === String(week) ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
                       >
                         {week}
                       </button>
@@ -4211,7 +4532,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       type="button"
                       onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: '' })}
-                      className={`px-2 py-0.5 text-[10px] rounded-full transition ${invoiceWeekValue === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                      className={`px-2 py-0.5 text-xs rounded-full transition ${invoiceWeekValue === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
                       title="Sin semana"
                     >
                       -
@@ -4222,7 +4543,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             ) : (
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">Compra</span>
+                  <span className="text-xs text-slate-500">Compra</span>
                   <select
                     value={purchaseStatus}
                     onChange={(e) => updatePurchaseDraft(order.bo, { purchaseStatus: e.target.value })}
@@ -4233,7 +4554,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </select>
                 </label>
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">SO</span>
+                  <span className="text-xs text-slate-500">SO</span>
                   <input
                     value={purchaseSo}
                     onChange={(e) => updatePurchaseDraft(order.bo, { purchaseSo: e.target.value })}
@@ -4242,7 +4563,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   />
                 </label>
                 <label className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500">PO</span>
+                  <span className="text-xs text-slate-500">PO</span>
                   <input
                     value={purchasePoAxis}
                     onChange={(e) => updatePurchaseDraft(order.bo, { poAxis: e.target.value })}
@@ -4253,7 +4574,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 {purchaseStatus === 'comprado' && (
                   <>
                     <label className="flex items-center gap-1">
-                      <span className="text-[10px] text-slate-500">Despacho</span>
+                      <span className="text-xs text-slate-500">Despacho</span>
                       <select
                         value={purchaseDispatch}
                         onChange={(e) => updatePurchaseDraft(order.bo, { purchaseDispatch: e.target.value })}
@@ -4265,7 +4586,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       </select>
                     </label>
                     <label className="flex items-center gap-1">
-                      <span className="text-[10px] text-slate-500">Vía</span>
+                      <span className="text-xs text-slate-500">Vía</span>
                       <select
                         value={purchaseShipping}
                         onChange={(e) => updatePurchaseDraft(order.bo, { purchaseShipping: e.target.value })}
@@ -4397,7 +4718,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const filteredStockCatalog = useMemo(() => {
     const tokens = buildSearchTokens(stockCatalogQuery);
     const originFilter = isCotizadorStockAdmin ? 'AXIS' : stockCatalogOrigin;
-    return stockCatalog.filter(item => {
+    const filtrados = stockCatalog.filter(item => {
       if (originFilter !== 'all' && (item.origin || '').toUpperCase() !== originFilter) return false;
       if (tokens.length === 0) return true;
       const haystack = [
@@ -4411,6 +4732,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (!globalQuery) return true;
       return [item.sku, item.mpn, item.name, item.brand].some(v => (v || '').toLowerCase().includes(globalQuery));
     });
+    // Lo que hay en bodega primero; sin unidades al final (sort estable).
+    const sinUnidades = (item) => !(Number(item.quantity) > 0);
+    return [...filtrados].sort((a, b) => Number(sinUnidades(a)) - Number(sinUnidades(b)));
   }, [stockCatalog, stockCatalogQuery, stockCatalogOrigin, globalQuery, isCotizadorStockAdmin]);
 
   const unassignedUsuarios = useMemo(
@@ -4747,7 +5071,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     invoiceMonthOptions,
     dashboardBilling,
     setCurrentView,
-    syncStatus
+    syncStatus,
+    seguimiento,
+    abrirCotizacionEnHistorial,
+    isFullAdmin
   };
 
   // Modelo único de navegación: alimenta los pills de desktop, el drawer y la barra inferior móvil.
@@ -4802,7 +5129,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <div className="text-sm font-display font-semibold text-slate-900 leading-tight">myquote</div>
-              <div className="text-[10px] text-slate-500 truncate">Cotización Axis / Qnap</div>
+              <div className="text-xs text-slate-500 truncate">Cotización Axis / Qnap</div>
             </div>
           )}
         </div>
@@ -4824,7 +5151,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </span>
               {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
               {!sidebarCollapsed && item.badge ? (
-                <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-xs rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
                   {item.badge}
                 </span>
               ) : null}
@@ -4841,7 +5168,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             {!sidebarCollapsed && (
               <>
                 <span className="flex-1 truncate">Buscar</span>
-                <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 text-slate-400">Ctrl K</kbd>
+                <kbd className="text-xs px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 text-slate-400">Ctrl K</kbd>
               </>
             )}
           </button>
@@ -4856,7 +5183,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             {!sidebarCollapsed && (
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                <div className="text-[10px] text-slate-500 truncate">{user?.empresa || ''}</div>
+                <div className="text-xs text-slate-500 truncate">{user?.empresa || ''}</div>
               </div>
             )}
             {!sidebarCollapsed && (
@@ -4958,7 +5285,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <NavIcon name={item.icon} />
                     <span className="flex-1 truncate">{item.label}</span>
                     {item.badge ? (
-                      <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-[10px] rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                      <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-xs rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
                         {item.badge}
                       </span>
                     ) : null}
@@ -4991,6 +5318,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           onLogout={handleLogout}
         />
 
+        <PegarListaModal
+          abierto={pegarListaTexto !== null}
+          textoInicial={pegarListaTexto || ''}
+          productos={isCotizadorStockAdmin ? productos.filter(p => (p.origen || 'QNAP') === 'AXIS') : productos}
+          onAgregar={agregarListaPegada}
+          onCerrar={() => setPegarListaTexto(null)}
+        />
+        <AtajosAyuda abierto={atajosAbiertos} onCerrar={() => setAtajosAbiertos(false)} esAdmin={isFullAdmin} />
+        <RevisionEnvioModal
+          abierto={revisionAbierta}
+          problemas={revisionAbierta ? problemasEnvio() : { bajoPiso: [], porCrear: [], sinStock: [] }}
+          onVolver={() => setRevisionAbierta(false)}
+          onGenerar={() => generarCotizacion({ saltarRevision: true })}
+        />
+
         {isFullAdmin && editorCotizacionId && (
           <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 text-white">Abriendo editor…</div>}>
             <CotizacionEditor
@@ -5014,7 +5356,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 key={item.key}
                 onClick={() => setCurrentView(item.key)}
                 aria-label={item.label}
-                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-medium transition ${currentView === item.key ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-xs font-medium transition ${currentView === item.key ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 <span className="relative">
                   <NavIcon name={item.icon} className="w-5 h-5" />
@@ -5030,7 +5372,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <button
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Abrir menú completo"
-              className="flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400"
+              className="flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400"
             >
               <NavIcon name="menu" className="w-5 h-5" />
               Menú
@@ -5107,26 +5449,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <th className="px-4 py-3 text-left">SKU</th>
                       <th className="px-4 py-3 text-left">MPN</th>
                       <th className="px-4 py-3 text-right">Disponible</th>
+                      {canViewCotizador && <th className="px-4 py-3 text-right"><span className="sr-only">Cotizar</span></th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {stockCatalogLoading && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Cargando stock...</td>
+                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Cargando stock...</td>
                       </tr>
                     )}
                     {!stockCatalogLoading && stockCatalogError && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
+                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
                       </tr>
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Sin resultados.</td>
+                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Sin resultados.</td>
                       </tr>
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.map((item, idx) => (
-                      <tr key={`${item.mpn || item.sku || 'item'}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50/40' : ''}>
+                      <tr key={`${item.mpn || item.sku || 'item'}-${idx}`} className={`${idx % 2 === 1 ? 'bg-slate-50/40' : ''} ${Number(item.quantity) > 0 ? '' : 'opacity-60'}`}>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             {item.imageUrl ? (
@@ -5142,7 +5485,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <div className="min-w-0">
                               <div className="font-medium text-gray-800 truncate">{item.name || 'Sin descripción'}</div>
                               {item.origin && (
-                                <div className="text-[11px] text-gray-500">{item.origin}</div>
+                                <div className="text-xs text-gray-500">{item.origin}</div>
                               )}
                             </div>
                           </div>
@@ -5150,7 +5493,31 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <td className="px-4 py-3">{item.brand || 'N/A'}</td>
                         <td className="px-4 py-3">{item.sku || 'N/A'}</td>
                         <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-slate-700">{formatStockQuantity(item.quantity) || '0'}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-700 tabular-nums">{formatStockQuantity(item.quantity) || '0'}</td>
+                        {canViewCotizador && (
+                          <td className="px-4 py-3 text-right" data-html2canvas-ignore="true">
+                            {(() => {
+                              const producto = productoDeStock(item);
+                              if (!producto) return <span className="text-xs text-gray-400" title="No está en tu lista de precios">Sin precio</span>;
+                              const enCarrito = cotizacion.find(x => x.id === producto.id);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    addToCotizacion(producto);
+                                    notify(`Agregado ${producto.sku || producto.mpn} al cotizador`, {
+                                      tipo: 'ok',
+                                      accion: { label: 'Ir al cotizador', onClick: () => setCurrentView('cotizador') }
+                                    });
+                                  }}
+                                  className="whitespace-nowrap rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                >
+                                  {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : 'Agregar'}
+                                </button>
+                              );
+                            })()}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -5184,7 +5551,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       className="px-3 py-2 border rounded-lg text-sm"
                     />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <label className="flex flex-col gap-1 text-[11px] text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-gray-500">
                         Rol
                         <select
                           value={empresaForm.role}
@@ -5195,7 +5562,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <option value="admin">Administrador</option>
                         </select>
                       </label>
-                      <label className="flex flex-col gap-1 text-[11px] text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-gray-500">
                         GP QNAP (%)
                         <input
                           type="number"
@@ -5204,7 +5571,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           className="px-3 py-2 border rounded-lg text-sm text-gray-800"
                         />
                       </label>
-                      <label className="flex flex-col gap-1 text-[11px] text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-gray-500">
                         GP AXIS (%)
                         <input
                           type="number"
@@ -5289,24 +5656,24 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             )}
                             <div>
                               <div className="text-sm font-semibold text-slate-800">{empresa.nombre}</div>
-                              <div className="text-[11px] text-slate-500">
+                              <div className="text-xs text-slate-500">
                                 Rol: {empresa.role === 'admin' ? 'Administrador' : 'Cliente'} • GP QNAP {empresa.gp_qnap}% • GP AXIS {empresa.gp_axis}%
                               </div>
-                              <div className="text-[11px] text-slate-500">Partner: {empresa.partner_category}</div>
+                              <div className="text-xs text-slate-500">Partner: {empresa.partner_category}</div>
                               {isIntcomexEmpresa && (
-                                <div className="text-[11px] text-sky-700">Perfiles disponibles: Ventas y Compras</div>
+                                <div className="text-xs text-sky-700">Perfiles disponibles: Ventas y Compras</div>
                               )}
                             </div>
                           </div>
                           <button
                             onClick={() => loadEmpresaForm(empresa)}
-                            className="px-2 py-1 text-[11px] bg-slate-100 rounded hover:bg-slate-200"
+                            className="px-2 py-1 text-xs bg-slate-100 rounded hover:bg-slate-200"
                           >
                             Editar
                           </button>
                           <button
                             onClick={() => deleteEmpresa(empresa.nombre)}
-                            className="px-2 py-1 text-[11px] bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
                           >
                             Eliminar
                           </button>
@@ -5322,9 +5689,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               }}
                               className="rounded-lg border border-sky-200 bg-sky-50 p-2"
                             >
-                              <div className="text-[11px] font-semibold text-sky-800">Perfil Ventas</div>
-                              <div className="text-[11px] text-sky-700">Cotizador + Historial + Stock. QNAP 15% y AXIS 13% fijos.</div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                              <div className="text-xs font-semibold text-sky-800">Perfil Ventas</div>
+                              <div className="text-xs text-sky-700">Cotizador + Historial + Stock. QNAP 15% y AXIS 13% fijos.</div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                 {usersVentas.length === 0 ? (
                                   <span className="text-slate-400">Arrastra usuarios aquí.</span>
                                 ) : (
@@ -5349,9 +5716,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               }}
                               className="rounded-lg border border-amber-200 bg-amber-50 p-2"
                             >
-                              <div className="text-[11px] font-semibold text-amber-800">Perfil Compras</div>
-                              <div className="text-[11px] text-amber-700">Acceso exclusivo a Vista Compras.</div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                              <div className="text-xs font-semibold text-amber-800">Perfil Compras</div>
+                              <div className="text-xs text-amber-700">Acceso exclusivo a Vista Compras.</div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                 {usersCompras.length === 0 ? (
                                   <span className="text-slate-400">Arrastra usuarios aquí.</span>
                                 ) : (
@@ -5369,7 +5736,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             </div>
                           </div>
                         )}
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                           {usersInEmpresa.length === 0 ? (
                             <span className="text-slate-400">Arrastra usuarios aquí para asignar y aplicar márgenes.</span>
                           ) : (
@@ -5388,12 +5755,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     onClick={() => handleUserClick(u.id)}
                                     className="flex items-center gap-2 px-2 py-1 rounded-full border border-slate-200 bg-white hover:bg-slate-50"
                                   >
-                                    <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-[10px] flex items-center justify-center">
+                                    <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center">
                                       {initials || 'U'}
                                     </span>
-                                    <span className="text-[11px] text-slate-700">{u.nombre || u.usuario}</span>
+                                    <span className="text-xs text-slate-700">{u.nombre || u.usuario}</span>
                                     {isIntcomexEmpresa && normalizeIntcomexProfile(u.intcomex_profile) && (
-                                      <span className="text-[10px] uppercase text-slate-500">({normalizeIntcomexProfile(u.intcomex_profile)})</span>
+                                      <span className="text-xs uppercase text-slate-500">({normalizeIntcomexProfile(u.intcomex_profile)})</span>
                                     )}
                                   </button>
                                 );
@@ -5438,19 +5805,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="text-sm font-semibold text-slate-800">{selectedUser.usuario}</div>
-                          <div className="text-[11px] text-slate-500">{selectedUser.nombre || 'Sin nombre'}</div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-xs text-slate-500">{selectedUser.nombre || 'Sin nombre'}</div>
+                          <div className="text-xs text-slate-400">
                             {selectedUser.empresa ? `Empresa: ${selectedUser.empresa}` : 'Sin empresa'}
                           </div>
                           {isSelectedIntcomex && (
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-xs text-slate-400">
                               Perfil Intcomex: {selectedProfile || 'Sin perfil'}
                             </div>
                           )}
                         </div>
                         <button
                           onClick={() => setSelectedUsuarioId(null)}
-                          className="text-[11px] text-slate-500 hover:text-slate-700"
+                          className="text-xs text-slate-500 hover:text-slate-700"
                         >
                           Cerrar
                         </button>
@@ -5581,17 +5948,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <div className="w-full text-left flex items-start justify-between gap-2">
                             <div>
                               <div className="text-sm font-semibold text-slate-800">{u.usuario}</div>
-                              <div className="text-[11px] text-slate-500">{u.nombre || 'Sin nombre'}</div>
-                              <div className="text-[11px] text-slate-400">
+                              <div className="text-xs text-slate-500">{u.nombre || 'Sin nombre'}</div>
+                              <div className="text-xs text-slate-400">
                                 {u.empresa ? `Empresa: ${u.empresa}` : 'Sin empresa'}
                               </div>
                               {normalizeText(u.empresa) === 'intcomex' && normalizeIntcomexProfile(u.intcomex_profile) && (
-                                <div className="text-[11px] text-slate-400">
+                                <div className="text-xs text-slate-400">
                                   Perfil: {normalizeIntcomexProfile(u.intcomex_profile)}
                                 </div>
                               )}
                             </div>
-                            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+                            <div className="text-xs uppercase tracking-wide text-slate-400">
                               {u.role === 'admin' ? 'Administrador' : 'Cliente'}
                             </div>
                           </div>
@@ -5682,7 +6049,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         >
                           <div className="text-sm font-semibold text-slate-900">{item.nombre || item.usuario || 'Usuario'}</div>
                           <div className="text-xs text-gray-500">{item.empresa || 'Sin empresa'} - {item.role || 'client'}</div>
-                          <div className="text-[11px] text-gray-400">
+                          <div className="text-xs text-gray-400">
                             Sesiones: {item.sessions.length} - Ultima actividad: {formatDateTime(item.lastSeen)}
                           </div>
                         </button>
@@ -5716,15 +6083,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 <div className="text-sm font-semibold text-slate-900">
                                   Ses. #{(session.session_id || '').toString().slice(-6)}
                                 </div>
-                                <div className="text-[11px] text-gray-500">
+                                <div className="text-xs text-gray-500">
                                   {session.device_id || 'Dispositivo N/A'} - {session.ip_address || 'IP N/A'}
                                 </div>
-                                <div className="text-[11px] text-gray-400">
+                                <div className="text-xs text-gray-400">
                                   Inicio: {formatDateTime(session.started_at)} - Ultima: {formatDateTime(session.last_seen)}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className={`text-[11px] px-2 py-0.5 rounded-full ${session.active ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${session.active ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
                                   {session.active ? 'Activa' : 'Inactiva'}
                                 </span>
                                 {session.active && (
@@ -5738,7 +6105,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               </div>
                             </div>
                             {session.user_agent && (
-                              <div className="mt-2 text-[11px] text-gray-500">UA: {session.user_agent}</div>
+                              <div className="mt-2 text-xs text-gray-500">UA: {session.user_agent}</div>
                             )}
                           </div>
                         ))}
@@ -5762,13 +6129,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <div className="text-sm font-semibold text-slate-900">
                                 {log.success ? 'Login OK' : 'Login fallido'}
                               </div>
-                              <span className="text-[11px] text-gray-400">{formatDateTime(log.created_at)}</span>
+                              <span className="text-xs text-gray-400">{formatDateTime(log.created_at)}</span>
                             </div>
-                            <div className="text-[11px] text-gray-500">
+                            <div className="text-xs text-gray-500">
                               IP: {log.ip_address || 'N/A'} - Sesion: {(log.session_id || '').toString().slice(-6) || 'N/A'}
                             </div>
                             {log.user_agent && (
-                              <div className="text-[11px] text-gray-500 mt-1">UA: {log.user_agent}</div>
+                              <div className="text-xs text-gray-500 mt-1">UA: {log.user_agent}</div>
                             )}
                           </div>
                         ))}
@@ -6076,13 +6443,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                     {funnelStages.map(stage => (
                       <div key={stage.key} className="rounded-xl border border-white/70 bg-white/70 p-3">
-                        <div className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-semibold ${stage.tone}`}>
+                        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${stage.tone}`}>
                           {stage.label}
                         </div>
                         <div className="mt-2 text-2xl font-semibold text-slate-900">{stage.count}</div>
                         <div className="text-xs text-slate-500">Cotizaciones</div>
                         <div className="mt-2 text-sm font-semibold text-slate-800">{formatCurrency(stage.amount)}</div>
-                        <div className="text-[11px] text-slate-400">Monto total</div>
+                        <div className="text-xs text-slate-400">Monto total</div>
                       </div>
                     ))}
                   </div>
@@ -6196,7 +6563,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="p-6 text-center text-gray-500">No hay cotizaciones guardadas.</div>
               ) : (
                 <div className="max-h-[60vh] overflow-auto">
-                  <table className="w-full min-w-[860px] text-sm">
+                  <table className="w-full min-w-[1080px] text-sm">
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="px-3 py-2 text-center">
@@ -6206,11 +6573,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             onChange={toggleSelectAllHistorialFiltered}
                           />
                         </th>
+                        <th className="px-3 py-2 text-left">Folio</th>
                         <th className="px-3 py-2 text-left">Fecha</th>
                         <th className="px-3 py-2 text-left">Proyecto</th>
                         <th className="px-3 py-2 text-left">Empresa</th>
                         <th className="px-3 py-2 text-left">PID</th>
+                        <th className="px-3 py-2 text-left">Estado</th>
+                        {isFullAdmin && <th className="px-3 py-2 text-right">Margen</th>}
                         <th className="px-3 py-2 text-right">Monto</th>
+                        <th className="px-3 py-2 text-right"><span className="sr-only">Acciones</span></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -6245,6 +6616,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 onChange={() => toggleSelectHistorial(cot.id)}
                               />
                             </td>
+                            <td className="px-3 py-2 font-mono text-xs text-gray-700">{cot.numero || `#${cot.id}`}</td>
                             <td className="px-3 py-2 text-xs text-gray-600">{getDateKey(cot.created_at) || 'N/A'}</td>
                             <td className="px-3 py-2">{cot.cliente_telefono || 'N/A'}</td>
                             <td className="px-3 py-2">{cot.cliente_empresa || 'N/A'}</td>
@@ -6253,7 +6625,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 <span>{cot.cliente_email || 'N/A'}</span>
                                 {showRegistroAlert && (
                                   <span
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold"
                                     title="Registro de proyecto"
                                   >
                                     !
@@ -6261,11 +6633,67 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-right font-semibold">{formatCurrency(cot.total || 0)}</td>
+                            <td className="px-3 py-2">
+                              {(() => {
+                                const estado = normalizeEstado(cot.estado);
+                                const nombreEstado = { enviada: 'Enviada', revision: 'En revisión', aprobada: 'Aceptada', rechazada: 'Rechazada' }[estado] || estado;
+                                const tono = {
+                                  enviada: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+                                  revision: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+                                  aprobada: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+                                  rechazada: 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+                                }[estado] || 'bg-slate-100 text-slate-700';
+                                return (
+                                  <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${tono}`}>
+                                    {nombreEstado}
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                            {isFullAdmin && (
+                              <td className="px-3 py-2 text-right">
+                                {(() => {
+                                  const m = margenCotizacion(cot);
+                                  return m ? (
+                                    <span className="inline-flex flex-col items-end" title={m.parcial ? 'Algunas líneas no tienen costo' : undefined}>
+                                      <MargenChip gpPct={m.gpPct} origen={m.origenes} />
+                                    </span>
+                                  ) : <span className="text-xs text-gray-400">—</span>;
+                                })()}
+                              </td>
+                            )}
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(cot.total || 0)}</td>
+                            <td className="px-2 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                              {isFullAdmin && (
+                                <button
+                                  onClick={() => setEditorCotizacionId(cot.id)}
+                                  className="px-2 py-1 text-xs font-medium text-blue-700 rounded hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-slate-800"
+                                  title="Editar (E)"
+                                >
+                                  Editar
+                                </button>
+                              )}
+                              <button
+                                onClick={() => exportHistorialPdf(cot)}
+                                className="px-2 py-1 text-xs font-medium text-slate-700 rounded hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                                title="Descargar PDF (P)"
+                              >
+                                PDF
+                              </button>
+                              {canViewCotizador && (
+                                <button
+                                  onClick={() => duplicarCotizacion(cot)}
+                                  className="px-2 py-1 text-xs font-medium text-slate-700 rounded hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                                  title="Duplicar como nueva cotización (D)"
+                                >
+                                  Duplicar
+                                </button>
+                              )}
+                            </td>
                           </tr>
                           {isExpanded && (
                             <tr className="bg-white">
-                              <td colSpan={6} className="px-4 py-3 border-t">
+                              <td colSpan={isFullAdmin ? 10 : 9} className="px-4 py-3 border-t">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                   <div>
                                     <div className="text-xs text-gray-500">Proyecto</div>
@@ -6294,7 +6722,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                                 e.stopPropagation();
                                                 updateCotizacionEstado(cot.id, option.value);
                                               }}
-                                              className={`px-2 py-0.5 text-[11px] rounded ${baseClass} ${toneClass}`}
+                                              className={`px-2 py-0.5 text-xs rounded ${baseClass} ${toneClass}`}
                                               title={option.label}
                                             >
                                               {option.short}
@@ -6682,11 +7110,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <div className="flex-1 min-w-0 text-xs text-slate-600">
                           <span className="text-sm font-semibold text-slate-900 whitespace-nowrap">BO {item.bo}</span>
                           <span className="ml-2 text-slate-700">{item.customerName || 'Cliente N/A'}</span>
-                          <span className="ml-2 text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">% {item.allocPct ?? 0}</span>
-                          <span className="ml-2 text-[11px] text-slate-500">Proyecto: {item.projectName || 'N/A'}</span>
-                          <span className="ml-2 text-[11px] text-slate-500">PO Axis: {item.poAxis || 'N/A'}</span>
+                          <span className="ml-2 text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">% {item.allocPct ?? 0}</span>
+                          <span className="ml-2 text-xs text-slate-500">Proyecto: {item.projectName || 'N/A'}</span>
+                          <span className="ml-2 text-xs text-slate-500">PO Axis: {item.poAxis || 'N/A'}</span>
                         </div>
-                        <div className="text-[11px] text-slate-500 whitespace-nowrap">
+                        <div className="text-xs text-slate-500 whitespace-nowrap">
                           Facturado: {item.invoicedAt ? new Date(item.invoicedAt).toLocaleDateString() : 'N/A'}
                         </div>
                         <button
@@ -7354,8 +7782,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
               <div className="text-right">
                 <div className="text-sm font-semibold">Informe de órdenes activas</div>
-                <div className="text-[11px] text-slate-500">Generado: {new Date().toLocaleDateString()}</div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-xs text-slate-500">Generado: {new Date().toLocaleDateString()}</div>
+                <div className="text-xs text-slate-500">
                   Modo: {osoReportMode === 'proximas' ? 'Próximas entregas' : (osoReportMode === 'axis' ? 'Reporte Axis' : 'Por empresa')}
                 </div>
               </div>
@@ -7372,7 +7800,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 return ordered.map(([empresa, rows]) => (
                   <div key={`pdf-${empresa}`} className="mb-4">
                     <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
-                    <table className="w-full text-[10px] border border-slate-200">
+                    <table className="w-full text-xs border border-slate-200">
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
@@ -7427,7 +7855,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 return ordered.map(([empresa, rows]) => (
                   <div key={`pdf-axis-${empresa}`} className="mb-4">
                     <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
-                    <table className="w-full text-[10px] border border-slate-200">
+                    <table className="w-full text-xs border border-slate-200">
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
@@ -7494,7 +7922,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   .filter(row => row.etaEstimado)
                   .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado));
                 return (
-                  <table className="w-full text-[10px] border border-slate-200">
+                  <table className="w-full text-xs border border-slate-200">
                     <thead className="bg-slate-50 text-slate-600">
                       <tr>
                         <th className="px-2 py-1 text-left">BO</th>
@@ -7715,33 +8143,33 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     {isAdmin && (
                       <div className="flex items-center gap-2 flex-wrap">
                         {!isCotizadorStockAdmin && (
-                          <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                          <label className="flex items-center gap-1 text-xs text-gray-500">
                             GP QNAP
                             <input
                               type="number"
                               step="0.1"
                               value={formatGpPercent(cotizacionGpGlobalQnap)}
                               onChange={e => updateGlobalMargin('QNAP', e.target.value)}
-                              className="w-14 px-2 py-0.5 border rounded text-[11px]"
+                              className="w-14 px-2 py-0.5 border rounded text-xs"
                             />
                           </label>
                         )}
-                        <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                        <label className="flex items-center gap-1 text-xs text-gray-500">
                           GP AXIS
                           <input
                             type="number"
                             step="0.1"
                             value={formatGpPercent(cotizacionGpGlobalAxis)}
                             onChange={e => updateGlobalMargin('AXIS', e.target.value)}
-                            className="w-14 px-2 py-0.5 border rounded text-[11px]"
+                            className="w-14 px-2 py-0.5 border rounded text-xs"
                           />
                         </label>
-                        <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                        <label className="flex items-center gap-1 text-xs text-gray-500">
                           Partner
                           <select
                             value={cotizacionPartnerCategory}
                             onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
-                            className="px-2 py-0.5 border rounded text-[11px]"
+                            className="px-2 py-0.5 border rounded text-xs"
                           >
                             <option>Partner Autorizado</option>
                             <option>Partner Silver</option>
@@ -7749,17 +8177,49 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <option>Partner Multiregional</option>
                           </select>
                         </label>
+                        {isFullAdmin && (
+                          <div className="flex w-full flex-wrap items-center gap-2 border-t border-slate-200 pt-2 text-xs text-gray-500 dark:border-slate-700">
+                            <span className="font-semibold text-gray-600" title="Objetivo: GP con que cotizas. Piso: mínimo antes de pedir revisión.">Semáforo de margen</span>
+                            {['QNAP', 'AXIS'].map(marca => (
+                              <span key={marca} className="flex items-center gap-1">
+                                {marca}
+                                <label className="flex items-center gap-1">
+                                  objetivo
+                                  <input
+                                    id={`margen-objetivo-${marca}`}
+                                    type="number"
+                                    step="0.5"
+                                    value={configMargen[marca].objetivo}
+                                    onChange={e => setConfigMargen({ ...configMargen, [marca]: { ...configMargen[marca], objetivo: e.target.value } })}
+                                    className="w-14 px-2 py-0.5 border rounded text-xs"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1">
+                                  piso
+                                  <input
+                                    id={`margen-piso-${marca}`}
+                                    type="number"
+                                    step="0.5"
+                                    value={configMargen[marca].piso}
+                                    onChange={e => setConfigMargen({ ...configMargen, [marca]: { ...configMargen[marca], piso: e.target.value } })}
+                                    className="w-14 px-2 py-0.5 border rounded text-xs"
+                                  />
+                                </label>
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     {isVentasUser && (
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <label className="flex items-center gap-1 text-[11px] text-gray-500">
+                      <div className="flex items-center gap-2 text-xs">
+                        <label className="flex items-center gap-1 text-xs text-gray-500">
                           Partner AXIS
                           <select
                             value={cotizacionPartnerCategory}
                             onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
                             disabled={updatingCotizacionPartner}
-                            className="px-2 py-0.5 border rounded text-[11px]"
+                            className="px-2 py-0.5 border rounded text-xs"
                           >
                             <option>Partner Autorizado</option>
                             <option>Partner Silver</option>
@@ -7786,34 +8246,89 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               </div>
               <div className={`${isClient ? 'p-4' : 'p-2'} border-b relative`}>
-                <div className={`${isClient ? 'text-sm' : 'text-xs'} text-gray-500 mb-2`}>
-                  Busca por SKU, MPN o modelo.
+                <div className="mb-2 flex items-center justify-between gap-2 text-sm text-gray-500">
+                  <span>Busca por SKU, MPN o modelo · <kbd className="rounded border border-slate-300 px-1 font-mono text-xs">/</kbd> para enfocar</span>
+                  <button
+                    type="button"
+                    onClick={() => setPegarListaTexto('')}
+                    className="shrink-0 rounded-lg px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                    title="Pega SKU y cantidades desde un correo o Excel"
+                  >
+                    Pegar lista
+                  </button>
                 </div>
                 <input
                   type="text"
-                  placeholder="Buscar productos..."
+                  placeholder="Buscar productos... (o pega una lista)"
                   value={catalogSearch}
-                  onChange={e => setCatalogSearch(e.target.value)}
+                  onChange={e => { setCatalogSearch(e.target.value); setCatalogActivo(0); }}
+                  onPaste={e => {
+                    const texto = e.clipboardData?.getData('text') || '';
+                    if (pareceLista(texto)) {
+                      e.preventDefault();
+                      setPegarListaTexto(texto);
+                    }
+                  }}
+                  onKeyDown={e => {
+                    const visibles = filteredCatalogo.slice(0, 50);
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setCatalogActivo(i => Math.min(i + 1, visibles.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setCatalogActivo(i => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter' && catalogSearch.trim() && visibles[catalogActivo]) {
+                      e.preventDefault();
+                      const p = visibles[catalogActivo];
+                      addToCotizacion(p);
+                      setCatalogSearch('');
+                      setCatalogActivo(0);
+                      notify(`Agregado ${p.sku || p.mpn}`, { tipo: 'ok', duracion: 1800 });
+                    } else if (e.key === 'Escape') {
+                      setCatalogSearch('');
+                    }
+                  }}
                   id="catalog-search" ref={catalogInputRef}
-                  className={`${isClient ? 'px-3 py-2 text-sm' : 'px-2 py-1 text-xs'} w-full border rounded`}
+                  role="combobox"
+                  aria-expanded={catalogSearch.trim() !== ''}
+                  aria-controls="catalog-resultados"
+                  autoComplete="off"
+                  className="px-3 py-2 text-sm w-full border rounded-lg"
                 />
                 {catalogSearch.trim() !== '' && catalogDropdownStyle && createPortal(
-                  <div style={catalogDropdownStyle} className="bg-white border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                  <div id="catalog-resultados" role="listbox" style={catalogDropdownStyle} className="bg-white dark:bg-slate-900 border rounded-lg shadow-lg max-h-80 overflow-y-auto">
                     {filteredCatalogo.length === 0 ? (
                       <div className="p-3 text-sm text-gray-500">Sin resultados.</div>
-                    ) : filteredCatalogo.map(p => (
+                    ) : filteredCatalogo.slice(0, 50).map((p, i) => (
                       <button
                         key={p.id}
-                        onClick={() => { addToCotizacion(p); setCatalogSearch(''); }}
-                        className="w-full text-left p-2 hover:bg-blue-50 flex items-center justify-between"
+                        role="option"
+                        aria-selected={i === catalogActivo}
+                        onMouseDown={e => e.preventDefault()}
+                        onMouseEnter={() => setCatalogActivo(i)}
+                        onClick={() => {
+                          addToCotizacion(p);
+                          setCatalogSearch('');
+                          setCatalogActivo(0);
+                          // El foco vuelve al buscador: se sigue escribiendo el siguiente producto.
+                          catalogInputRef.current?.focus();
+                          notify(`Agregado ${p.sku || p.mpn}`, { tipo: 'ok', duracion: 1800 });
+                        }}
+                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 ${i === catalogActivo ? 'bg-blue-50 dark:bg-slate-800' : ''}`}
                       >
                         <div className="flex-1 min-w-0">
-                          <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">{p.marca}</span>
-                          <p className="text-xs font-medium text-gray-800 truncate">{p.desc}</p>
-                          <p className="text-[11px] text-gray-500">SKU: {p.sku}</p>
-                          <p className="text-xs font-semibold text-blue-600">{formatCurrency(calcularPrecioCatalogo(p))}</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-0.5 rounded">{p.marca}</span>
+                            <span className="font-mono text-xs text-gray-500 truncate">{p.sku} · {p.mpn}</span>
+                          </div>
+                          <p className="text-sm text-gray-800 truncate">{p.desc}</p>
                         </div>
-                        <span className="ml-2 text-xs text-blue-600">Agregar</span>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold text-blue-600 tabular-nums">{formatCurrency(calcularPrecioCatalogo(p))}</p>
+                          {getStockEntregaText(p.mpn) && (
+                            <p className="text-xs text-emerald-700">En stock</p>
+                          )}
+                        </div>
                       </button>
                     ))}
                   </div>,
@@ -7844,22 +8359,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <div className="flex-1 min-w-0">
                           {isAdmin ? (
                             <>
-                              <span className="text-[11px] text-blue-600">{item.marca}</span>
+                              <span className="text-xs text-blue-600">{item.marca}</span>
                               <p className="text-xs font-medium truncate">{item.desc}</p>
                             </>
                           ) : (
                             <p className="text-xs font-medium truncate">Modelo: {item.desc}</p>
                           )}
-                          <p className="text-[11px] text-gray-500">SKU: {item.sku} | MPN: {item.mpn || 'N/A'} | {item.tiempo}</p>
+                          <p className="text-xs text-gray-500">SKU: {item.sku} | MPN: {item.mpn || 'N/A'} | {item.tiempo}</p>
                         </div>
-                        <button onClick={() => removeItem(item.id)} className="text-red-500 hover:bg-red-50 px-2 py-0.5 rounded text-[11px]">Quitar</button>
+                        <button onClick={() => removeItem(item.id)} className="text-red-500 hover:bg-red-50 px-2 py-0.5 rounded text-xs">Quitar</button>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <label className="text-[11px] text-gray-500">Cant:</label>
+                        <label className="text-xs text-gray-500">Cant:</label>
                         <input type="number" min="1" value={item.cant} onChange={e => updateItem(item.id, 'cant', e.target.value)} className="w-12 px-2 py-0.5 border rounded text-xs text-center" />
                         {isAdmin && (
                           <>
-                            <label className="text-[11px] text-gray-500">Margen</label>
+                            <label className="text-xs text-gray-500" title="GP de esta línea. Vacío usa el GP global de la marca.">GP %</label>
                             <input
                               type="number"
                               value={
@@ -7871,24 +8386,24 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               }
                               onChange={e => updateItem(item.id, 'gpOverride', e.target.value)}
                               placeholder={(baseGp * 100).toFixed(2)}
-                              className="w-16 px-2 py-0.5 border rounded text-[11px]"
+                              className="w-16 px-2 py-0.5 border rounded text-xs"
                             />
-                            <label className="text-[11px] text-gray-500">Entrega</label>
+                            <label className="text-xs text-gray-500">Entrega</label>
                             <input
                               type="text"
                               value={item.tiempo || ''}
                               onChange={e => updateItem(item.id, 'tiempo', e.target.value)}
-                              className="w-36 px-2 py-0.5 border rounded text-[11px]"
+                              className="w-36 px-2 py-0.5 border rounded text-xs"
                             />
                           </>
                         )}
                         {isAdmin && isAxis && (
                           <>
-                            <label className="text-[11px] text-gray-500">Partner</label>
+                            <label className="text-xs text-gray-500">Partner</label>
                             <select
                               value={item.partnerCategory || DEFAULT_AXIS_PARTNER}
                               onChange={e => updateItem(item.id, 'partnerCategory', e.target.value)}
-                              className="px-2 py-0.5 border rounded text-[11px]"
+                              className="px-2 py-0.5 border rounded text-xs"
                             >
                               <option>Partner Autorizado</option>
                               <option>Partner Silver</option>
@@ -7899,22 +8414,33 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         )}
                         {isAdmin && isAxis && (
                           <>
-                            <label className="text-[11px] text-gray-500">Rebate</label>
+                            <label className="text-xs text-gray-500">Rebate</label>
                             <input
                               type="number"
                               value={item.rebateProject ?? 0}
                               onChange={e => updateItem(item.id, 'rebateProject', e.target.value)}
-                              className="w-16 px-2 py-0.5 border rounded text-[11px]"
+                              className="w-16 px-2 py-0.5 border rounded text-xs"
                             />
                           </>
                         )}
-                        <div className="flex-1 text-right">
-                          <p className="text-[11px] text-gray-500">{formatCurrency(pu)} x {item.cant}</p>
-                          <p className="text-xs font-semibold text-blue-600">{formatCurrency(pu * item.cant)}</p>
+                        <div className="flex-1 flex items-center justify-end gap-3 text-right">
+                          {isAdmin && (() => {
+                            const m = margenItem(item);
+                            return (
+                              <div className="flex flex-col items-end gap-0.5">
+                                <MargenChip gpPct={m.gpPct} origen={item.origen} />
+                                <span className="text-xs text-gray-500 tabular-nums">Margen {formatCurrency(m.margenTotal)}</span>
+                              </div>
+                            );
+                          })()}
+                          <div>
+                            <p className="text-xs text-gray-500 tabular-nums">{formatCurrency(pu)} × {item.cant}</p>
+                            <p className="text-sm font-semibold text-blue-600 tabular-nums">{formatCurrency(pu * item.cant)}</p>
+                          </div>
                         </div>
                       </div>
                       {isAdmin && isAxis && (
-                        <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-gray-500">
+                        <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-500">
                             <span>Partner: {formatCurrency(partnerRebate)}</span>
                             <span>Rebate Total: <span className="font-semibold text-gray-800">{formatCurrency(rebateTotal)}</span></span>
                             <span>Descuento porcentual Axis: <span className="font-semibold text-gray-800">{descuentoPorcentualAxis.toFixed(2)}%</span></span>
@@ -7951,8 +8477,31 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">Total</span>
-                    <span className="text-xl font-bold text-blue-600">{formatCurrency(totalCotizacion)}</span>
+                    <span className="text-xl font-bold text-blue-600 tabular-nums">{formatCurrency(totalCotizacion)}</span>
                   </div>
+                  {resumenMargenCarrito && (
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Costo</span>
+                        <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.costo)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Margen</span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.margen)}</span>
+                          <MargenChip gpPct={resumenMargenCarrito.gpPct} origen={resumenMargenCarrito.origenes} />
+                        </span>
+                      </div>
+                      {(() => {
+                        const bajoPiso = problemasEnvio().bajoPiso.length;
+                        return bajoPiso > 0 ? (
+                          <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                            {bajoPiso} línea{bajoPiso === 1 ? '' : 's'} bajo el piso de margen
+                          </p>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
                   <div className="space-y-2">
                     {isAdmin && (
                       <button
@@ -7972,9 +8521,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       </button>
                     )}
                     <button
-                      onClick={() => setCurrentView('cliente')}
+                      onClick={() => generarCotizacion()}
                       disabled={cotizacion.length === 0}
-                      className="w-full py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-600 disabled:opacity-50"
+                      title="Ctrl+Enter"
+                      className="w-full py-2.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-600 disabled:opacity-50"
                     >
                       Generar Cotización
                     </button>
@@ -8172,7 +8722,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             en la fila flex, su texto largo se quedaba con el ancho y dejaba el
             contenido del cliente en 0px. */}
         {!isAdmin && (
-          <footer className="mt-auto px-2 py-3 pb-24 lg:pb-3 text-[10px] leading-4 text-gray-500 border-t bg-white/70 dark:bg-slate-900/70 dark:border-slate-800">
+          <footer className="mt-auto px-2 py-3 pb-24 lg:pb-3 text-xs leading-4 text-gray-500 border-t bg-white/70 dark:bg-slate-900/70 dark:border-slate-800">
             <div className="w-[97%] mx-auto">
               <p>
                 Plataforma de gestión de cotizaciones comerciales diseñada para la emisión de propuestas formales.

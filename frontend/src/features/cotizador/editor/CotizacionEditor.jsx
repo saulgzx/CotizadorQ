@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cotizacionesAPI } from '../../../api';
 import { COTIZACION_ESTADOS, DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
 import { formatCurrency } from '../cotizadorHelpers';
+import { estadoMargen } from '../margen';
 import {
   aplicarCambio,
   buscarEnCatalogo,
@@ -47,12 +48,13 @@ const fechaHora = (valor) => {
 
 const pct = (valor) => (valor === null || valor === undefined ? '—' : `${valor.toFixed(1)}%`);
 
-const tonoMargen = (valorPct) => {
-  if (valorPct === null || valorPct === undefined) return 'text-slate-400';
-  if (valorPct < 0) return 'text-rose-600 dark:text-rose-400';
-  if (valorPct < 8) return 'text-amber-600 dark:text-amber-400';
-  return 'text-emerald-600 dark:text-emerald-400';
+// Mismo semaforo que el cotizador: objetivo y piso por marca (Ajustes).
+const TONO = {
+  ok: 'text-emerald-600 dark:text-emerald-400',
+  bajo_objetivo: 'text-amber-600 dark:text-amber-400',
+  bajo_piso: 'text-rose-600 dark:text-rose-400'
 };
+const tonoMargen = (valorPct, origen) => TONO[estadoMargen(valorPct, origen || 'QNAP')] || 'text-slate-400';
 
 const inputBase =
   'rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 ' +
@@ -95,7 +97,7 @@ const NumeroInput = ({ value, onCommit, decimales = 2, min = 0, className = '', 
 };
 
 const Campo = ({ label, children, className = '' }) => (
-  <label className={`flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 ${className}`}>
+  <label className={`flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-500 ${className}`}>
     {label}
     {children}
   </label>
@@ -264,7 +266,7 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
                     >
                       Cargar v{v.version} en el editor
                     </button>
-                    <p className='text-[11px] text-slate-500'>No se guarda hasta que presiones Guardar: queda como una versión nueva.</p>
+                    <p className='text-xs text-slate-500'>No se guarda hasta que presiones Guardar: queda como una versión nueva.</p>
                   </div>
                 )}
               </li>
@@ -283,22 +285,22 @@ const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
     <div className='flex w-40 flex-col gap-1'>
       {sinDisty && !linea.nueva ? (
         <>
-          <span className='text-[10px] uppercase text-slate-400'>Costo final</span>
+          <span className='text-xs uppercase text-slate-400'>Costo final</span>
           <NumeroInput
             value={linea.costo_unitario}
             onCommit={(v) => onCambio('costo_unitario', v)}
             placeholder='sin costo'
             ariaLabel='Costo final unitario'
           />
-          {linea.costo_unitario === null && <span className='text-[10px] text-amber-600'>Sin costo guardado</span>}
+          {linea.costo_unitario === null && <span className='text-xs text-amber-600'>Sin costo guardado</span>}
         </>
       ) : (
         <>
-          <span className='text-[10px] uppercase text-slate-400'>Disty USD</span>
+          <span className='text-xs uppercase text-slate-400'>Disty USD</span>
           <NumeroInput value={linea.precio_disty} onCommit={(v) => onCambio('precio_disty', v)} ariaLabel='Costo disty' />
           {esAxis && (
             <>
-              <span className='mt-1 flex items-center justify-between text-[10px] uppercase text-slate-400'>
+              <span className='mt-1 flex items-center justify-between text-xs uppercase text-slate-400'>
                 Rebate partner
                 {linea.rebate_inferido && (
                   <span className='rounded bg-amber-100 px-1 normal-case text-amber-700' title='No se guardó al crear: se dedujo del costo'>
@@ -322,11 +324,11 @@ const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
                 </select>
               )}
               <NumeroInput value={linea.rebate_partner} onCommit={(v) => onCambio('rebate_partner', v)} ariaLabel='Rebate partner' />
-              <span className='mt-1 text-[10px] uppercase text-slate-400'>Rebate proyecto</span>
+              <span className='mt-1 text-xs uppercase text-slate-400'>Rebate proyecto</span>
               <NumeroInput value={linea.rebate_proyecto} onCommit={(v) => onCambio('rebate_proyecto', v)} ariaLabel='Rebate proyecto' />
             </>
           )}
-          <span className='text-right text-[11px] text-slate-500'>
+          <span className='text-right text-xs text-slate-500'>
             Final <span className='font-semibold tabular-nums text-slate-700'>{formatCurrency(linea.costo_unitario || 0)}</span>
           </span>
         </>
@@ -704,7 +706,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
 
               <div className='overflow-x-auto'>
                 <table className='w-full min-w-[1100px] text-sm'>
-                  <thead className='bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800'>
+                  <thead className='bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800'>
                     <tr>
                       <th className='w-10 px-2 py-2' />
                       <th className='px-2 py-2 text-left'>Producto</th>
@@ -739,7 +741,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                               <button type='button' onClick={() => mover(i, -1)} disabled={i === 0} className='px-1 disabled:opacity-30' aria-label='Subir línea'>
                                 ▲
                               </button>
-                              <span className='text-[10px]'>{i + 1}</span>
+                              <span className='text-xs'>{i + 1}</span>
                               <button
                                 type='button'
                                 onClick={() => mover(i, 1)}
@@ -756,13 +758,13 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                               <span className='font-mono text-xs text-slate-600'>{l.sku || '—'}</span>
                               <span className='font-mono text-xs text-slate-400'>{l.mpn}</span>
                               <span
-                                className={`rounded px-1.5 text-[10px] font-semibold ${
+                                className={`rounded px-1.5 text-xs font-semibold ${
                                   l.origen === 'AXIS' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                                 }`}
                               >
                                 {l.origen}
                               </span>
-                              {cambios.nueva && <span className='rounded bg-emerald-100 px-1.5 text-[10px] font-semibold text-emerald-800'>nueva</span>}
+                              {cambios.nueva && <span className='rounded bg-emerald-100 px-1.5 text-xs font-semibold text-emerald-800'>nueva</span>}
                             </div>
                             <textarea
                               value={l.descripcion}
@@ -781,7 +783,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                               ariaLabel='Cantidad'
                               className={cambio('cantidad') ? marcado : ''}
                             />
-                            {cambio('cantidad') && <div className='mt-1 text-right text-[10px] text-slate-400 line-through'>{l.original.cantidad}</div>}
+                            {cambio('cantidad') && <div className='mt-1 text-right text-xs text-slate-400 line-through'>{l.original.cantidad}</div>}
                           </td>
                           <td className={`px-2 py-2 ${cambio('costo_unitario') ? marcado : ''}`}>
                             <CeldaCosto
@@ -807,13 +809,13 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                               className={cambio('precio_unitario') ? marcado : ''}
                             />
                             {cambio('precio_unitario') && (
-                              <div className='mt-1 text-right text-[10px] text-slate-400 line-through'>{formatCurrency(l.original.precio_unitario)}</div>
+                              <div className='mt-1 text-right text-xs text-slate-400 line-through'>{formatCurrency(l.original.precio_unitario)}</div>
                             )}
                           </td>
                           <td className='px-2 py-2 text-right font-semibold tabular-nums text-slate-800'>{formatCurrency(totalLinea(l))}</td>
                           <td className='px-2 py-2 text-right tabular-nums'>
-                            <div className={`font-semibold ${tonoMargen(margen.pct)}`}>{margen.total === null ? '—' : formatCurrency(margen.total)}</div>
-                            <div className={`text-xs ${tonoMargen(margen.pct)}`}>{pct(margen.pct)}</div>
+                            <div className={`font-semibold ${tonoMargen(margen.pct, l.origen)}`}>{margen.total === null ? '—' : formatCurrency(margen.total)}</div>
+                            <div className={`text-xs ${tonoMargen(margen.pct, l.origen)}`}>{pct(margen.pct)}</div>
                           </td>
                           <td className='px-2 py-2'>
                             <textarea
@@ -848,7 +850,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
           <aside className='border-t border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 lg:w-80 lg:shrink-0 lg:overflow-auto lg:border-l lg:border-t-0'>
             <div className='space-y-4 lg:sticky lg:top-0'>
               <div>
-                <div className='text-[11px] uppercase tracking-wide text-slate-500'>Total venta</div>
+                <div className='text-xs uppercase tracking-wide text-slate-500'>Total venta</div>
                 <div className='text-3xl font-bold tabular-nums text-slate-900'>{formatCurrency(resumen.venta)}</div>
                 {sucio && Math.abs(deltaVenta) >= 0.01 && (
                   <div className='text-xs text-slate-500'>
@@ -862,21 +864,21 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
               </div>
               <dl className='grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800'>
                 <div>
-                  <dt className='text-[11px] uppercase text-slate-500'>Costo</dt>
+                  <dt className='text-xs uppercase text-slate-500'>Costo</dt>
                   <dd className='font-semibold tabular-nums text-slate-800'>{formatCurrency(resumen.costo)}</dd>
                 </div>
                 <div>
-                  <dt className='text-[11px] uppercase text-slate-500'>Margen</dt>
-                  <dd className={`font-semibold tabular-nums ${tonoMargen(resumen.margen_pct)}`}>
+                  <dt className='text-xs uppercase text-slate-500'>Margen</dt>
+                  <dd className={`font-semibold tabular-nums ${tonoMargen(resumen.margen_pct, lineas.map((x) => x.origen))}`}>
                     {formatCurrency(resumen.margen)} <span className='text-xs'>({pct(resumen.margen_pct)})</span>
                   </dd>
                 </div>
                 <div>
-                  <dt className='text-[11px] uppercase text-slate-500'>Líneas</dt>
+                  <dt className='text-xs uppercase text-slate-500'>Líneas</dt>
                   <dd className='font-semibold text-slate-800'>{lineas.length}</dd>
                 </div>
                 <div>
-                  <dt className='text-[11px] uppercase text-slate-500'>Unidades</dt>
+                  <dt className='text-xs uppercase text-slate-500'>Unidades</dt>
                   <dd className='font-semibold text-slate-800'>{lineas.reduce((s, l) => s + l.cantidad, 0)}</dd>
                 </div>
               </dl>
@@ -892,7 +894,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                   )}
                 </ul>
               )}
-              <p className='text-[11px] text-slate-400'>Costo y margen solo se ven con tu cuenta admin; el PDF y el cliente ven precios.</p>
+              <p className='text-xs text-slate-400'>Costo y margen solo se ven con tu cuenta admin; el PDF y el cliente ven precios.</p>
 
               <Campo label='Qué cambió (queda en el historial)'>
                 <textarea
@@ -931,7 +933,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                 >
                   {sucio ? 'Descartar cambios' : 'Cerrar'}
                 </button>
-                <p className='text-center text-[11px] text-slate-400'>Ctrl+S guarda · Esc cierra</p>
+                <p className='text-center text-xs text-slate-400'>Ctrl+S guarda · Esc cierra</p>
               </div>
             </div>
           </aside>
@@ -942,7 +944,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
         <div className='flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-900 lg:hidden'>
           <div>
             <div className='text-lg font-bold tabular-nums text-slate-900'>{formatCurrency(resumen.venta)}</div>
-            <div className={`text-xs ${tonoMargen(resumen.margen_pct)}`}>Margen {pct(resumen.margen_pct)}</div>
+            <div className={`text-xs ${tonoMargen(resumen.margen_pct, lineas.map((x) => x.origen))}`}>Margen {pct(resumen.margen_pct)}</div>
           </div>
           <button
             type='button'
