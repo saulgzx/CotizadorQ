@@ -68,6 +68,8 @@ import PegarListaModal from './PegarListaModal';
 import AtajosAyuda from './AtajosAyuda';
 import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
+import CarritoLineas from './CarritoLineas';
+import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
 const margenCotizacion = (cot) => {
@@ -1738,14 +1740,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // Cargar productos del backend
   const loadProductos = async (roleOverride) => {
-    try {
-      const isAdminForLoad = roleOverride ? canManageCotizadorStock(roleOverride) : isAdmin;
-      const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.productos,
-        queryFn: () => productosAPI.getAll(),
-        staleTime: 0
-      });
-      const mapped = data.map(p => ({
+    const isAdminForLoad = roleOverride ? canManageCotizadorStock(roleOverride) : isAdmin;
+    const usuarioCache = (() => {
+      const u = safeJsonParse(localStorage.getItem('user'), null);
+      return u ? `${u.id}-${u.role}` : null;
+    })();
+    const mapear = (data) => (Array.isArray(data) ? data : []).map(p => ({
         id: p.id,
         origen: p.origen || 'QNAP',
         marca: p.marca || '',
@@ -1763,7 +1763,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         costoChile: isAdminForLoad && Number(p.costo_chile_real) > 0 ? Number(p.costo_chile_real) : null,
         tiempo: p.tiempo_entrega || 'ETA por confirmar'
       }));
+    // Carga instantánea: se muestra el catálogo guardado en este navegador y se
+    // refresca en segundo plano con la versión del servidor.
+    if (usuarioCache) {
+      const guardado = leerCache('productos', usuarioCache);
+      if (guardado) setProductos(prev => (prev.length ? prev : mapear(guardado)));
+    }
+    try {
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.productos,
+        queryFn: () => productosAPI.getAll(),
+        staleTime: 0
+      });
+      const mapped = mapear(data);
       setProductos(mapped);
+      if (usuarioCache) guardarCache('productos', usuarioCache, data);
       return mapped;
     } catch (error) {
       console.error('Error cargando productos:', error);
@@ -1865,6 +1879,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Catálogo e historial guardados son del usuario que sale.
+    limpiarCaches();
+    queryClient.clear();
     setIsLoggedIn(false);
     setUser(null);
     setUsuario('');
@@ -1912,13 +1929,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!isLoggedIn || (currentView !== 'historial' && currentView !== 'dashboard')) return;
     let cancelled = false;
     const loadHistorial = async () => {
-      setHistorialLoading(true);
+      // Con datos ya cargados no se vuelve a mostrar "Cargando": se refresca en segundo plano.
+      if (historial.length === 0) setHistorialLoading(true);
       setHistorialError('');
       try {
         const data = await queryClient.fetchQuery({
           queryKey: [...queryKeys.cotizaciones, 'includeItems'],
           queryFn: () => cotizacionesAPI.getAll({ includeItems: true }),
-          staleTime: 0
+          // Cambiar entre Dashboard e Historial no vuelve a descargar todo durante 30 s.
+          staleTime: 30 * 1000
         });
         if (!cancelled) setHistorial(data);
       } catch (error) {
@@ -2410,6 +2429,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return true;
   };
 
+  // Cambios desde la tabla del carrito. El precio unitario se traduce a GP de la línea,
+  // así el precio que escribes queda fijo aunque cambie el GP global.
+  const cambiarLineaCarrito = (id, campo, valor) => {
+    if (campo === 'precioUnitario') {
+      const item = cotizacion.find(x => x.id === id);
+      const precio = Number(valor);
+      if (!item || !(precio > 0)) return;
+      const gpPct = (1 - margenItem(item).costo / precio) * 100;
+      if (!Number.isFinite(gpPct) || gpPct >= 99.9) return;
+      updateItem(id, 'gpOverride', String(Math.round(gpPct * 10000) / 10000));
+      return;
+    }
+    if (campo === 'gpOverride' && valor !== '' && Number(valor) >= 99.9) return;
+    updateItem(id, campo, valor);
+  };
+
+  const moverLineaCarrito = (indice, delta) => {
+    setCotizacion(prev => {
+      const destino = indice + delta;
+      if (destino < 0 || destino >= prev.length) return prev;
+      const next = [...prev];
+      [next[indice], next[destino]] = [next[destino], next[indice]];
+      return next;
+    });
+  };
+
   const removeItem = (id) => {
     const index = cotizacion.findIndex(x => x.id === id);
     if (index < 0) return;
@@ -2532,6 +2577,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   // Guardar cotización
+  // Tras cualquier cambio, el próximo ingreso al historial trae datos frescos (no la cache de 30 s).
+  const invalidarHistorial = () => queryClient.invalidateQueries({ queryKey: queryKeys.cotizaciones });
+
   const saveCotizacion = async ({ silent = false } = {}) => {
     try {
       setSaving(true);
@@ -2595,6 +2643,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       // Guardamos el número/folio asignado para que el PDF del borrador ya lo muestre.
       const numeroAsignado = created?.cotizacion?.numero ?? null;
       if (numeroAsignado) setCurrentQuoteNumero(numeroAsignado);
+      invalidarHistorial();
       if (!silent) notify(`Cotización guardada correctamente${numeroAsignado ? ` (N° ${numeroAsignado})` : ''}`);
       return created?.cotizacion || null;
     } catch (error) {
@@ -3654,6 +3703,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const results = await Promise.allSettled(ids.map(id => cotizacionesAPI.delete(id)));
       const failed = results.filter(r => r.status === 'rejected');
       setHistorial(prev => prev.filter(cot => !ids.includes(cot.id)));
+      invalidarHistorial();
       setSelectedHistorialIds(new Set());
       if (failed.length > 0) {
         const firstError = failed[0]?.reason?.message || 'Error eliminando cotizaciones';
@@ -3963,6 +4013,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setHistorial(prev => prev.map(cot => (
         cot.id === cotizacionId ? { ...cot, estado: newEstado } : cot
       )));
+      invalidarHistorial();
     } catch (error) {
       notify(error.message || 'Error actualizando estado');
     } finally {
@@ -3974,6 +4025,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const handleCotizacionEditada = (actualizada) => {
     if (!actualizada?.id) return;
     setHistorial(prev => prev.map(c => (c.id === actualizada.id ? { ...c, ...actualizada } : c)));
+    invalidarHistorial();
   };
 
   // Producto del catálogo que corresponde a una fila de stock (por MPN, luego SKU).
@@ -8160,7 +8212,68 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               </div>
             </div>
-            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
+            </div>
+            <div className="lg:col-span-4 space-y-4">
+              <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden lg:sticky lg:top-4">
+                <div className="p-4 border-b bg-gray-50">
+                  <h3 className="font-semibold">Resumen</h3>
+                </div>
+                <div className="p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Ítems</span>
+                    <span className="text-sm font-semibold">{cotizacion.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">Total</span>
+                    <span className="text-xl font-bold text-blue-600 tabular-nums">{formatCurrency(totalCotizacion)}</span>
+                  </div>
+                  {resumenMargenCarrito && (
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Costo</span>
+                        <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.costo)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Margen</span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.margen)}</span>
+                          <MargenChip gpPct={resumenMargenCarrito.gpPct} origen={resumenMargenCarrito.origenes} />
+                        </span>
+                      </div>
+                      {(() => {
+                        const bajoPiso = problemasEnvio().bajoPiso.length;
+                        return bajoPiso > 0 ? (
+                          <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                            {bajoPiso} línea{bajoPiso === 1 ? '' : 's'} bajo el piso de margen
+                          </p>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    {isAdmin && (
+                      <button
+                        onClick={exportCotizacionAxis}
+                        disabled={cotizacion.length === 0}
+                        className="w-full py-2 bg-amber-500 text-white font-semibold rounded-lg hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        Exportar a Axis
+                      </button>
+                    )}
+                    <button
+                      onClick={() => generarCotizacion()}
+                      disabled={cotizacion.length === 0}
+                      title="Ctrl+Enter"
+                      className="w-full py-2.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-600 disabled:opacity-50"
+                    >
+                      Generar Cotización
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden mt-4">
               <div className={`${isClient ? 'p-4' : 'p-3'} border-b bg-gray-50`}>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="font-semibold">Cotización</h3>
@@ -8332,208 +8445,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
               </div>
               <div>
-                {cotizacion.length === 0 ? (
-                  <div className="p-6 text-center text-gray-500">
-                    <span className="text-sm text-gray-500">Carrito</span>
-                    <p className="mt-2 text-sm">No hay productos. Busca por SKU, MPN o modelo.</p>
-                  </div>
-                ) : cotizacion.map((item, index) => {
-                  const pu = calcularPrecioClienteItem(item);
-                  const isAxis = (item.origen || 'QNAP') === 'AXIS';
-                  const baseGp = isAxis ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap;
-                  const partnerRebate = isAxis ? getAxisPartnerRebate(item, item.partnerCategory || cotizacionPartnerCategory) : 0;
-                  const projectRebate = isAxis ? (parseFloat(item.rebateProject) || 0) : 0;
-                  const rebateTotal = partnerRebate + projectRebate;
-                  const costoXUS = item.precio * AXIS_CONSTANTS.INBOUND_FREIGHT;
-                  const costoFinalXUS = costoXUS / AXIS_CONSTANTS.IC;
-                  const costoXCL = item.costoChile > 0 ? item.costoChile : costoFinalXUS * (1 + AXIS_CONSTANTS.INT);
-                  const costoTotalXCL = Math.max(costoXCL - rebateTotal, 0);
-                  const descuentoPorcentualAxis = item.precio > 0 ? (rebateTotal / item.precio) * 100 : 0;
-                  return (
-                    <div key={item.id} className={`p-2 border-b ${index % 2 === 0 ? 'bg-white' : 'bg-blue-50'}`}>
-                      <div className="flex justify-between items-start mb-1">
-                        <div className="flex-1 min-w-0">
-                          {isAdmin ? (
-                            <>
-                              <span className="text-xs text-blue-600">{item.marca}</span>
-                              <p className="text-xs font-medium truncate">{item.desc}</p>
-                            </>
-                          ) : (
-                            <p className="text-xs font-medium truncate">Modelo: {item.desc}</p>
-                          )}
-                          <p className="text-xs text-gray-500">SKU: {item.sku} | MPN: {item.mpn || 'N/A'} | {item.tiempo}</p>
-                          {isAdmin && item.costoChile > 0 && (
-                            <p className="text-xs text-emerald-700 dark:text-emerald-300" title="OH Unit USD de la hoja Stock: reemplaza al costo Chile calculado">
-                              Costo Chile real (stock): {formatCurrency(item.costoChile)}
-                            </p>
-                          )}
-                        </div>
-                        <button onClick={() => removeItem(item.id)} className="text-red-500 hover:bg-red-50 px-2 py-0.5 rounded text-xs">Quitar</button>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <label className="text-xs text-gray-500">Cant:</label>
-                        <input type="number" min="1" value={item.cant} onChange={e => updateItem(item.id, 'cant', e.target.value)} className="w-12 px-2 py-0.5 border rounded text-xs text-center" />
-                        {isAdmin && (
-                          <>
-                            <label className="text-xs text-gray-500" title="GP de esta línea. Vacío usa el GP global de la marca.">GP %</label>
-                            <input
-                              type="number"
-                              value={
-                                item.gpOverrideInput !== undefined
-                                  ? item.gpOverrideInput
-                                  : (item.gpOverride === null || item.gpOverride === undefined
-                                    ? ''
-                                    : (Math.round(item.gpOverride * 10000) / 100).toString())
-                              }
-                              onChange={e => updateItem(item.id, 'gpOverride', e.target.value)}
-                              placeholder={(baseGp * 100).toFixed(2)}
-                              className="w-16 px-2 py-0.5 border rounded text-xs"
-                            />
-                            <label className="text-xs text-gray-500">Entrega</label>
-                            <input
-                              type="text"
-                              value={item.tiempo || ''}
-                              onChange={e => updateItem(item.id, 'tiempo', e.target.value)}
-                              className="w-36 px-2 py-0.5 border rounded text-xs"
-                            />
-                          </>
-                        )}
-                        {isAdmin && isAxis && (
-                          <>
-                            <label className="text-xs text-gray-500">Partner</label>
-                            <select
-                              value={item.partnerCategory || DEFAULT_AXIS_PARTNER}
-                              onChange={e => updateItem(item.id, 'partnerCategory', e.target.value)}
-                              className="px-2 py-0.5 border rounded text-xs"
-                            >
-                              <option>Partner Autorizado</option>
-                              <option>Partner Silver</option>
-                              <option>Partner Gold</option>
-                              <option>Partner Multiregional</option>
-                            </select>
-                          </>
-                        )}
-                        {isAdmin && isAxis && (
-                          <>
-                            <label className="text-xs text-gray-500">Rebate</label>
-                            <input
-                              type="number"
-                              value={item.rebateProject ?? 0}
-                              onChange={e => updateItem(item.id, 'rebateProject', e.target.value)}
-                              className="w-16 px-2 py-0.5 border rounded text-xs"
-                            />
-                          </>
-                        )}
-                        <div className="flex-1 flex items-center justify-end gap-3 text-right">
-                          {isAdmin && (() => {
-                            const m = margenItem(item);
-                            return (
-                              <div className="flex flex-col items-end gap-0.5">
-                                <MargenChip gpPct={m.gpPct} origen={item.origen} />
-                                <span className="text-xs text-gray-500 tabular-nums">Margen {formatCurrency(m.margenTotal)}</span>
-                              </div>
-                            );
-                          })()}
-                          <div>
-                            <p className="text-xs text-gray-500 tabular-nums">{formatCurrency(pu)} × {item.cant}</p>
-                            <p className="text-sm font-semibold text-blue-600 tabular-nums">{formatCurrency(pu * item.cant)}</p>
-                          </div>
-                        </div>
-                      </div>
-                      {isAdmin && isAxis && (
-                        <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-500">
-                            <span>Partner: {formatCurrency(partnerRebate)}</span>
-                            <span>Rebate Total: <span className="font-semibold text-gray-800">{formatCurrency(rebateTotal)}</span></span>
-                            <span>Descuento porcentual Axis: <span className="font-semibold text-gray-800">{descuentoPorcentualAxis.toFixed(2)}%</span></span>
-                            <span>Costo XUS: <span className="font-semibold text-gray-800">{formatCurrency(costoXUS)}</span></span>
-                            <span>Costo Final XCL: <span className="font-semibold text-gray-800">{formatCurrency(costoTotalXCL)}</span></span>
-                          </div>
-                        )}
-                      {showAdminPanel && isAdmin && (
-                        <div className="mt-2 p-2 bg-gray-50 rounded border text-xs">
-                          <div className="grid grid-cols-1 gap-2">
-                            <div>
-                              <label className="text-gray-500">Precio Disty:</label>
-                              <input type="number" value={item.precio} onChange={e => updateItem(item.id, 'precio', e.target.value)} className="w-full mt-1 px-2 py-1 border rounded" />
-                            </div>
-                          </div>
-                          <div className="mt-1 text-gray-500">Freight: {calcParams.INBOUND_FREIGHT} | IC: {calcParams.IC} | INT: {(calcParams.INT * 100).toFixed(0)}%</div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                <CarritoLineas
+                  items={cotizacion}
+                  isAdmin={isAdmin}
+                  precioItem={calcularPrecioClienteItem}
+                  margenItem={margenItem}
+                  gpBase={(item) => ((item.origen || 'QNAP') === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap)}
+                  rebatePartner={getAxisPartnerRebate}
+                  partnerDefault={cotizacionPartnerCategory}
+                  onCambio={cambiarLineaCarrito}
+                  onQuitar={removeItem}
+                  onMover={moverLineaCarrito}
+                />
               </div>
             </div>
-            </div>
-            <div className="lg:col-span-4 space-y-4">
-              <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden lg:sticky lg:top-4">
-                <div className="p-4 border-b bg-gray-50">
-                  <h3 className="font-semibold">Resumen</h3>
-                </div>
-                <div className="p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">Ítems</span>
-                    <span className="text-sm font-semibold">{cotizacion.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">Total</span>
-                    <span className="text-xl font-bold text-blue-600 tabular-nums">{formatCurrency(totalCotizacion)}</span>
-                  </div>
-                  {resumenMargenCarrito && (
-                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-2 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Costo</span>
-                        <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.costo)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-gray-500">Margen</span>
-                        <span className="flex items-center gap-2">
-                          <span className="font-semibold tabular-nums text-gray-800">{formatCurrency(resumenMargenCarrito.margen)}</span>
-                          <MargenChip gpPct={resumenMargenCarrito.gpPct} origen={resumenMargenCarrito.origenes} />
-                        </span>
-                      </div>
-                      {(() => {
-                        const bajoPiso = problemasEnvio().bajoPiso.length;
-                        return bajoPiso > 0 ? (
-                          <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
-                            {bajoPiso} línea{bajoPiso === 1 ? '' : 's'} bajo el piso de margen
-                          </p>
-                        ) : null;
-                      })()}
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    {isAdmin && (
-                      <button
-                        onClick={() => setShowAdminPanel(!showAdminPanel)}
-                        className="w-full px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
-                      >
-                        {showAdminPanel ? 'Ocultar' : 'Mostrar'} Panel Admin
-                      </button>
-                    )}
-                    {isAdmin && (
-                      <button
-                        onClick={exportCotizacionAxis}
-                        disabled={cotizacion.length === 0}
-                        className="w-full py-2 bg-amber-500 text-white font-semibold rounded-lg hover:bg-amber-600 disabled:opacity-50"
-                      >
-                        Exportar a Axis
-                      </button>
-                    )}
-                    <button
-                      onClick={() => generarCotizacion()}
-                      disabled={cotizacion.length === 0}
-                      title="Ctrl+Enter"
-                      className="w-full py-2.5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-600 disabled:opacity-50"
-                    >
-                      Generar Cotización
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
           </div>
         )}
 
