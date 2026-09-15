@@ -1,6 +1,88 @@
 import React from 'react';
 import { useCotizador } from '../cotizadorContext';
 import { formatCurrency } from '../cotizadorHelpers';
+import EncabezadoPagina from '../../ui/EncabezadoPagina';
+import Icono from '../../ui/Icono';
+
+const tarjeta = 'glass-card rounded-2xl border border-slate-200 shadow-card';
+
+// Barras de facturación: AXIS en su color de marca, Intcomex en tinta.
+const BARRA_AXIS = 'bg-amber-400';
+const BARRA_INTCOMEX = 'bg-slate-700 dark:bg-slate-300';
+
+function Leyenda() {
+  return (
+    <span className='flex items-center gap-3 text-xs text-slate-500'>
+      <span className='flex items-center gap-1.5'><span className={`h-2 w-2 rounded-full ${BARRA_AXIS}`} />AXIS</span>
+      <span className='flex items-center gap-1.5'><span className={`h-2 w-2 rounded-full ${BARRA_INTCOMEX}`} />Intcomex</span>
+    </span>
+  );
+}
+
+function PanelFacturacion({ titulo, axis, intcomex, bos, conMonto, filas, maxAxis, maxIntcomex, prefijo }) {
+  return (
+    <section className='rounded-xl border border-slate-200 p-4'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <h3 className='text-sm font-semibold text-slate-900'>{titulo}</h3>
+        <span className='text-xs text-slate-500'>{bos} BO · {conMonto} con monto</span>
+      </div>
+      <dl className='mt-3 grid grid-cols-2 gap-2'>
+        <div className='rounded-lg bg-slate-50 px-3 py-2'>
+          <dt className='mq-sobre'>AXIS</dt>
+          <dd className='text-lg font-bold tabular-nums text-slate-900'>{formatCurrency(axis)}</dd>
+        </div>
+        <div className='rounded-lg bg-slate-50 px-3 py-2'>
+          <dt className='mq-sobre'>Intcomex</dt>
+          <dd className='text-lg font-bold tabular-nums text-slate-900'>{formatCurrency(intcomex)}</dd>
+        </div>
+      </dl>
+      <ul className='mt-4 space-y-3'>
+        {filas.map((row) => {
+          const axisPct = row.axis > 0 ? Math.max(3, Math.round((row.axis / (maxAxis || 1)) * 100)) : 0;
+          const intcomexPct = row.intcomex > 0 ? Math.max(3, Math.round((row.intcomex / (maxIntcomex || 1)) * 100)) : 0;
+          const vacia = !row.axis && !row.intcomex;
+          return (
+            <li key={`${prefijo}-${row.week}`}>
+              <div className='mb-1 flex flex-wrap items-center justify-between gap-x-2 text-xs'>
+                <span className='font-medium text-slate-700'>{row.week}</span>
+                <span className={`tabular-nums ${vacia ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {formatCurrency(row.axis)} · {formatCurrency(row.intcomex)}
+                </span>
+              </div>
+              <div className='space-y-1'>
+                <div className='h-1.5 w-full overflow-hidden rounded-full bg-slate-100'>
+                  <div className={`h-full rounded-full ${BARRA_AXIS}`} style={{ width: `${axisPct}%` }} />
+                </div>
+                <div className='h-1.5 w-full overflow-hidden rounded-full bg-slate-100'>
+                  <div className={`h-full rounded-full ${BARRA_INTCOMEX}`} style={{ width: `${intcomexPct}%` }} />
+                </div>
+              </div>
+              {row.boSummaries.length > 0 && (
+                <details className='group mt-1.5'>
+                  <summary className='inline-flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900'>
+                    <Icono nombre='abajo' className='h-3.5 w-3.5 transition group-open:rotate-180' />
+                    {row.boSummaries.length} BO
+                  </summary>
+                  <ul className='mt-1 max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200'>
+                    {row.boSummaries.map((item) => (
+                      <li key={`${prefijo}-detalle-${row.week}-${item.bo}`} className='flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs'>
+                        <span className='min-w-0'>
+                          <span className='font-mono text-slate-700'>{item.bo || 'N/A'}</span>
+                          <span className='ml-2 truncate text-slate-500'>{item.customerName}</span>
+                        </span>
+                        <span className='font-semibold tabular-nums text-slate-900'>{formatCurrency(item.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 export default function DashboardView() {
   const {
@@ -29,72 +111,88 @@ export default function DashboardView() {
     return `hace ${Math.round(hours / 24)} días`;
   };
 
+  const mesActual = new Date().toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+
   return (
-    <div className="space-y-4 view-enter">
-      {isAdmin && (
-        <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
-          <input
-            type="text"
-            aria-label="Buscar"
-            placeholder="Buscar..."
-            value={globalSearch}
-            onChange={(e) => setGlobalSearch(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900/60"
-          />
+    <div className='view-enter'>
+      <EncabezadoPagina seccion='Ventas' titulo='Dashboard' subtitulo={`Resumen de ${mesActual}`}>
+        {isAdmin && (
+          <label className='relative block w-64 max-w-full' htmlFor='dashboard-buscar'>
+            <span className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400'>
+              <Icono nombre='search' />
+            </span>
+            <input
+              id='dashboard-buscar'
+              type='text'
+              aria-label='Buscar en todas las vistas'
+              placeholder='Buscar en todas las vistas…'
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              className='h-10 w-full rounded-[10px] border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900'
+            />
+          </label>
+        )}
+        <button type='button' onClick={() => setCurrentView('cotizador')} className='mq-btn mq-btn-primario'>
+          Nueva cotización
+        </button>
+      </EncabezadoPagina>
+
+      <div className='space-y-4'>
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+          {dashboardKpis.map((kpi) => {
+            const Tag = kpi.onClick ? 'button' : 'div';
+            return (
+              <Tag
+                key={kpi.label}
+                {...(kpi.onClick ? { type: 'button', onClick: kpi.onClick } : {})}
+                className={`${tarjeta} p-4 text-left ${kpi.onClick ? 'transition hover:border-slate-300' : ''}`}
+              >
+                <div className='mq-sobre'>{kpi.label}</div>
+                <div className='mt-1.5 text-[28px] font-bold leading-8 tracking-tight tabular-nums text-slate-900'>{kpi.value}</div>
+                <div className='mt-1 text-xs text-slate-500'>{kpi.hint}</div>
+              </Tag>
+            );
+          })}
         </div>
-      )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 stagger-children">
-        {dashboardKpis.map((kpi) => {
-          const Tag = kpi.onClick ? 'button' : 'div';
-          return (
-            <Tag
-              key={kpi.label}
-              {...(kpi.onClick ? { type: 'button', onClick: kpi.onClick } : {})}
-              className="glass-card text-left rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)] transition hover:-translate-y-0.5 hover:shadow-lg"
-            >
-              <div className="text-xs text-slate-500 dark:text-slate-400">{kpi.label}</div>
-              <div className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mt-1 tabular-nums">{kpi.value}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{kpi.hint}</div>
-            </Tag>
-          );
-        })}
-      </div>
-      {isFullAdmin && seguimiento.length > 0 && (
-        <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Para hacer seguimiento</h2>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Enviadas hace más de 7 días, sin aprobar ni rechazar</span>
-          </div>
-          <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
-            {seguimiento.slice(0, 8).map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => abrirCotizacionEnHistorial(item.id)}
-                  className="w-full flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-left text-sm rounded-lg px-2 hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                >
-                  <span className="min-w-0">
-                    <span className="font-mono text-xs text-slate-500 mr-2">N° {item.folio}</span>
-                    <span className="font-medium text-slate-800 dark:text-slate-100">{item.empresa}</span>
-                    {item.proyecto && <span className="text-slate-500 dark:text-slate-400"> · {item.proyecto}</span>}
-                  </span>
-                  <span className="flex items-center gap-3">
-                    <span className={`text-xs font-semibold ${item.dias > 21 ? 'text-rose-600 dark:text-rose-400' : 'text-amber-700 dark:text-amber-400'}`}>{item.dias} días</span>
-                    <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{formatCurrency(item.total)}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {seguimiento.length > 8 && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Y {seguimiento.length - 8} más en el historial.</p>
-          )}
-        </div>
-      )}
-      {isAdmin && syncStatus?.syncs?.length > 0 && (
-        <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Catálogo (Google Sheets):</span>
+
+        {isFullAdmin && seguimiento.length > 0 && (
+          <section className={`${tarjeta} p-4`}>
+            <div className='flex flex-wrap items-baseline justify-between gap-2'>
+              <h3 className='text-base font-semibold text-slate-900'>Para hacer seguimiento</h3>
+              <span className='text-xs text-slate-500'>Enviadas hace más de 7 días, sin aprobar ni rechazar</span>
+            </div>
+            <ul className='mt-3 divide-y divide-slate-100'>
+              {seguimiento.slice(0, 8).map((item) => (
+                <li key={item.id}>
+                  <button
+                    type='button'
+                    onClick={() => abrirCotizacionEnHistorial(item.id)}
+                    className='flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg px-2 py-2.5 text-left text-sm hover:bg-slate-50'
+                  >
+                    <span className='min-w-0'>
+                      <span className='mr-2 font-mono text-xs text-slate-500'>{item.folio}</span>
+                      <span className='font-medium text-slate-900'>{item.empresa}</span>
+                      {item.proyecto && <span className='text-slate-500'> · {item.proyecto}</span>}
+                    </span>
+                    <span className='flex items-center gap-3'>
+                      <span className={`inline-flex h-5 items-center rounded-full px-2 text-xs font-semibold ${item.dias > 21 ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                        hace {item.dias} días
+                      </span>
+                      <span className='font-semibold tabular-nums text-slate-900'>{formatCurrency(item.total)}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {seguimiento.length > 8 && (
+              <p className='mt-2 text-xs text-slate-500'>Y {seguimiento.length - 8} más en el historial.</p>
+            )}
+          </section>
+        )}
+
+        {isAdmin && syncStatus?.syncs?.length > 0 && (
+          <div className='flex flex-wrap items-center gap-2 text-xs'>
+            <span className='mq-sobre'>Catálogo</span>
             {syncStatus.syncs.map((s) => {
               const ok = s.status === 'ok';
               const ageLabel = formatSyncAge(s.created_at);
@@ -102,168 +200,87 @@ export default function DashboardView() {
                 <span
                   key={s.origen}
                   title={s.warnings || s.error || ''}
-                  className={`max-w-full truncate px-2 py-1 rounded-full border ${ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300'}`}
+                  className={`inline-flex max-w-full items-center gap-1.5 truncate rounded-full px-2.5 py-1 font-medium ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}
                 >
+                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-current' />
                   {s.origen}: {ok
-                    ? `sincronizado ${ageLabel} (${s.inserted} nuevos, ${s.updated} actualizados${s.rejected > 0 ? `, ${s.rejected} rechazados` : ''})`
-                    : `${s.status === 'aborted' ? 'ABORTADO' : s.status === 'error' ? 'ERROR' : s.status} ${ageLabel}`}
+                    ? `sincronizado ${ageLabel} · ${s.inserted} nuevos, ${s.updated} actualizados${s.rejected > 0 ? `, ${s.rejected} rechazados` : ''}`
+                    : `${s.status === 'aborted' ? 'abortado' : s.status === 'error' ? 'con error' : s.status} ${ageLabel}`}
                 </span>
               );
             })}
           </div>
-        </div>
-      )}
-      {isAdmin && (
-        <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Facturación estimada y reportada</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Fuente: BO + mes/semana facturación + montos Axis/Intcomex.</p>
+        )}
+
+        {isAdmin && (
+          <section className={`${tarjeta} p-4`}>
+            <div className='flex flex-wrap items-center justify-between gap-3'>
+              <div>
+                <h3 className='text-base font-semibold text-slate-900'>Facturación estimada y reportada</h3>
+                <p className='text-xs text-slate-500'>Por semana de facturación de cada BO, con montos AXIS e Intcomex.</p>
+              </div>
+              <div className='flex items-center gap-4'>
+                <Leyenda />
+                <label className='flex items-center gap-2 text-xs font-medium text-slate-500' htmlFor='dashboard-mes'>
+                  Mes
+                  <select
+                    id='dashboard-mes'
+                    value={dashboardInvoiceMonth}
+                    onChange={(e) => setDashboardInvoiceMonth(e.target.value)}
+                    className='h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-900'
+                  >
+                    {invoiceMonthOptions.map(option => (
+                      <option key={`dashboard-month-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 dark:text-slate-400">Mes:</span>
-              <select
-                value={dashboardInvoiceMonth}
-                onChange={(e) => setDashboardInvoiceMonth(e.target.value)}
-                className="px-2 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/60"
-              >
-                {invoiceMonthOptions.map(option => (
-                  <option key={`dashboard-month-${option.value}`} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+            <div className='mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2'>
+              <PanelFacturacion
+                titulo={`Por facturar · ${dashboardBilling.monthLabel}`}
+                axis={dashboardBilling.remainingAxis}
+                intcomex={dashboardBilling.remainingIntcomex}
+                bos={dashboardBilling.remainingBos}
+                conMonto={dashboardBilling.remainingWithAmounts}
+                filas={dashboardBilling.remainingRows}
+                maxAxis={dashboardBilling.maxRemainingAxis}
+                maxIntcomex={dashboardBilling.maxRemainingIntcomex}
+                prefijo='restante'
+              />
+              <PanelFacturacion
+                titulo={`Facturado · ${dashboardBilling.monthLabel}`}
+                axis={dashboardBilling.invoicedAxis}
+                intcomex={dashboardBilling.invoicedIntcomex}
+                bos={dashboardBilling.invoicedBos}
+                conMonto={dashboardBilling.invoicedWithAmounts}
+                filas={dashboardBilling.invoicedRows}
+                maxAxis={dashboardBilling.maxInvoicedAxis}
+                maxIntcomex={dashboardBilling.maxInvoicedIntcomex}
+                prefijo='facturado'
+              />
             </div>
+          </section>
+        )}
+
+        <section className={`${tarjeta} p-4`}>
+          <h3 className='text-base font-semibold text-slate-900'>Accesos rápidos</h3>
+          <p className='mt-1 text-xs text-slate-500'>
+            Atajos: <kbd className='font-mono'>Alt+1</kbd> Dashboard · <kbd className='font-mono'>Alt+2</kbd> Cotizador · <kbd className='font-mono'>Alt+3</kbd> Historial · <kbd className='font-mono'>Alt+4</kbd> Stock · <kbd className='font-mono'>/</kbd> buscar producto · <kbd className='font-mono'>?</kbd> todos los atajos
+          </p>
+          <div className='mt-3 flex flex-wrap gap-2'>
+            <button type='button' onClick={() => setCurrentView('cotizador')} className='mq-btn mq-btn-sm mq-btn-primario'>Ir al cotizador</button>
+            <button type='button' onClick={() => setCurrentView('historial')} className='mq-btn mq-btn-sm mq-btn-secundario'>Ver historial</button>
+            {isAdmin && (
+              <>
+                <button type='button' onClick={() => setCurrentView('admin')} className='mq-btn mq-btn-sm mq-btn-secundario'>Listas de precio</button>
+                <button type='button' onClick={() => setCurrentView('ordenes')} className='mq-btn mq-btn-sm mq-btn-secundario'>Órdenes activas</button>
+              </>
+            )}
           </div>
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 dark:border-emerald-500/20 dark:bg-emerald-500/10 p-4">
-              <div className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Estimado restante ({dashboardBilling.monthLabel})</div>
-              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="rounded-lg border border-emerald-200 bg-white/80 dark:border-emerald-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Axis</div>
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.remainingAxis)}</div>
-                </div>
-                <div className="rounded-lg border border-sky-200 bg-white/80 dark:border-sky-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Intcomex</div>
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.remainingIntcomex)}</div>
-                </div>
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                BO: {dashboardBilling.remainingBos} (con monto: {dashboardBilling.remainingWithAmounts})
-              </div>
-              <div className="mt-3 space-y-2">
-                {dashboardBilling.remainingRows.map(row => {
-                  const maxAxis = dashboardBilling.maxRemainingAxis || 1;
-                  const maxIntcomex = dashboardBilling.maxRemainingIntcomex || 1;
-                  const axisPct = row.axis > 0 ? Math.max(4, Math.round((row.axis / maxAxis) * 100)) : 0;
-                  const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
-                  return (
-                    <div key={`remaining-${row.week}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-slate-600 dark:text-slate-400 mb-1">
-                        <span>{row.week}</span>
-                        <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
-                      </div>
-                      <div className="h-2 w-full bg-white dark:bg-slate-800/80 rounded-full overflow-hidden border border-emerald-100 dark:border-emerald-500/20">
-                        <div className="h-full bg-emerald-500" style={{ width: `${axisPct}%` }} />
-                      </div>
-                      <div className="h-2 w-full bg-white dark:bg-slate-800/80 rounded-full overflow-hidden border border-sky-100 dark:border-sky-500/20 mt-1">
-                        <div className="h-full bg-sky-500" style={{ width: `${intcomexPct}%` }} />
-                      </div>
-                      {row.boSummaries.length > 0 && (
-                        <details className="mt-1.5 rounded-md border border-emerald-100 bg-white/80 dark:border-emerald-500/20 dark:bg-slate-900/40 px-2 py-1 max-w-full overflow-hidden">
-                          <summary className="cursor-pointer text-xs text-emerald-800 dark:text-emerald-300 font-medium select-none">
-                            Ver resumen BO ({row.boSummaries.length})
-                          </summary>
-                          <div className="mt-1 max-h-40 overflow-y-auto overflow-x-hidden divide-y divide-emerald-50 dark:divide-emerald-500/10">
-                            {row.boSummaries.map((item) => (
-                              <div key={`remaining-week-detail-${row.week}-${item.bo}`} className="py-1 text-xs text-slate-700 dark:text-slate-300">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium">BO {item.bo || 'N/A'}</span>
-                                  <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(item.total)}</span>
-                                </div>
-                                <div className="text-slate-500 dark:text-slate-400 truncate">{item.customerName}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="rounded-xl border border-blue-100 bg-blue-50/40 dark:border-blue-500/20 dark:bg-blue-500/10 p-4">
-              <div className="text-sm font-semibold text-blue-800 dark:text-blue-300">Ya facturado reportado ({dashboardBilling.monthLabel})</div>
-              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="rounded-lg border border-blue-200 bg-white/80 dark:border-blue-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Axis</div>
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.invoicedAxis)}</div>
-                </div>
-                <div className="rounded-lg border border-cyan-200 bg-white/80 dark:border-cyan-500/30 dark:bg-slate-900/40 p-2">
-                  <div className="text-xs text-slate-500 dark:text-slate-400">Intcomex</div>
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(dashboardBilling.invoicedIntcomex)}</div>
-                </div>
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                BO: {dashboardBilling.invoicedBos} (con monto: {dashboardBilling.invoicedWithAmounts})
-              </div>
-              <div className="mt-3 space-y-2">
-                {dashboardBilling.invoicedRows.map(row => {
-                  const maxAxis = dashboardBilling.maxInvoicedAxis || 1;
-                  const maxIntcomex = dashboardBilling.maxInvoicedIntcomex || 1;
-                  const axisPct = row.axis > 0 ? Math.max(4, Math.round((row.axis / maxAxis) * 100)) : 0;
-                  const intcomexPct = row.intcomex > 0 ? Math.max(4, Math.round((row.intcomex / maxIntcomex) * 100)) : 0;
-                  return (
-                    <div key={`invoiced-${row.week}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-slate-600 dark:text-slate-400 mb-1">
-                        <span>{row.week}</span>
-                        <span>A: {formatCurrency(row.axis)} · I: {formatCurrency(row.intcomex)}</span>
-                      </div>
-                      <div className="h-2 w-full bg-white dark:bg-slate-800/80 rounded-full overflow-hidden border border-blue-100 dark:border-blue-500/20">
-                        <div className="h-full bg-blue-500" style={{ width: `${axisPct}%` }} />
-                      </div>
-                      <div className="h-2 w-full bg-white dark:bg-slate-800/80 rounded-full overflow-hidden border border-cyan-100 dark:border-cyan-500/20 mt-1">
-                        <div className="h-full bg-cyan-500" style={{ width: `${intcomexPct}%` }} />
-                      </div>
-                      {row.boSummaries.length > 0 && (
-                        <details className="mt-1.5 rounded-md border border-blue-100 bg-white/80 dark:border-blue-500/20 dark:bg-slate-900/40 px-2 py-1 max-w-full overflow-hidden">
-                          <summary className="cursor-pointer text-xs text-blue-800 dark:text-blue-300 font-medium select-none">
-                            Ver resumen BO ({row.boSummaries.length})
-                          </summary>
-                          <div className="mt-1 max-h-40 overflow-y-auto overflow-x-hidden divide-y divide-blue-50 dark:divide-blue-500/10">
-                            {row.boSummaries.map((item) => (
-                              <div key={`invoiced-week-detail-${row.week}-${item.bo}`} className="py-1 text-xs text-slate-700 dark:text-slate-300">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium">BO {item.bo || 'N/A'}</span>
-                                  <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(item.total)}</span>
-                                </div>
-                                <div className="text-slate-500 dark:text-slate-400 truncate">{item.customerName}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      <div className="glass-card rounded-2xl border border-white/70 dark:border-white/10 p-4 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.4)]">
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Accesos rápidos</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Atajos: Alt+1 Dashboard · Alt+2 Cotizador · Alt+3 Historial · Alt+4 Stock · / buscar producto · ? todos los atajos.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button onClick={() => setCurrentView('cotizador')} className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">Ir a cotizador</button>
-          <button onClick={() => setCurrentView('historial')} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Ver historial</button>
-          {isAdmin && (
-            <>
-              <button onClick={() => setCurrentView('admin')} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Lista de precios</button>
-              <button onClick={() => setCurrentView('ordenes')} className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Órdenes activas</button>
-            </>
-          )}
-        </div>
+        </section>
       </div>
     </div>
   );

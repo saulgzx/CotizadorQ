@@ -38,17 +38,17 @@ export default function AtajosAyuda({ abierto, onCerrar, esAdmin }) {
   const grupos = [...new Set(visibles.map((a) => a.grupo))];
 
   return (
-    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-black/40 p-4 pt-[10vh]' onClick={onCerrar}>
+    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 pt-[10vh]' onClick={onCerrar}>
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='atajos-titulo'
-        className='max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-2xl animate-scale-in dark:bg-slate-900'
+        className='max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-float animate-scale-in dark:bg-slate-900'
         onClick={(e) => e.stopPropagation()}
       >
         <div className='mb-4 flex items-center justify-between'>
           <h2 id='atajos-titulo' className='text-lg font-semibold text-slate-900'>Atajos de teclado</h2>
-          <button type='button' onClick={onCerrar} className='rounded px-2 py-1 text-slate-500 hover:bg-slate-100' aria-label='Cerrar ayuda'>
+          <button type='button' onClick={onCerrar} className='grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100' aria-label='Cerrar ayuda'>
             ✕
           </button>
         </div>

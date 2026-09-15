@@ -87,7 +87,7 @@ export function Toaster() {
                 aviso.accion.onClick();
                 cerrarAviso(aviso.id);
               }}
-              className='shrink-0 rounded-md px-2 py-0.5 font-semibold text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-slate-800'
+              className='shrink-0 rounded-md px-2 py-0.5 font-semibold text-slate-900 underline-offset-2 hover:underline'
             >
               {aviso.accion.label}
             </button>
@@ -95,7 +95,7 @@ export function Toaster() {
           <button
             type='button'
             onClick={() => cerrarAviso(aviso.id)}
-            className='shrink-0 text-slate-400 hover:text-slate-600'
+            className='grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800'
             aria-label='Cerrar aviso'
           >
             ✕

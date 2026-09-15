@@ -51,9 +51,9 @@ const pct = (valor) => (valor === null || valor === undefined ? '—' : `${valor
 
 // Mismo semaforo que el cotizador: objetivo y piso por marca (Ajustes).
 const TONO = {
-  ok: 'text-emerald-600 dark:text-emerald-400',
-  bajo_objetivo: 'text-amber-600 dark:text-amber-400',
-  bajo_piso: 'text-rose-600 dark:text-rose-400'
+  ok: 'text-emerald-700 dark:text-emerald-400',
+  bajo_objetivo: 'text-amber-700 dark:text-amber-400',
+  bajo_piso: 'text-rose-700 dark:text-rose-400'
 };
 const tonoMargen = (valorPct, origen) => TONO[estadoMargen(valorPct, origen || 'QNAP')] || 'text-slate-400';
 
@@ -159,7 +159,7 @@ const BuscadorProductos = ({ productos, onAgregar }) => {
                 onClick={() => agregar(p)}
                 onMouseEnter={() => setActivo(i)}
                 className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm ${
-                  i === activo ? 'bg-blue-50 dark:bg-slate-800' : ''
+                  i === activo ? 'bg-slate-100' : ''
                 }`}
               >
                 <span className='min-w-0'>
@@ -209,9 +209,9 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
   };
 
   return (
-    <div className='fixed inset-0 z-[60] flex justify-end bg-black/30' onClick={onCerrar}>
+    <div className='fixed inset-0 z-[60] flex justify-end bg-slate-950/40 backdrop-blur-[2px]' onClick={onCerrar}>
       <aside
-        className='flex h-full w-full max-w-md flex-col bg-white shadow-2xl dark:bg-slate-900'
+        className='flex h-full w-full max-w-md flex-col bg-white shadow-float dark:bg-slate-900'
         onClick={(e) => e.stopPropagation()}
         aria-label='Versiones anteriores'
       >
@@ -220,7 +220,7 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
             <h3 className='font-semibold text-slate-800'>Versiones anteriores</h3>
             <p className='text-xs text-slate-500'>Vigente: v{versionActual}. Cada guardado conserva la versión previa.</p>
           </div>
-          <button type='button' onClick={onCerrar} className='rounded px-2 py-1 text-slate-500 hover:bg-slate-100' aria-label='Cerrar'>
+          <button type='button' onClick={onCerrar} className='grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100' aria-label='Cerrar'>
             ✕
           </button>
         </div>
@@ -246,7 +246,7 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
                   type='button'
                   onClick={() => ver(v.version)}
                   disabled={cargando}
-                  className='mt-2 text-xs font-medium text-blue-600 hover:underline disabled:opacity-50'
+                  className='mt-2 mq-btn mq-btn-xs mq-btn-fantasma text-slate-900'
                 >
                   {cargando ? 'Cargando…' : 'Ver detalle'}
                 </button>
@@ -263,7 +263,7 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
                     <button
                       type='button'
                       onClick={() => onCargar(detalle)}
-                      className='mt-2 w-full rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700'
+                      className='mt-2 w-full mq-btn mq-btn-sm mq-btn-primario'
                     >
                       Cargar v{v.version} en el editor
                     </button>
@@ -563,7 +563,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
     <div className='fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-950' role='dialog' aria-modal='true' aria-label='Editor de cotización'>
       {/* Barra superior */}
       <header className='flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900'>
-        <button type='button' onClick={cerrar} className='rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100' aria-label='Cerrar editor'>
+        <button type='button' onClick={cerrar} className='grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100' aria-label='Cerrar editor'>
           ←
         </button>
         <div className='min-w-[180px] flex-1'>
@@ -595,7 +595,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
             <button
               type='button'
               onClick={() => setVerVersiones(true)}
-              className='rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600'
+              className='mq-btn mq-btn-sm mq-btn-secundario'
             >
               Versiones
             </button>
@@ -608,7 +608,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
       ) : errorCarga ? (
         <div className='flex flex-1 flex-col items-center justify-center gap-3 text-rose-600'>
           {errorCarga}
-          <button type='button' onClick={cargar} className='rounded bg-slate-800 px-3 py-1.5 text-sm text-white'>
+          <button type='button' onClick={cargar} className='mq-btn mq-btn-sm mq-btn-primario'>
             Reintentar
           </button>
         </div>
@@ -618,7 +618,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
             {conflicto && (
               <div className='flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200'>
                 <span>Otra sesión guardó esta cotización mientras la editabas. Tus cambios no se guardaron.</span>
-                <button type='button' onClick={cargar} className='rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700'>
+                <button type='button' onClick={cargar} className='mq-btn mq-btn-xs mq-btn-primario'>
                   Recargar la versión vigente
                 </button>
               </div>
@@ -673,7 +673,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                   <button
                     type='button'
                     onClick={aplicarGpATodas}
-                    className='rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600'
+                    className='mq-btn mq-btn-secundario'
                   >
                     Aplicar
                   </button>
@@ -701,14 +701,14 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                 <button
                   type='button'
                   onClick={actualizarCostosCatalogo}
-                  className='rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600'
+                  className='mq-btn mq-btn-secundario'
                   title='Trae el costo disty (y el rebate de la categoría de partner) vigente del catálogo'
                 >
                   Actualizar costos del catálogo
                 </button>
               </div>
               {aviso && (
-                <div className='flex items-center justify-between border-b border-slate-100 bg-blue-50 px-4 py-2 text-xs text-blue-800 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-200'>
+                <div className='flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-200'>
                   {aviso}
                   <button type='button' onClick={() => setAviso('')} aria-label='Ocultar aviso'>
                     ✕
@@ -842,7 +842,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                             <button
                               type='button'
                               onClick={() => setLineas((prev) => prev.filter((x) => x.key !== l.key))}
-                              className='rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600'
+                              className='grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600'
                               aria-label={`Quitar ${l.sku || l.mpn}`}
                               title='Quitar línea'
                             >
@@ -926,7 +926,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                   type='button'
                   onClick={() => guardar()}
                   disabled={guardando || !sucio}
-                  className='rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
+                  className='mq-btn mq-btn-lg mq-btn-primario w-full'
                 >
                   {guardando ? 'Guardando…' : sucio ? 'Guardar cambios' : 'Sin cambios'}
                 </button>
@@ -934,14 +934,14 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                   type='button'
                   onClick={() => guardar({ conPdf: true })}
                   disabled={guardando || !sucio}
-                  className='rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50'
+                  className='mq-btn mq-btn-secundario w-full'
                 >
                   Guardar y descargar PDF
                 </button>
                 <button
                   type='button'
                   onClick={cerrar}
-                  className='rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100'
+                  className='mq-btn mq-btn-fantasma w-full'
                 >
                   {sucio ? 'Descartar cambios' : 'Cerrar'}
                 </button>
@@ -962,7 +962,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
             type='button'
             onClick={() => guardar()}
             disabled={guardando || !sucio}
-            className='rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50'
+            className='mq-btn mq-btn-primario'
           >
             {guardando ? 'Guardando…' : 'Guardar'}
           </button>

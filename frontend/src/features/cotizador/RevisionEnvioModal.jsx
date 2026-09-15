@@ -17,12 +17,12 @@ export default function RevisionEnvioModal({ abierto, problemas, onVolver, onGen
   ].filter((g) => (problemas[g.clave] || []).length > 0);
 
   return (
-    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-black/40 p-4 pt-[10vh]' onClick={onVolver}>
+    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 pt-[10vh]' onClick={onVolver}>
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='revision-titulo'
-        className='max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-2xl animate-scale-in dark:bg-slate-900'
+        className='max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-float animate-scale-in dark:bg-slate-900'
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && onVolver()}
       >
@@ -44,14 +44,14 @@ export default function RevisionEnvioModal({ abierto, problemas, onVolver, onGen
           ))}
         </div>
         <div className='mt-5 flex justify-end gap-2'>
-          <button type='button' onClick={onVolver} className='rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100'>
+          <button type='button' onClick={onVolver} className='mq-btn mq-btn-fantasma'>
             Volver y corregir
           </button>
           <button
             ref={generarRef}
             type='button'
             onClick={onGenerar}
-            className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
+            className='mq-btn mq-btn-primario'
           >
             Generar igual
           </button>

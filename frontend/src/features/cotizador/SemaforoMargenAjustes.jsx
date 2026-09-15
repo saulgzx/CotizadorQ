@@ -76,22 +76,22 @@ export default function SemaforoMargenAjustes() {
 
   return (
     <form
-      className='flex w-full flex-wrap items-end gap-x-4 gap-y-2 border-t border-slate-200 pt-2 text-xs text-gray-500 dark:border-slate-700'
+      className='flex w-full flex-wrap items-end gap-x-5 gap-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500'
       onSubmit={(e) => {
         e.preventDefault();
         guardar();
       }}
     >
       <div className='basis-full'>
-        <span className='font-semibold text-gray-700'>Semáforo de margen</span>
-        <span className='ml-2 text-gray-500'>
+        <span className='font-semibold text-slate-700'>Semáforo de margen</span>
+        <span className='ml-2 text-slate-500'>
           Bajo el mínimo aceptable la línea sale en rojo y pide revisión; entre mínimo y objetivo, en amarillo.
         </span>
       </div>
       {MARCAS.map((marca) => (
         <fieldset key={marca} className='flex items-end gap-2'>
           <legend className='sr-only'>{marca}</legend>
-          <span className='pb-1 font-semibold text-gray-700'>{marca}</span>
+          <span className='pb-1 font-semibold text-slate-700'>{marca}</span>
           <label className='flex flex-col gap-0.5' htmlFor={`margen-piso-${marca}`}>
             Mínimo aceptable %
             <input
@@ -124,7 +124,7 @@ export default function SemaforoMargenAjustes() {
         <button
           type='submit'
           disabled={!sucio || Boolean(error)}
-          className='rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900'
+          className='mq-btn mq-btn-sm mq-btn-primario'
         >
           Guardar cambios
         </button>
@@ -132,7 +132,7 @@ export default function SemaforoMargenAjustes() {
           <button
             type='button'
             onClick={() => setBorrador(aTexto(config))}
-            className='rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+            className='mq-btn mq-btn-sm mq-btn-fantasma'
           >
             Descartar
           </button>
@@ -141,7 +141,7 @@ export default function SemaforoMargenAjustes() {
           <button
             type='button'
             onClick={() => setBorrador(aTexto(MARGEN_DEFAULTS))}
-            className='rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+            className='mq-btn mq-btn-sm mq-btn-fantasma'
             title='Carga 15 % QNAP / 13 % AXIS con mínimo 10 %; luego guarda'
           >
             Valores por defecto

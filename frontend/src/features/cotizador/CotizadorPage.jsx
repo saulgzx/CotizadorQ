@@ -72,6 +72,7 @@ import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
 import Resaltado from '../ui/Resaltado';
 import Icono from '../ui/Icono';
+import EncabezadoPagina from '../ui/EncabezadoPagina';
 import { EstadoVacio, FilasEsqueleto, ListaEsqueleto, TarjetasEsqueleto } from '../ui/Esqueleto';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
@@ -232,8 +233,8 @@ function CommandPalette({ open, onClose, navItems, currentView, onNavigate, prod
 
   return (
     <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Buscador rápido">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div className="relative mx-auto mt-[12vh] w-[640px] max-w-[92vw] rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/70 dark:border-slate-700/60 overflow-hidden animate-scale-in">
+      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
+      <div className="relative mx-auto mt-[12vh] w-[640px] max-w-[92vw] rounded-2xl bg-white dark:bg-slate-900 shadow-float border border-slate-200/70 dark:border-slate-700/60 overflow-hidden animate-scale-in">
         <div className="flex items-center gap-2 px-4 border-b border-slate-100 dark:border-slate-800">
           <NavIcon name="search" className="w-4 h-4 text-slate-400 shrink-0" />
           <input
@@ -244,7 +245,7 @@ function CommandPalette({ open, onClose, navItems, currentView, onNavigate, prod
             placeholder="Buscar vistas, productos o acciones…"
             className="flex-1 py-3.5 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 border-0"
           />
-          <kbd className="text-xs px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-400 shrink-0">Esc</kbd>
+          <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300 text-slate-500 shrink-0">Esc</kbd>
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {results.length === 0 ? (
@@ -255,7 +256,7 @@ function CommandPalette({ open, onClose, navItems, currentView, onNavigate, prod
                 key={r.id}
                 onMouseEnter={() => setActiveIndex(i)}
                 onClick={() => { r.run(); onClose(); }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-left transition ${i === activeIndex ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-700 dark:text-slate-300'}`}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-left transition ${i === activeIndex ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-700'}`}
               >
                 <NavIcon name={r.icon} className="w-4 h-4 shrink-0" />
                 <span className="flex-1 truncate">{r.label}</span>
@@ -1455,11 +1456,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const nuevoUsuarioFormRef = useRef(null);
 
   const fieldLabelClass = isClient
-    ? 'flex flex-col gap-1 text-xs text-gray-500'
-    : 'flex flex-col gap-1 text-xs text-gray-500';
+    ? 'flex flex-col gap-1 text-xs text-slate-500'
+    : 'flex flex-col gap-1 text-xs text-slate-500';
   const fieldInputClass = isClient
-    ? 'px-3 py-2 border rounded text-sm text-gray-800'
-    : 'px-2 py-1 border rounded text-xs text-gray-800';
+    ? 'px-3 py-2 border rounded text-sm text-slate-800'
+    : 'px-2 py-1 border rounded text-xs text-slate-800';
 
   const usuariosPorEmpresa = useMemo(() => {
     const grouped = usuarios.reduce((acc, u) => {
@@ -2404,7 +2405,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       syncCotizacionWithCatalogPrices(refreshedCatalog);
     } catch (error) {
       applyPartnerCategoryToAxis(previousCategory);
-      notify(error.message || 'No se pudo actualizar la categoria de partner');
+      notify(error.message || 'No se pudo actualizar la categoría de partner');
     } finally {
       setUpdatingCotizacionPartner(false);
     }
@@ -2766,7 +2767,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setMissingBos(missingBos);
       setShowMissingBosModal(missingBos.length > 0);
     } catch (error) {
-      setOsoError(error.message || 'Error cargando ordenes');
+      setOsoError(error.message || 'Error cargando órdenes');
     } finally {
       setOsoLoading(false);
     }
@@ -3740,8 +3741,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const ids = Array.from(selectedHistorialIds);
     if (ids.length === 0) return;
     const msg = ids.length === 1
-      ? 'Eliminar 1 cotizacion guardada?'
-      : `Eliminar ${ids.length} cotizaciones guardadas?`;
+      ? '¿Eliminar 1 cotización guardada?'
+      : `¿Eliminar ${ids.length} cotizaciones guardadas?`;
     if (!confirm(msg)) return;
     try {
       setSaving(true);
@@ -4437,8 +4438,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       : (status === 'Parcial' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700');
     const sAndDStatus = mode === 'ordenes' ? getSAndDStatus(order.bo) : null;
     const sAndDClass = sAndDStatus === 'aplicado'
-      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-      : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : 'mq-btn-secundario';
     const etaBadge = (() => {
       if (!order.etaEstimated) return null;
       const eta = new Date(order.etaEstimated);
@@ -4448,7 +4449,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const etaUtc = Date.UTC(eta.getFullYear(), eta.getMonth(), eta.getDate());
       const diffDays = Math.round((etaUtc - todayUtc) / 86400000);
       if (diffDays < 0) return { label: `ETA vencido: ${order.etaEstimated}`, className: 'bg-rose-100 text-rose-700' };
-      if (diffDays <= 7) return { label: `ETA = 7 días: ${order.etaEstimated}`, className: 'bg-amber-100 text-amber-700' };
+      if (diffDays <= 7) return { label: `ETA en ≤ 7 días: ${order.etaEstimated}`, className: 'bg-amber-100 text-amber-700' };
       return { label: `ETA estimado: ${order.etaEstimated}`, className: 'bg-emerald-100 text-emerald-700' };
     })();
     const progress = totalOrderQty > 0 ? Math.min((totalShippedQty / totalOrderQty) * 100, 100) : 0;
@@ -4495,12 +4496,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return (
       <div
         key={order.bo}
-        className={`border rounded-2xl bg-white shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] ${
+        className={`relative overflow-hidden border rounded-2xl bg-white shadow-card ${
           isPendingPurchase
-            ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/40'
+            ? 'border-slate-200 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-rose-500'
             : missingInvoiceMonth
-              ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/30'
-              : (isEmbarcador ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200')
+              ? 'border-slate-200 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-rose-500'
+              : (isEmbarcador ? 'border-slate-200 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-amber-400' : 'border-slate-200')
         }`}
       >
         <div className="px-4 py-3 border-b border-slate-100">
@@ -4544,7 +4545,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     setExpandedBo(prev => (prev === order.bo ? null : order.bo));
                   }
                 }}
-                className="flex flex-wrap items-center gap-3 text-xs text-gray-600 flex-1 min-w-0 text-left cursor-pointer"
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 basis-full sm:basis-auto flex-1 min-w-0 text-left cursor-pointer"
               >
                 <button
                   onClick={(e) => {
@@ -4552,7 +4553,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     e.stopPropagation();
                     navigator.clipboard?.writeText?.(String(order.bo || ''));
                   }}
-                  className="text-sm font-semibold text-slate-900 whitespace-nowrap hover:text-blue-700"
+                  className="font-mono text-sm font-semibold text-slate-900 whitespace-nowrap hover:underline"
                   title="Copiar BO"
                   type="button"
                 >
@@ -4566,10 +4567,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   {etaBadge.label}
                 </span>
               )}
-              <span className="whitespace-nowrap text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">% {order.allocPct ?? 0}</span>
+              <span className="whitespace-nowrap text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full tabular-nums">{order.allocPct ?? 0}% asignado</span>
               <button
                 onClick={() => togglePinnedBo(order.bo)}
-                className={`text-xs px-2 py-1 rounded-full ${pinned ? 'text-amber-700 bg-amber-100' : 'text-slate-700 bg-slate-100'}`}
+                className={`mq-btn mq-btn-xs ${pinned ? 'bg-amber-50 text-amber-800 border-amber-200' : 'mq-btn-fantasma'}`}
               >
                 {pinned ? 'Quitar pin' : 'Fijar'}
               </button>
@@ -4577,15 +4578,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <button
                   onClick={() => saveBoMeta(order)}
                   disabled={(!isDirty && !isAxisDirty(order) && !isIntcomexDirty(order)) || boSaving[order.bo]}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order) || isIntcomexDirty(order)) ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
+                  className={`mq-btn mq-btn-xs ${(isDirty || isAxisDirty(order) || isIntcomexDirty(order)) ? 'bg-slate-900 text-white hover:bg-slate-800' : 'mq-btn-secundario'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
                 >
-                  {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
+                  {boSaving[order.bo] ? 'Guardando…' : 'Guardar'}
                 </button>
               )}
               {mode === 'ordenes' && (
                 <button
                   onClick={() => handleSAndDClick(order)}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${sAndDClass}`}
+                  className={`mq-btn mq-btn-xs ${sAndDClass}`}
                 >
                   {sAndDStatus === 'aplicado' ? 'S&D Aplicado' : 'S&D Pendiente'}
                 </button>
@@ -4594,14 +4595,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <button
                   onClick={() => savePurchaseMeta(order.bo)}
                   disabled={!isPurchaseDirty}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isPurchaseDirty ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400'}`}
+                  className={`mq-btn mq-btn-xs ${isPurchaseDirty ? 'bg-slate-900 text-white hover:bg-slate-800' : 'mq-btn-secundario'}`}
                 >
                   Guardar cambios
                 </button>
               )}
               <button
                 onClick={() => setExpandedBo(prev => (prev === order.bo ? null : order.bo))}
-                className="text-xs text-blue-600 whitespace-nowrap hover:text-blue-700"
+                className="mq-btn mq-btn-xs mq-btn-fantasma"
               >
                 {expandedBo === order.bo ? 'Ocultar' : 'Ver detalle'}
               </button>
@@ -4613,7 +4614,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={projectValue}
                     onChange={(e) => updateBoDraft(order.bo, { projectName: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-56 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-56 bg-white"
                     placeholder="Nombre del proyecto"
                   />
                 </label>
@@ -4622,7 +4623,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={poAxisValue}
                     onChange={(e) => updateBoDraft(order.bo, { poAxis: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                     placeholder="PO Axis"
                   />
                 </label>
@@ -4631,7 +4632,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={invoiceMonthValue}
                     onChange={(e) => updateBoDraft(order.bo, { estimatedInvoiceMonth: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-44 bg-white"
                   >
                     <option value="">Sin mes</option>
                     {invoiceMonthOptions.map(option => (
@@ -4643,13 +4644,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </label>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-500">Semana</span>
-                  <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5">
+                  <div className="inline-flex items-center rounded-lg border border-slate-300 bg-white p-0.5">
                     {[1, 2, 3, 4].map(week => (
                       <button
                         key={`${order.bo}-week-${week}`}
                         type="button"
                         onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: String(week) })}
-                        className={`px-2 py-0.5 text-xs rounded-full transition ${invoiceWeekValue === String(week) ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                        className={`min-w-[26px] h-6 px-1.5 text-xs font-medium rounded-md transition ${invoiceWeekValue === String(week) ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
                       >
                         {week}
                       </button>
@@ -4657,7 +4658,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       type="button"
                       onClick={() => updateBoDraft(order.bo, { estimatedInvoiceWeek: '' })}
-                      className={`px-2 py-0.5 text-xs rounded-full transition ${invoiceWeekValue === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
+                      className={`min-w-[26px] h-6 px-1.5 text-xs font-medium rounded-md transition ${invoiceWeekValue === '' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200'}`}
                       title="Sin semana"
                     >
                       -
@@ -4672,7 +4673,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={purchaseStatus}
                     onChange={(e) => updatePurchaseDraft(order.bo, { purchaseStatus: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                   >
                     <option value="pendiente">Pendiente compra</option>
                     <option value="comprado">Comprado</option>
@@ -4683,7 +4684,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={purchaseSo}
                     onChange={(e) => updatePurchaseDraft(order.bo, { purchaseSo: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                     placeholder="SO"
                   />
                 </label>
@@ -4692,7 +4693,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={purchasePoAxis}
                     onChange={(e) => updatePurchaseDraft(order.bo, { poAxis: e.target.value })}
-                    className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                    className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                     placeholder="PO Axis"
                   />
                 </label>
@@ -4703,7 +4704,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={purchaseDispatch}
                         onChange={(e) => updatePurchaseDraft(order.bo, { purchaseDispatch: e.target.value })}
-                        className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                        className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                       >
                         <option value="">Seleccionar</option>
                         <option value="xus">XUS</option>
@@ -4715,7 +4716,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={purchaseShipping}
                         onChange={(e) => updatePurchaseDraft(order.bo, { purchaseShipping: e.target.value })}
-                        className="px-2 py-1 border border-slate-200 rounded-full text-xs text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-blue-200 bg-slate-50"
+                        className="h-8 px-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 w-40 bg-white"
                       >
                         <option value="">Seleccionar</option>
                         <option value="aerea">Aérea</option>
@@ -4730,20 +4731,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </div>
         <div className="px-4 pb-3">
           <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${progress}%` }}></div>
+            <div className="h-full bg-slate-700 rounded-full" style={{ width: `${progress}%` }}></div>
           </div>
         </div>
         {expandedBo === order.bo && (
           <div className="px-4 pb-4">
-            <div className="text-xs text-gray-500 mb-2">
+            <div className="text-xs text-slate-500 mb-2">
               Orden Cliente: {order.customerPO || 'N/A'}
             </div>
-            <div className="text-xs text-gray-500 mb-2">
+            <div className="text-xs text-slate-500 mb-2">
               Planned Ship Date: {order.plannedShipDate || 'N/A'}
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-2 py-2 text-left">MPN</th>
                     <th className="px-2 py-2 text-left">SKU</th>
@@ -4768,7 +4769,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           value={getAxisMontoValue(order.bo, line)}
                           onChange={(e) => updateAxisDraft(order.bo, getAxisLineKey(line), e.target.value)}
                           disabled={!canEditAxis}
-                          className={`w-24 px-2 py-1 border border-slate-200 rounded text-xs text-right ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
+                          className={`w-24 h-8 px-2 border border-slate-300 rounded-md text-sm text-right tabular-nums ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
                           placeholder="0"
                         />
                       </td>
@@ -4778,7 +4779,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           value={getIntcomexMontoValue(order.bo, line)}
                           onChange={(e) => updateIntcomexDraft(order.bo, getAxisLineKey(line), e.target.value)}
                           disabled={!canEditAxis}
-                          className={`w-24 px-2 py-1 border border-slate-200 rounded text-xs text-right ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
+                          className={`w-24 h-8 px-2 border border-slate-300 rounded-md text-sm text-right tabular-nums ${canEditAxis ? '' : 'bg-slate-50 text-slate-400'}`}
                           placeholder="0"
                         />
                       </td>
@@ -4982,96 +4983,102 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Cargando...</div>
+      <div className="min-h-screen app-bg flex flex-col items-center justify-center gap-4" role="status" aria-label="Cargando MyQuote">
+        <img src="/brand/myquote-symbol-web.svg" alt="" className="h-12 w-12 animate-pulse dark:invert" />
+        <span className="text-sm text-slate-500">Cargando…</span>
       </div>
     );
   }
 
   // LOGIN
   if (!isLoggedIn) {
+    const puntosLogin = [
+      ['calc', 'Cotiza AXIS y QNAP con precio, margen y plazo en la misma línea.'],
+      ['box', 'Stock disponible y ETA leídos del maestro en cada búsqueda.'],
+      ['clock', 'Historial con versiones, estados y PDF listo para enviar.']
+    ];
+    const campoLogin = "h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-400";
     return (
-      <div className="min-h-screen app-bg relative overflow-hidden">
-        <div className="absolute -top-32 -left-32 h-[420px] w-[420px] rounded-full bg-cyan-400/20 blur-3xl" />
-        <div className="absolute -bottom-40 right-0 h-[520px] w-[520px] rounded-full bg-amber-300/20 blur-3xl" />
-        <div className="hidden dark:block absolute inset-0 bg-[radial-gradient(circle_at_top,#1f2a44,transparent_55%)] opacity-60" />
+      <div className="min-h-screen app-bg">
         <div className="absolute top-4 right-4 z-20">
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
-        <div className="relative z-10 min-h-screen flex items-center justify-center p-4 sm:p-6">
-          <div className="view-enter w-full max-w-5xl grid md:grid-cols-[1.1fr_0.9fr] rounded-[28px] overflow-hidden border border-slate-200/80 dark:border-white/15 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.9)]">
-            <div className="hidden md:flex flex-col justify-between p-10 text-slate-900 dark:text-white bg-white/40 dark:bg-white/5">
-              <div>
-                {/* Logo MyQuote negro; en modo oscuro se invierte a blanco */}
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-16 w-auto dark:invert" />
-                <p className="text-sm text-slate-500 dark:text-blue-200/70 mt-5">Cotización Axis / Qnap - Intcomex</p>
+        <div className="min-h-screen flex items-center justify-center px-4 py-10">
+          <div className="view-enter w-full max-w-4xl grid md:grid-cols-[1.05fr_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-float">
+            <div className="hidden md:flex flex-col justify-between gap-10 p-10 bg-[#0F1216] text-white">
+              <div className="space-y-5">
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-9 w-auto invert" />
+                <p className="text-2xl leading-8 font-bold tracking-tight text-white">
+                  Cotizaciones de Axis y QNAP, listas para enviar.
+                </p>
               </div>
-              <div className="space-y-3 text-sm text-slate-600 dark:text-blue-100/70">
-                <div className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                  <span>Gestiona cotizaciones con trazabilidad y control comercial.</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                  <span>Centraliza productos, márgenes y estados en un solo flujo.</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                  <span>Exporta reportes y comparte propuestas más rápido.</span>
-                </div>
-              </div>
+              <ul className="space-y-4">
+                {puntosLogin.map(([icono, texto]) => (
+                  <li key={icono} className="flex items-start gap-3 text-sm leading-5 text-white/75">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-white">
+                      <NavIcon name={icono} className="h-4 w-4" />
+                    </span>
+                    <span className="pt-1.5">{texto}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-white/50">Intcomex Chile · Product Management</p>
             </div>
-            <div className="p-6 sm:p-10 bg-white/60 dark:bg-white/10 backdrop-blur-2xl">
-              <div className="flex flex-col items-center gap-2 text-center mb-8">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-12 w-auto mb-2 md:hidden dark:invert" />
-                <p className="text-slate-600 dark:text-blue-100/80 text-sm">Cotización Axis / Qnap - Intcomex</p>
-                <p className="text-slate-500 dark:text-blue-100/60 text-xs">Ingrese sus credenciales</p>
+
+            <form
+              className="flex flex-col justify-center gap-6 p-6 sm:p-10"
+              onSubmit={e => { e.preventDefault(); handleLogin(); }}
+            >
+              <div className="space-y-1">
+                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-8 w-auto mb-5 md:hidden dark:invert" />
+                <h1 className="text-2xl leading-8 font-bold tracking-tight text-slate-900">Ingresar</h1>
+                <p className="text-sm text-slate-500">Usa el usuario y la contraseña que te entregó Intcomex.</p>
               </div>
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-slate-600 dark:text-blue-100/80 mb-1">Usuario</label>
+                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-usuario">
+                  Usuario
                   <input
+                    id="login-usuario"
                     type="text"
+                    autoComplete="username"
                     value={usuario}
                     onChange={e => setUsuario(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    className="w-full px-4 py-3 bg-white/70 dark:bg-white/10 border border-slate-300/70 dark:border-white/20 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 dark:focus:ring-cyan-400/50 focus:border-cyan-500/50 transition"
-                    placeholder="Usuario"
+                    className={campoLogin}
+                    placeholder="nombre.apellido"
                   />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-600 dark:text-blue-100/80 mb-1">Contraseña</label>
-                  <div className="relative">
+                </label>
+                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-password">
+                  Contraseña
+                  <span className="relative">
                     <input
+                      id="login-password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      className="w-full px-4 py-3 bg-white/70 dark:bg-white/10 border border-slate-300/70 dark:border-white/20 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 dark:focus:ring-cyan-400/50 focus:border-cyan-500/50 transition"
-                      placeholder="Contraseña"
+                      className={`${campoLogin} pr-20`}
+                      placeholder="••••••••"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800 dark:text-blue-200/70 dark:hover:text-white text-sm"
+                      aria-pressed={showPassword}
+                      className="mq-btn mq-btn-xs mq-btn-fantasma absolute right-1.5 top-1/2 -translate-y-1/2"
                     >
                       {showPassword ? 'Ocultar' : 'Mostrar'}
                     </button>
-                  </div>
-                </div>
+                  </span>
+                </label>
                 {loginError && (
-                  <div className="p-3 bg-red-500/10 dark:bg-red-500/20 border border-red-500/30 rounded-xl text-red-600 dark:text-red-200 text-sm text-center animate-fade-in">
+                  <p role="alert" className="rounded-[10px] border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
                     {loginError}
-                  </div>
+                  </p>
                 )}
-                <button
-                  onClick={handleLogin}
-                  className="mq-btn mq-btn-lg mq-btn-primario w-full"
-                >
-                  Ingresar
-                </button>
               </div>
-            </div>
+              <button type="submit" className="mq-btn mq-btn-lg mq-btn-primario w-full">
+                Ingresar
+              </button>
+            </form>
           </div>
         </div>
       </div>
@@ -5082,7 +5089,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   if (currentView === 'cliente') {
     const fecha = new Date().toLocaleDateString('es-CL', { year: 'numeric', month: 'long', day: 'numeric' });
     return (
-      <div className="min-h-screen bg-gray-100 p-4 print:bg-white">
+      <div className="min-h-screen bg-slate-100 p-4 print:bg-white">
         <div data-pdf-root="1" className="max-w-4xl mx-auto bg-white shadow-xl print:shadow-none rounded-lg overflow-hidden print-area">
           <div className="p-4 sm:p-8 border-b bg-white">
             <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -5095,12 +5102,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   style={{ width: '208px', height: '56px', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
                 />
               </div>
-              <div className="text-right text-xs text-gray-500">
-                <div><span className="font-semibold text-gray-700">Fecha:</span> {fecha}</div>
+              <div className="text-right text-xs text-slate-500">
+                <div><span className="font-semibold text-slate-700">Fecha:</span> {fecha}</div>
               </div>
             </div>
           </div>
-          <div className="p-4 bg-gray-50 border-b grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm break-words">
+          <div className="p-4 bg-slate-50 border-b grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm break-words">
             <div><b>Nombre:</b> {cliente.nombre || 'N/A'}</div>
             <div><b>Empresa:</b> {cliente.empresa || 'N/A'}</div>
             <div><b>PID:</b> {cliente.pid || 'N/A'}</div>
@@ -5108,7 +5115,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
           <div className="p-4 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-100">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-2 py-2 text-left">Marca</th>
                   <th className="px-2 py-2 text-center">Cant.</th>
@@ -5124,7 +5131,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 {cotizacion.map((item, i) => {
                   const pu = calcularPrecioClienteItem(item);
                   return (
-                    <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                       <td className="px-2 py-2">{item.marca}</td>
                       <td className="px-2 py-2 text-center">{item.cant}</td>
                       <td className="px-2 py-2 font-mono text-xs">{item.sku}</td>
@@ -5145,8 +5152,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </div>
           </div>
-          <div className="p-4 bg-gray-50 border-t text-xs text-gray-600">
-            <h3 className="font-bold text-gray-800 mb-2">OBSERVACIONES Y CONDICIONES:</h3>
+          <div className="p-4 bg-slate-50 border-t text-xs text-slate-600">
+            <h3 className="font-bold text-slate-800 mb-2">OBSERVACIONES Y CONDICIONES:</h3>
             <ol className="list-decimal list-inside space-y-1">
               <li>Los valores están expresados en dólares americanos. No incluye IVA.</li>
               <li>La cotización posee una validez de 15 días desde la fecha de emisión.</li>
@@ -5157,13 +5164,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               <li>No se permite la anulación de OC sobre equipos a importación calzada.</li>
               <li>La persona que autoriza la OC es responsable del cumplimiento del pago.</li>
               {!isAdmin && (
-                <li>La presente cotizacion, no constituye una oferta formal ni vinculante hasta su validación por el Product Manager. (Alexis González)</li>
+                <li>La presente cotización no constituye una oferta formal ni vinculante hasta su validación por el Product Manager. (Alexis González)</li>
               )}
             </ol>
           </div>
-          <div className="p-3 bg-gray-800 text-white text-center text-sm">
+          <div className="p-3 bg-slate-800 text-white text-center text-sm">
             <p className="font-semibold">Favor Emitir Orden de Compra a: INTCOMEX CHILE S.A.</p>
-            <p className="text-gray-300">Rut: 96.705.940-4 - Cordillera 331 - Quilicura - Santiago</p>
+            <p className="text-slate-300">Rut: 96.705.940-4 - Cordillera 331 - Quilicura - Santiago</p>
           </div>
         </div>
         <div className="mt-4 flex justify-center gap-3 flex-wrap print:hidden">
@@ -5385,7 +5392,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {mobileMenuOpen && (
           <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menú de navegación">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setMobileMenuOpen(false)} />
-            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-2xl flex flex-col">
+            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-float flex flex-col">
               <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-semibold uppercase shrink-0">
@@ -5470,7 +5477,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         />
 
         {isFullAdmin && editorCotizacionId && (
-          <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 text-white">Abriendo editor…</div>}>
+          <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] text-white">Abriendo editor…</div>}>
             <CotizacionEditor
               cotizacionId={editorCotizacionId}
               productos={productos}
@@ -5527,28 +5534,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
         {currentView === 'stock' && (
           <div className="space-y-4 view-enter">
-            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
-              <div className="p-4 border-b bg-gray-50 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <h3 className="font-semibold text-gray-800">Stock disponible</h3>
-                  <p className="text-xs text-gray-500">Disponible para entrega inmediata: stock en bodega menos lo ya asignado a clientes (OSO).</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
-                  <button
-                    onClick={exportStockExcel}
-                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700"
-                  >
-                    Exportar Excel
-                  </button>
-                  <button
-                    onClick={exportStockPdf}
-                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700"
-                  >
-                    Exportar PDF
-                  </button>
-                </div>
-              </div>
+            <EncabezadoPagina
+              seccion="Ventas"
+              titulo="Stock disponible"
+              subtitulo="Entrega inmediata: stock en bodega menos lo ya asignado a clientes (OSO)."
+            >
+              <button onClick={exportStockExcel} className="mq-btn mq-btn-sm mq-btn-secundario">Exportar Excel</button>
+              <button onClick={exportStockPdf} className="mq-btn mq-btn-sm mq-btn-secundario">Exportar PDF</button>
+            </EncabezadoPagina>
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
               <div className="p-4 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center gap-3">
                   <div className="relative flex-1">
@@ -5578,13 +5572,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     ))}
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  Tip: puedes buscar por varias palabras, por ejemplo "Axis 03181".
+                <div className="text-xs text-slate-500">
+                  {filteredStockCatalog.length} productos con unidades · puedes buscar por varias palabras, por ejemplo «Axis 03181».
                 </div>
               </div>
               <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-3 py-4 sm:px-6 sm:py-6">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                  <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase tracking-wide">
                     <tr>
                       <th className="px-4 py-3 text-left">Producto</th>
                       <th className="px-4 py-3 text-left">Marca</th>
@@ -5627,9 +5621,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <div className="w-14 h-14 bg-slate-100 border rounded" />
                             )}
                             <div className="min-w-0">
-                              <div className="font-medium text-gray-800 truncate">{item.name || 'Sin descripción'}</div>
+                              <div className="font-medium text-slate-800 truncate">{item.name || 'Sin descripción'}</div>
                               {item.origin && (
-                                <div className="text-xs text-gray-500">{item.origin}</div>
+                                <div className="text-xs text-slate-500">{item.origin}</div>
                               )}
                             </div>
                           </div>
@@ -5640,7 +5634,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <td className="px-4 py-3 text-right tabular-nums">
                           <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-500/30">{formatStockQuantity(item.quantity) || '0'}</span>
                           {Number(item.asignado) > 0 && (
-                            <div className="text-xs text-gray-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
+                            <div className="text-xs text-slate-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
                               {formatStockQuantity(item.asignado)} asignada{Number(item.asignado) === 1 ? '' : 's'} de {formatStockQuantity(item.stock_bodega)}
                             </div>
                           )}
@@ -5649,7 +5643,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <td className="px-4 py-3 text-right" data-html2canvas-ignore="true">
                             {(() => {
                               const producto = productoDeStock(item);
-                              if (!producto) return <span className="text-xs text-gray-400" title="No está en tu lista de precios">Sin precio</span>;
+                              if (!producto) return <span className="text-xs text-slate-500" title="No está en tu lista de precios">Sin precio</span>;
                               const enCarrito = cotizacion.find(x => x.id === producto.id);
                               return (
                                 <button
@@ -5661,7 +5655,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       accion: { label: 'Ir al cotizador', onClick: () => setCurrentView('cotizador') }
                                     });
                                   }}
-                                  className="whitespace-nowrap rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                  className="mq-btn mq-btn-sm mq-btn-secundario"
                                 >
                                   {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : 'Agregar'}
                                 </button>
@@ -5679,16 +5673,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
         {currentView === 'usuarios' && isFullAdmin && (
           <div className="space-y-4 view-enter">
+            <EncabezadoPagina seccion="Administración" titulo="Usuarios" subtitulo="Empresas, márgenes por cliente, accesos y sesiones activas." />
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
-              <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+              <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-base font-semibold text-slate-900">Empresas</h2>
-                  <span className="text-xs text-gray-500">{Object.keys(empresaConfigs).length}</span>
+                  <span className="text-xs text-slate-500">{Object.keys(empresaConfigs).length}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setShowEmpresaForm(v => !v)}
-                    className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm"
+                    className="mq-btn mq-btn-primario"
                   >
                     {showEmpresaForm ? 'Cerrar' : 'Crear empresa'}
                   </button>
@@ -5699,43 +5694,43 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre de empresa"
                       value={empresaForm.nombre}
                       onChange={e => setEmpresaForm(f => ({ ...f, nombre: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-slate-500">
                         Rol
                         <select
                           value={empresaForm.role}
                           onChange={e => setEmpresaForm(f => ({ ...f, role: e.target.value }))}
-                          className="px-3 py-2 border rounded-lg text-sm text-gray-800"
+                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
                         >
                           <option value="client">Cliente</option>
                           <option value="admin">Administrador</option>
                         </select>
                       </label>
-                      <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-slate-500">
                         GP QNAP (%)
                         <input
                           type="number"
                           value={empresaForm.gp_qnap}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_qnap: e.target.value }))}
-                          className="px-3 py-2 border rounded-lg text-sm text-gray-800"
+                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
                         />
                       </label>
-                      <label className="flex flex-col gap-1 text-xs text-gray-500">
+                      <label className="flex flex-col gap-1 text-xs text-slate-500">
                         GP AXIS (%)
                         <input
                           type="number"
                           value={empresaForm.gp_axis}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_axis: e.target.value }))}
-                          className="px-3 py-2 border rounded-lg text-sm text-gray-800"
+                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
                         />
                       </label>
                     </div>
                     <select
                       value={empresaForm.partner_category}
                       onChange={e => setEmpresaForm(f => ({ ...f, partner_category: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     >
                       <option>Partner Autorizado</option>
                       <option>Partner Silver</option>
@@ -5743,7 +5738,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <option>Partner Multiregional</option>
                     </select>
                     <div className="flex items-center gap-3">
-                      <label className="px-3 py-2 border rounded-lg text-sm cursor-pointer bg-white">
+                      <label className="mq-btn mq-btn-sm mq-btn-secundario">
                         Cargar logo (500x500)
                         <input
                           type="file"
@@ -5759,7 +5754,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         onClick={saveEmpresaConfig}
-                        className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm"
+                        className="mq-btn mq-btn-primario"
                       >
                         Guardar empresa
                       </button>
@@ -5768,7 +5763,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
                 <div className="mt-4 space-y-3 max-h-[60vh] overflow-auto pr-1">
                   {Object.values(empresaConfigs).length === 0 ? (
-                    <div className="text-xs text-gray-500">Crea una empresa para asignar usuarios.</div>
+                    <div className="text-xs text-slate-500">Crea una empresa para asignar usuarios.</div>
                   ) : (
                     Object.values(empresaConfigs).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(empresa => (
                       <div
@@ -5780,7 +5775,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           const isIntcomexEmpresa = normalizeText(empresa.nombre) === 'intcomex';
                           if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, isIntcomexEmpresa ? 'ventas' : '');
                         }}
-                        className="border-2 border-dashed border-slate-200 rounded-xl p-3 bg-white/70"
+                        className="border border-dashed border-slate-300 rounded-xl p-3 bg-white"
                       >
                         {(() => {
                           const usersInEmpresa = usuarios.filter(u => (u.empresa || '').trim() === empresa.nombre);
@@ -5812,19 +5807,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               </div>
                               <div className="text-xs text-slate-500">Partner: {empresa.partner_category}</div>
                               {isIntcomexEmpresa && (
-                                <div className="text-xs text-sky-700">Perfiles disponibles: Ventas y Compras</div>
+                                <div className="text-xs text-slate-500">Perfiles disponibles: Ventas y Compras</div>
                               )}
                             </div>
                           </div>
                           <button
                             onClick={() => loadEmpresaForm(empresa)}
-                            className="px-2 py-1 text-xs bg-slate-100 rounded hover:bg-slate-200"
+                            className="mq-btn mq-btn-xs mq-btn-secundario"
                           >
                             Editar
                           </button>
                           <button
                             onClick={() => deleteEmpresa(empresa.nombre)}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            className="mq-btn mq-btn-xs mq-btn-peligro"
                           >
                             Eliminar
                           </button>
@@ -5838,10 +5833,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 const userId = e.dataTransfer.getData('text/plain');
                                 if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, 'ventas');
                               }}
-                              className="rounded-lg border border-sky-200 bg-sky-50 p-2"
+                              className="rounded-lg border border-slate-200 bg-slate-50 p-2.5"
                             >
-                              <div className="text-xs font-semibold text-sky-800">Perfil Ventas</div>
-                              <div className="text-xs text-sky-700">Cotizador + Historial + Stock. QNAP 15% y AXIS 13% fijos.</div>
+                              <div className="text-xs font-semibold text-slate-900">Perfil Ventas</div>
+                              <div className="text-xs text-slate-500">Cotizador, Historial y Stock. QNAP 15% y AXIS 13% fijos.</div>
                               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                 {usersVentas.length === 0 ? (
                                   <span className="text-slate-400">Arrastra usuarios aquí.</span>
@@ -5850,7 +5845,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <button
                                       key={`ventas-${u.id}`}
                                       onClick={() => handleUserClick(u.id)}
-                                      className="px-2 py-1 rounded-full border border-sky-200 bg-white hover:bg-sky-100"
+                                      className="h-7 px-2.5 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                     >
                                       {u.nombre || u.usuario}
                                     </button>
@@ -5865,10 +5860,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 const userId = e.dataTransfer.getData('text/plain');
                                 if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, 'compras');
                               }}
-                              className="rounded-lg border border-amber-200 bg-amber-50 p-2"
+                              className="rounded-lg border border-slate-200 bg-slate-50 p-2.5"
                             >
-                              <div className="text-xs font-semibold text-amber-800">Perfil Compras</div>
-                              <div className="text-xs text-amber-700">Acceso exclusivo a Vista Compras.</div>
+                              <div className="text-xs font-semibold text-slate-900">Perfil Compras</div>
+                              <div className="text-xs text-slate-500">Acceso exclusivo a Vista compras.</div>
                               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                 {usersCompras.length === 0 ? (
                                   <span className="text-slate-400">Arrastra usuarios aquí.</span>
@@ -5877,7 +5872,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <button
                                       key={`compras-${u.id}`}
                                       onClick={() => handleUserClick(u.id)}
-                                      className="px-2 py-1 rounded-full border border-amber-200 bg-white hover:bg-amber-100"
+                                      className="h-7 px-2.5 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                     >
                                       {u.nombre || u.usuario}
                                     </button>
@@ -5928,20 +5923,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               </div>
 
-              <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+              <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-gray-800">Usuarios</h3>
-                  <span className="text-xs text-gray-500">{usuariosPage.total}</span>
+                  <h3 className="text-base font-semibold text-slate-900">Usuarios</h3>
+                  <span className="text-xs text-slate-500">{usuariosPage.total}</span>
                 </div>
                 {isAdmin && (
                   <div className="mb-3">
                     <input
                       type="text"
                       aria-label="Buscar"
-                      placeholder="Buscar..."
+                      placeholder="Buscar…"
                       value={globalSearch}
                       onChange={e => setGlobalSearch(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                   </div>
                 )}
@@ -5968,7 +5963,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         </div>
                         <button
                           onClick={() => setSelectedUsuarioId(null)}
-                          className="text-xs text-slate-500 hover:text-slate-700"
+                          className="mq-btn mq-btn-xs mq-btn-fantasma"
                         >
                           Cerrar
                         </button>
@@ -5977,7 +5972,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <select
                           value={selectedUser.empresa || ''}
                           onChange={e => assignUserToEmpresa(selectedUser.id, e.target.value, normalizeText(e.target.value) === 'intcomex' ? 'ventas' : '')}
-                          className="px-2 py-1 border rounded text-xs"
+                          className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                           disabled={Object.keys(empresaConfigs).length === 0}
                         >
                           <option value="">Sin empresa</option>
@@ -5989,7 +5984,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <select
                             value={selectedProfile || ''}
                             onChange={e => assignUserToEmpresa(selectedUser.id, selectedUser.empresa, e.target.value)}
-                            className="px-2 py-1 border rounded text-xs"
+                            className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                           >
                             <option value="">Selecciona perfil Intcomex</option>
                             <option value="ventas">Ventas</option>
@@ -6001,19 +5996,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             placeholder="Nueva contraseña"
                             value={usuarioPasswordById[selectedUser.id] || ''}
                             onChange={e => setUsuarioPasswordById(prev => ({ ...prev, [selectedUser.id]: e.target.value }))}
-                            className="px-2 py-1 border rounded text-xs flex-1"
+                            className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm flex-1"
                           />
                           <button
                             onClick={() => resetUsuarioPassword(selectedUser.id, usuarioPasswordById[selectedUser.id])}
                             disabled={usuariosLoading}
-                            className="px-2 py-1 bg-slate-200 rounded hover:bg-slate-300 text-xs"
+                            className="mq-btn mq-btn-xs mq-btn-secundario"
                           >
                             Reset
                           </button>
                           <button
                             onClick={() => deleteUsuario(selectedUser.id)}
                             disabled={usuariosLoading || isFixedAdmin}
-                            className="px-2 py-1 bg-white border border-rose-200 text-rose-700 rounded hover:bg-rose-50 disabled:opacity-50 text-xs"
+                            className="mq-btn mq-btn-xs mq-btn-peligro"
                           >
                             Eliminar
                           </button>
@@ -6025,7 +6020,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="flex items-center gap-2 mb-3">
                   <button
                     onClick={() => setShowUsuarioForm(v => !v)}
-                    className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm"
+                    className="mq-btn mq-btn-primario"
                   >
                     {showUsuarioForm ? 'Cerrar' : 'Crear usuario'}
                   </button>
@@ -6045,7 +6040,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Usuario"
                       value={nuevoUsuario.usuario}
                       onChange={e => setNuevoUsuario(u => ({ ...u, usuario: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <input
                       name="nuevo_nombre"
@@ -6053,7 +6048,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre"
                       value={nuevoUsuario.nombre}
                       onChange={e => setNuevoUsuario(u => ({ ...u, nombre: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <input
                       name="nuevo_password"
@@ -6062,12 +6057,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       autoComplete="new-password"
                       value={nuevoUsuario.password}
                       onChange={e => setNuevoUsuario(u => ({ ...u, password: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <button
                       type="submit"
                       disabled={usuariosLoading}
-                      className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 text-sm md:col-span-3"
+                      className="mq-btn mq-btn-primario md:col-span-3"
                     >
                       Crear usuario
                     </button>
@@ -6078,9 +6073,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
 
                 {usuariosLoading ? (
-                  <div className="text-xs text-gray-500">Cargando...</div>
+                  <div className="text-xs text-slate-500">Cargando…</div>
                 ) : usuariosPage.total === 0 ? (
-                  <div className="text-xs text-gray-500">Sin usuarios.</div>
+                  <div className="text-xs text-slate-500">Sin usuarios.</div>
                 ) : (
                   <div className="space-y-3 max-h-[60vh] overflow-auto pr-1">
                     {usuariosPage.rows.map(u => {
@@ -6116,7 +6111,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <div className="mt-3 flex items-center gap-2">
                             <button
                               onClick={() => setSelectedUsuarioId(u.id)}
-                              className="px-2 py-1 text-xs bg-slate-900 text-white rounded hover:bg-slate-800"
+                              className="mq-btn mq-btn-xs mq-btn-primario"
                             >
                               Editar
                             </button>
@@ -6130,7 +6125,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         id="page-size-usuarios"
                         value={usuariosPage.pageSize}
                         onChange={(e) => updateTablePageSize('usuarios', Number(e.target.value))}
-                        className="px-2 py-1 border rounded"
+                        className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                       >
                         <option value={10}>10</option>
                         <option value={15}>15</option>
@@ -6159,13 +6154,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <Suspense fallback={<div className="glass-card rounded-2xl border border-white/70 p-4 text-sm text-slate-500">Cargando mapa…</div>}>
               <ConnectionsMap />
             </Suspense>
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-900">Sesiones activas</h2>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => loadActiveSessions()}
-                    className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800"
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
                     Refrescar
                   </button>
@@ -6175,7 +6170,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       checked={sessionAutoRefresh}
                       onChange={(e) => setSessionAutoRefresh(e.target.checked)}
                     />
-                    Actualizacion automatica (10s)
+                    Actualización automática (10 s)
                   </label>
                 </div>
               </div>
@@ -6183,25 +6178,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_1.3fr] gap-4">
                 <div className="border border-white/70 rounded-xl p-3 bg-white/70">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-gray-800">Usuarios activos</h3>
-                    <span className="text-xs text-gray-500">{sessionsByUser.length}</span>
+                    <h3 className="text-base font-semibold text-slate-900">Usuarios activos</h3>
+                    <span className="text-xs text-slate-500">{sessionsByUser.length}</span>
                   </div>
                   {sessionsLoading ? (
-                    <div className="text-sm text-gray-500">Cargando sesiones...</div>
+                    <div className="text-sm text-slate-500">Cargando sesiones...</div>
                   ) : sessionsByUser.length === 0 ? (
-                    <div className="text-sm text-gray-500">No hay sesiones activas.</div>
+                    <div className="text-sm text-slate-500">No hay sesiones activas.</div>
                   ) : (
                     <div className="space-y-2">
                       {sessionsByUser.map(item => (
                         <button
                           key={item.userId}
                           onClick={() => setSelectedSessionUserId(item.userId)}
-                          className={`w-full text-left p-3 rounded-xl border transition ${selectedSessionUserId === item.userId ? 'border-slate-900 bg-white' : 'border-white/70 bg-white/70 hover:bg-white'}`}
+                          className={`w-full text-left p-3 rounded-xl border transition ${selectedSessionUserId === item.userId ? 'border-slate-900 bg-white' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                         >
                           <div className="text-sm font-semibold text-slate-900">{item.nombre || item.usuario || 'Usuario'}</div>
-                          <div className="text-xs text-gray-500">{item.empresa || 'Sin empresa'} - {item.role || 'client'}</div>
-                          <div className="text-xs text-gray-400">
-                            Sesiones: {item.sessions.length} - Ultima actividad: {formatDateTime(item.lastSeen)}
+                          <div className="text-xs text-slate-500">{item.empresa || 'Sin empresa'} - {item.role || 'client'}</div>
+                          <div className="text-xs text-slate-500">
+                            Sesiones: {item.sessions.length} · Última actividad: {formatDateTime(item.lastSeen)}
                           </div>
                         </button>
                       ))}
@@ -6211,20 +6206,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="space-y-4">
                   <div className="border border-white/70 rounded-xl p-3 bg-white/70">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-800">Sesiones del usuario</h3>
+                      <h3 className="text-base font-semibold text-slate-900">Sesiones del usuario</h3>
                       <button
                         onClick={() => loadUserActivity(selectedSessionUserId)}
-                        className="px-2 py-1 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        className="mq-btn mq-btn-xs mq-btn-secundario"
                       >
                         Actualizar
                       </button>
                     </div>
                     {userActivityLoading ? (
-                      <div className="text-sm text-gray-500">Cargando actividad...</div>
+                      <div className="text-sm text-slate-500">Cargando actividad...</div>
                     ) : userActivityError ? (
                       <div className="text-sm text-rose-600">{userActivityError}</div>
                     ) : userSessions.length === 0 ? (
-                      <div className="text-sm text-gray-500">Selecciona un usuario con sesiones activas.</div>
+                      <div className="text-sm text-slate-500">Selecciona un usuario con sesiones activas.</div>
                     ) : (
                       <div className="space-y-2">
                         {userSessions.map(session => (
@@ -6234,11 +6229,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 <div className="text-sm font-semibold text-slate-900">
                                   Ses. #{(session.session_id || '').toString().slice(-6)}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-slate-500">
                                   {session.device_id || 'Dispositivo N/A'} - {session.ip_address || 'IP N/A'}
                                 </div>
-                                <div className="text-xs text-gray-400">
-                                  Inicio: {formatDateTime(session.started_at)} - Ultima: {formatDateTime(session.last_seen)}
+                                <div className="text-xs text-slate-500">
+                                  Inicio: {formatDateTime(session.started_at)} · Última: {formatDateTime(session.last_seen)}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -6248,7 +6243,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 {session.active && (
                                   <button
                                     onClick={() => revokeSession(session.session_id)}
-                                    className="px-2 py-1 text-xs rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                    className="mq-btn mq-btn-xs mq-btn-peligro"
                                   >
                                     Cerrar
                                   </button>
@@ -6256,7 +6251,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               </div>
                             </div>
                             {session.user_agent && (
-                              <div className="mt-2 text-xs text-gray-500">UA: {session.user_agent}</div>
+                              <div className="mt-2 text-xs text-slate-500">UA: {session.user_agent}</div>
                             )}
                           </div>
                         ))}
@@ -6265,13 +6260,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                   <div className="border border-white/70 rounded-xl p-3 bg-white/70">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-800">Logs de acceso</h3>
-                      <span className="text-xs text-gray-500">{userLogs.length}</span>
+                      <h3 className="text-base font-semibold text-slate-900">Logs de acceso</h3>
+                      <span className="text-xs text-slate-500">{userLogs.length}</span>
                     </div>
                     {userActivityLoading ? (
-                      <div className="text-sm text-gray-500">Cargando logs...</div>
+                      <div className="text-sm text-slate-500">Cargando logs...</div>
                     ) : userLogs.length === 0 ? (
-                      <div className="text-sm text-gray-500">Sin registros para este usuario.</div>
+                      <div className="text-sm text-slate-500">Sin registros para este usuario.</div>
                     ) : (
                       <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
                         {userLogs.map(log => (
@@ -6280,13 +6275,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <div className="text-sm font-semibold text-slate-900">
                                 {log.success ? 'Login OK' : 'Login fallido'}
                               </div>
-                              <span className="text-xs text-gray-400">{formatDateTime(log.created_at)}</span>
+                              <span className="text-xs text-slate-500">{formatDateTime(log.created_at)}</span>
                             </div>
-                            <div className="text-xs text-gray-500">
-                              IP: {log.ip_address || 'N/A'} - Sesion: {(log.session_id || '').toString().slice(-6) || 'N/A'}
+                            <div className="text-xs text-slate-500">
+                              IP: {log.ip_address || 'N/A'} · Sesión: {(log.session_id || '').toString().slice(-6) || 'N/A'}
                             </div>
                             {log.user_agent && (
-                              <div className="text-xs text-gray-500 mt-1">UA: {log.user_agent}</div>
+                              <div className="text-xs text-slate-500 mt-1">UA: {log.user_agent}</div>
                             )}
                           </div>
                         ))}
@@ -6300,114 +6295,114 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
         {currentView === 'admin' && isFullAdmin && (
           <div className="space-y-4 view-enter">
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
-              <h2 className="text-base font-semibold text-slate-900 mb-3">Listas de precio</h2>
+            <EncabezadoPagina seccion="Administración" titulo="Listas de precio" subtitulo="Productos QNAP y AXIS sincronizados desde el Excel maestro." />
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <button
                   onClick={() => setAdminOrigin('QNAP')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${adminOrigin === 'QNAP' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  className={`mq-btn mq-btn-sm ${adminOrigin === 'QNAP' ? 'mq-btn-primario' : 'mq-btn-fantasma'}`}
                 >
-                  Gestión de Productos QNAP
+                  QNAP
                 </button>
                 <button
                   onClick={() => setAdminOrigin('AXIS')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${adminOrigin === 'AXIS' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  className={`mq-btn mq-btn-sm ${adminOrigin === 'AXIS' ? 'mq-btn-primario' : 'mq-btn-fantasma'}`}
                 >
-                  Gestión de Productos Axis
+                  AXIS
                 </button>
                 <a
                   href="https://docs.google.com/spreadsheets/d/1cSAaO8GbWFKuboZzhQcyc2CuSD38xtQv8ELjO33G2U0/edit?gid=0#gid=0"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-white hover:bg-slate-800"
+                  className="mq-btn mq-btn-sm mq-btn-secundario sm:ml-auto"
                 >
                   Abrir Excel maestro
                 </a>
                 <button
                   onClick={() => syncFromSheetsOrigin('QNAP')}
                   disabled={saving}
-                  className="px-3 py-1.5 text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg text-sm font-medium disabled:opacity-50"
+                  className="mq-btn mq-btn-sm mq-btn-secundario"
                 >
                   Sync rápido QNAP
                 </button>
                 <button
                   onClick={() => syncFromSheetsOrigin('AXIS')}
                   disabled={saving}
-                  className="px-3 py-1.5 text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg text-sm font-medium disabled:opacity-50"
+                  className="mq-btn mq-btn-sm mq-btn-secundario"
                 >
                   Sync rápido AXIS
                 </button>
               </div>
               {showAddForm && (
-                <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-200">
-                  <h3 className="font-semibold mb-3">Nuevo Producto</h3>
+                <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
+                  <h3 className="text-base font-semibold text-slate-900 mb-3">Nuevo producto</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="px-3 py-2 border rounded-lg" />
-                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="px-3 py-2 border rounded-lg" />
+                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <button onClick={handleAddProduct} disabled={saving} className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
-                      {saving ? 'Guardando...' : 'Guardar'}
+                    <button onClick={handleAddProduct} disabled={saving} className="mq-btn mq-btn-primario">
+                      {saving ? 'Guardando…' : 'Guardar'}
                     </button>
-                    <button onClick={() => setShowAddForm(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">Cancelar</button>
+                    <button onClick={() => setShowAddForm(false)} className="mq-btn mq-btn-secundario">Cancelar</button>
                   </div>
                 </div>
               )}
             </div>
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Parametros de calculo</h3>
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
+              <h3 className="text-base font-semibold text-slate-900 mb-3">Parámetros de cálculo</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div className="p-2 bg-slate-50 rounded-lg border">
-                  <label className="text-xs text-gray-500">Inbound Freight</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-slate-700">Inbound Freight</label>
                   <input
                     type="number"
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.INBOUND_FREIGHT : (Number.isFinite(calcParams.INBOUND_FREIGHT) ? calcParams.INBOUND_FREIGHT : '')}
                     onChange={e => updateCalcParam('INBOUND_FREIGHT', e.target.value)}
-                    className="mt-1 w-full px-2 py-1 border rounded text-sm"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
                   />
                 </div>
-                <div className="p-2 bg-slate-50 rounded-lg border">
-                  <label className="text-xs text-gray-500">IC</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-slate-700">IC</label>
                   <input
                     type="number"
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.IC : (Number.isFinite(calcParams.IC) ? calcParams.IC : '')}
                     onChange={e => updateCalcParam('IC', e.target.value)}
-                    className="mt-1 w-full px-2 py-1 border rounded text-sm"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
                   />
                 </div>
-                <div className="p-2 bg-slate-50 rounded-lg border">
-                  <label className="text-xs text-gray-500">INT (%)</label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-slate-700">INT (%)</label>
                   <input
                     type="number"
                     step="0.1"
                     value={adminOrigin === 'AXIS' ? (AXIS_CONSTANTS.INT * 100) : (Number.isFinite(calcParams.INT) ? (calcParams.INT * 100) : '')}
                     onChange={e => updateCalcParam('INT', e.target.value, true)}
-                    className="mt-1 w-full px-2 py-1 border rounded text-sm"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
                   />
                 </div>
               </div>
             </div>
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 overflow-hidden">
-              <div className="p-3 border-b flex items-center justify-between flex-wrap gap-2">
-                <h3 className="font-semibold">Catlogo ({adminProductos.length})</h3>
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-base font-semibold text-slate-900">Catálogo <span className="font-normal text-slate-500">({adminProductos.length})</span></h3>
                 {isAdmin ? (
                   <input
                     type="text"
                     aria-label="Buscar"
-                    placeholder="Buscar..."
+                    placeholder="Buscar…"
                     value={globalSearch}
                     onChange={e => setGlobalSearch(e.target.value)}
-                    className="px-3 py-1.5 border rounded-lg text-sm"
+                    className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                   />
                 ) : (
-                  <input type="text" aria-label="Buscar productos" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="px-3 py-1.5 border rounded-lg text-sm" />
+                  <input type="text" aria-label="Buscar productos" placeholder="Buscar…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
                 )}
               </div>
               {selectedIds.size > 1 && (
@@ -6415,7 +6410,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     onClick={deleteSelectedProducts}
                     disabled={saving}
-                    className="px-2 py-1 text-xs bg-white border border-rose-200 text-rose-700 rounded-md hover:bg-rose-50 disabled:opacity-50"
+                    className="mq-btn mq-btn-xs mq-btn-peligro"
                   >
                     Eliminar seleccionados ({selectedIds.size})
                   </button>
@@ -6423,7 +6418,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               )}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-2 text-center">
                         <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAllFiltered} />
@@ -6437,25 +6432,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <th className="px-3 py-2 text-center">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody className="divide-y divide-slate-100">
                     {productosPage.total === 0 ? (
-                      <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-500">{adminProductos.length === 0 ? 'No hay productos. Cargue un Excel o agregue uno.' : 'Sin resultados.'}</td></tr>
+                      <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">{adminProductos.length === 0 ? 'No hay productos. Cargue un Excel o agregue uno.' : 'Sin resultados.'}</td></tr>
                     ) : productosPage.rows.map(p => (
-                      <tr key={p.id} className="hover:bg-gray-50">
+                      <tr key={p.id} className="hover:bg-slate-50">
                         {editingId === p.id ? (
                           <>
                             <td className="px-2 py-1 text-center">
                               <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelectOne(p.id)} />
                             </td>
-                            <td className="px-2 py-1"><input value={editForm.marca} onChange={e => setEditForm(f => ({ ...f, marca: e.target.value }))} className="w-full px-2 py-1 border rounded" /></td>
-                            <td className="px-2 py-1"><input value={editForm.sku} onChange={e => setEditForm(f => ({ ...f, sku: e.target.value }))} className="w-full px-2 py-1 border rounded" /></td>
-                            <td className="px-2 py-1"><input value={editForm.mpn} onChange={e => setEditForm(f => ({ ...f, mpn: e.target.value }))} className="w-full px-2 py-1 border rounded" /></td>
-                            <td className="px-2 py-1"><input value={editForm.desc} onChange={e => setEditForm(f => ({ ...f, desc: e.target.value }))} className="w-full px-2 py-1 border rounded" /></td>
-                            <td className="px-2 py-1"><input type="number" value={editForm.precio} onChange={e => setEditForm(f => ({ ...f, precio: e.target.value }))} className="w-20 px-2 py-1 border rounded text-right" /></td>
-                            <td className="px-2 py-1 text-right text-gray-600">{formatCurrency(calcularPrecioClienteLocal(parseFloat(editForm.precio) || 0, calcParams.DEFAULT_GP))}</td>
+                            <td className="px-2 py-1"><input value={editForm.marca} onChange={e => setEditForm(f => ({ ...f, marca: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
+                            <td className="px-2 py-1"><input value={editForm.sku} onChange={e => setEditForm(f => ({ ...f, sku: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
+                            <td className="px-2 py-1"><input value={editForm.mpn} onChange={e => setEditForm(f => ({ ...f, mpn: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
+                            <td className="px-2 py-1"><input value={editForm.desc} onChange={e => setEditForm(f => ({ ...f, desc: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
+                            <td className="px-2 py-1"><input type="number" value={editForm.precio} onChange={e => setEditForm(f => ({ ...f, precio: e.target.value }))} className="w-20 h-8 px-2 border border-slate-300 rounded-md bg-white text-sm text-right" /></td>
+                            <td className="px-2 py-1 text-right text-slate-600">{formatCurrency(calcularPrecioClienteLocal(parseFloat(editForm.precio) || 0, calcParams.DEFAULT_GP))}</td>
                             <td className="px-2 py-1 text-center">
-                              <button onClick={saveEdit} disabled={saving} className="px-2 py-1 text-green-600 hover:bg-green-50 rounded text-xs">Guardar</button>
-                              <button onClick={() => setEditingId(null)} className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded text-xs">Cancelar</button>
+                              <button onClick={saveEdit} disabled={saving} className="mq-btn mq-btn-xs mq-btn-primario">Guardar</button>
+                              <button onClick={() => setEditingId(null)} className="mq-btn mq-btn-xs mq-btn-fantasma">Cancelar</button>
                             </td>
                           </>
                         ) : (
@@ -6468,9 +6463,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <td className="px-3 py-2 font-mono text-xs">{p.mpn}</td>
                             <td className="px-3 py-2">{p.desc}</td>
                             <td className="px-3 py-2 text-right">{formatCurrency(p.precio)}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-blue-600">{formatCurrency(calcularPrecioAdmin(p))}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-slate-900 tabular-nums">{formatCurrency(calcularPrecioAdmin(p))}</td>
                             <td className="px-3 py-2 text-center">
-                              <button onClick={() => startEdit(p)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                              <button onClick={() => startEdit(p)} className="mq-btn mq-btn-xs mq-btn-fantasma text-slate-900">Editar</button>
                             </td>
                           </>
                         )}
@@ -6480,12 +6475,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </table>
               </div>
               <div className="p-3 border-t flex items-center justify-between flex-wrap gap-2">
-                <div className="text-xs text-gray-500 flex items-center gap-2">
+                <div className="text-xs text-slate-500 flex items-center gap-2">
                   <span>{selectedIds.size > 0 ? `${selectedIds.size} seleccionados` : 'Sin seleccionados'}</span>
                   {filteredProductos.length > 0 && (
                     <button
                       onClick={toggleSelectAllFiltered}
-                      className="text-xs text-blue-600 hover:text-blue-800"
+                      className="mq-btn mq-btn-xs mq-btn-fantasma"
                     >
                       Seleccionar todo
                     </button>
@@ -6497,7 +6492,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     id="page-size-productos"
                     value={productosPage.pageSize}
                     onChange={(e) => updateTablePageSize('productos', Number(e.target.value))}
-                    className="px-2 py-1 border rounded"
+                    className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                   >
                     <option value={10}>10</option>
                     <option value={15}>15</option>
@@ -6526,12 +6521,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         {currentView === 'historial' && (
           <div className="space-y-4 view-enter">
+            <EncabezadoPagina
+              seccion="Ventas"
+              titulo={isAdmin ? 'Historial' : 'Mis cotizaciones'}
+              subtitulo={isAdmin ? 'Cotizaciones emitidas, su estado y sus versiones.' : 'Las cotizaciones que has generado y su estado.'}
+            >
+              {canViewCotizador && (
+                <button type="button" onClick={() => setCurrentView('cotizador')} className="mq-btn mq-btn-primario">Nueva cotización</button>
+              )}
+            </EncabezadoPagina>
             {isAdmin && (
-              <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+              <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
                 <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <h2 className="text-base font-semibold text-slate-900">Funnel de aprobación</h2>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-slate-500">
                       {(funnelFrom || funnelTo)
                         ? `Rango: ${funnelFrom || '...'} - ${funnelTo || '...'}${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`
                         : `Últimos ${funnelDays} días${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`}
@@ -6543,18 +6547,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         type="date"
                         value={funnelFrom}
                         onChange={(e) => setFunnelFrom(e.target.value)}
-                        className="px-2 py-1.5 border rounded-lg text-xs text-slate-700"
+                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                       />
                       <span>hasta</span>
                       <input
                         type="date"
                         value={funnelTo}
                         onChange={(e) => setFunnelTo(e.target.value)}
-                        className="px-2 py-1.5 border rounded-lg text-xs text-slate-700"
+                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                       />
                       <button
                         onClick={() => { setFunnelFrom(''); setFunnelTo(''); }}
-                        className="px-2 py-1.5 border rounded-lg text-xs text-slate-600 hover:bg-slate-100"
+                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
                       >
                         Limpiar
                       </button>
@@ -6563,7 +6567,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       value={funnelDays}
                       onChange={(e) => setFunnelDays(Number(e.target.value))}
                       disabled={Boolean(funnelFrom || funnelTo)}
-                      className={`px-2 py-1.5 border rounded-lg text-xs ${funnelFrom || funnelTo ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-slate-700'}`}
+                      className={`h-8 px-2 border border-slate-300 rounded-lg text-sm ${funnelFrom || funnelTo ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-slate-700'}`}
                     >
                       <option value={7}>7 días</option>
                       <option value={30}>30 días</option>
@@ -6572,7 +6576,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <select
                       value={funnelEmpresa}
                       onChange={(e) => setFunnelEmpresa(e.target.value)}
-                      className="px-2 py-1.5 border rounded-lg text-xs text-slate-700"
+                      className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                     >
                       <option value="">Todas las empresas</option>
                       {historialEmpresas.map(emp => (
@@ -6581,7 +6585,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     </select>
                     <button
                       onClick={() => loadFunnel()}
-                      className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs hover:bg-slate-800"
+                      className="mq-btn mq-btn-sm mq-btn-secundario"
                     >
                       Refrescar
                     </button>
@@ -6607,7 +6611,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
               </div>
             )}
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-base font-semibold text-slate-900">{isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}</h2>
@@ -6615,13 +6619,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={deleteSelectedCotizaciones}
                       disabled={saving}
-                      className="px-2 py-1 text-xs bg-white border border-rose-200 text-rose-700 rounded-md hover:bg-rose-50 disabled:opacity-50"
+                      className="mq-btn mq-btn-xs mq-btn-peligro"
                     >
                       Eliminar seleccionados ({selectedHistorialIds.size})
                     </button>
                   )}
                 </div>
-                <span className="text-xs text-gray-500">{historialPage.total} resultados</span>
+                <span className="text-xs text-slate-500">{historialPage.total} resultados</span>
               </div>
               {isAdmin && (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -6638,17 +6642,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     type="text"
                     aria-label="Buscar"
-                    placeholder="Buscar..."
+                    placeholder="Buscar…"
                     value={globalSearch}
                     onChange={e => setGlobalSearch(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm md:col-span-2"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm md:col-span-2"
                   />
                 )}
                 <input
                   type="date"
                   value={historialFilters.fecha}
                   onChange={e => setHistorialFilters(f => ({ ...f, fecha: e.target.value }))}
-                  className="px-3 py-2 border rounded-lg text-sm"
+                  className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                 />
                 {!isAdmin && (
                   <>
@@ -6657,34 +6661,34 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Buscar cliente..."
                       value={historialFilters.cliente}
                       onChange={e => setHistorialFilters(f => ({ ...f, cliente: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar PID..."
                       value={historialFilters.pid}
                       onChange={e => setHistorialFilters(f => ({ ...f, pid: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar proyecto..."
                       value={historialFilters.proyecto}
                       onChange={e => setHistorialFilters(f => ({ ...f, proyecto: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar producto..."
                       value={historialFilters.producto}
                       onChange={e => setHistorialFilters(f => ({ ...f, producto: e.target.value }))}
-                      className="px-3 py-2 border rounded-lg text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
                     />
                   </>
                 )}
                 <button
                   onClick={() => setHistorialFilters({ fecha: '', cliente: '', pid: '', proyecto: '', producto: '', estados: [] })}
-                  className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm"
+                  className="mq-btn mq-btn-secundario"
                 >
                   Limpiar filtros
                 </button>
@@ -6720,7 +6724,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               )}
             </div>
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 overflow-hidden">
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
               {historialLoading ? (
                 <table className="w-full text-sm"><tbody><FilasEsqueleto filas={6} columnas={7} /></tbody></table>
               ) : historialError ? (
@@ -6737,7 +6741,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               ) : (
                 <div className="max-h-[60vh] overflow-auto">
                   <table className="w-full min-w-[1080px] text-sm">
-                    <thead className="bg-gray-50 sticky top-0 z-10">
+                    <thead className="bg-slate-50 sticky top-0 z-10 text-[11px] uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-3 py-2 text-center">
                           <input
@@ -6757,7 +6761,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <th className="px-3 py-2 text-right"><span className="sr-only">Acciones</span></th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
+                    <tbody className="divide-y divide-slate-100">
                       {historialPage.rows.map(cot => {
                         const highlightCliente = isAdmin && isClienteQuote(cot);
                         const showRegistroAlert = isAdmin && isClienteQuote(cot) && hasProjectRegistro(cot) && !dismissedRegistroById[cot.id];
@@ -6779,7 +6783,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   ? 'bg-green-50/70 border-l-4 border-green-300'
                                   : highlightCliente
                                     ? 'bg-blue-50/60'
-                                    : 'hover:bg-gray-50'
+                                    : 'hover:bg-slate-50'
                             }`}
                           >
                             <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
@@ -6789,8 +6793,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 onChange={() => toggleSelectHistorial(cot.id)}
                               />
                             </td>
-                            <td className="px-3 py-2 font-mono text-xs text-gray-700">{cot.numero || `#${cot.id}`}</td>
-                            <td className="px-3 py-2 text-xs text-gray-600">{getDateKey(cot.created_at) || 'N/A'}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-slate-700">{cot.numero || `#${cot.id}`}</td>
+                            <td className="px-3 py-2 text-xs text-slate-600">{getDateKey(cot.created_at) || 'N/A'}</td>
                             <td className="px-3 py-2">{cot.cliente_telefono || 'N/A'}</td>
                             <td className="px-3 py-2">{cot.cliente_empresa || 'N/A'}</td>
                             <td className="px-3 py-2">
@@ -6831,7 +6835,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <span className="inline-flex flex-col items-end" title={m.parcial ? 'Algunas líneas no tienen costo' : undefined}>
                                       <MargenChip gpPct={m.gpPct} origen={m.origenes} />
                                     </span>
-                                  ) : <span className="text-xs text-gray-400">—</span>;
+                                  ) : <span className="text-xs text-slate-500">—</span>;
                                 })()}
                               </td>
                             )}
@@ -6840,7 +6844,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               {isFullAdmin && (
                                 <button
                                   onClick={() => setEditorCotizacionId(cot.id)}
-                                  className="px-2 py-1 text-xs font-medium text-blue-700 rounded hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-slate-800"
+                                  className="mq-btn mq-btn-xs mq-btn-fantasma text-slate-900"
                                   title="Editar (E)"
                                 >
                                   Editar
@@ -6848,7 +6852,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               )}
                               <button
                                 onClick={() => exportHistorialPdf(cot)}
-                                className="px-2 py-1 text-xs font-medium text-slate-700 rounded hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                                className="mq-btn mq-btn-xs mq-btn-fantasma"
                                 title="Descargar PDF (P)"
                               >
                                 PDF
@@ -6856,7 +6860,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               {canViewCotizador && (
                                 <button
                                   onClick={() => duplicarCotizacion(cot)}
-                                  className="px-2 py-1 text-xs font-medium text-slate-700 rounded hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                                  className="mq-btn mq-btn-xs mq-btn-fantasma"
                                   title="Duplicar como nueva cotización (D)"
                                 >
                                   Duplicar
@@ -6869,20 +6873,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <td colSpan={isFullAdmin ? 10 : 9} className="px-4 py-3 border-t">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                                   <div>
-                                    <div className="text-xs text-gray-500">Proyecto</div>
-                                    <div className="font-semibold text-gray-800">{cot.cliente_telefono || 'N/A'}</div>
+                                    <div className="text-xs text-slate-500">Proyecto</div>
+                                    <div className="font-semibold text-slate-800">{cot.cliente_telefono || 'N/A'}</div>
                                   </div>
                                   {isAdmin && (
                                     <div>
-                                      <div className="text-xs text-gray-500">Estado</div>
+                                      <div className="text-xs text-slate-500">Estado</div>
                                       <div className="flex flex-wrap gap-1 mt-1">
                                         {COTIZACION_ESTADOS.map(option => {
                                           const isActive = normalizeEstado(cot.estado) === option.value;
                                           const isRechazada = option.value === 'rechazada';
                                           const isAceptada = option.value === 'aprobada';
                                           const baseClass = isActive
-                                            ? 'bg-slate-900 text-white'
-                                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
+                                            ? 'mq-btn-primario'
+                                            : 'mq-btn-secundario';
                                           const toneClass = isRechazada
                                             ? 'text-red-700 font-semibold'
                                             : isAceptada
@@ -6895,7 +6899,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                                 e.stopPropagation();
                                                 updateCotizacionEstado(cot.id, option.value);
                                               }}
-                                              className={`px-2 py-0.5 text-xs rounded ${baseClass} ${toneClass}`}
+                                              className={`mq-btn mq-btn-xs ${baseClass} ${toneClass}`}
                                               title={option.label}
                                             >
                                               {option.short}
@@ -6907,7 +6911,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   )}
                                   {isFullAdmin && (
                                     <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                                      <div className="text-xs text-gray-600">
+                                      <div className="text-xs text-slate-600">
                                         Cambia cantidades, precios, costos o productos. Cada guardado conserva la versión anterior.
                                         {cot.version > 1 && <span className="ml-1 font-semibold">v{cot.version}</span>}
                                       </div>
@@ -6920,7 +6924,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     </div>
                                   )}
                                   <div>
-                                    <div className="text-xs text-gray-500">PDF</div>
+                                    <div className="text-xs text-slate-500">PDF</div>
                                     <div className="mt-1 flex flex-wrap gap-2">
                                       <button
                                         onClick={(e) => { e.stopPropagation(); exportHistorialPdf(cot); }}
@@ -6946,7 +6950,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   </div>
                                   {isAdmin && (
                                     <div>
-                                      <div className="text-xs text-gray-500">Compras</div>
+                                      <div className="text-xs text-slate-500">Compras</div>
                                       {normalizeEstado(cot.estado) === 'aprobada' ? (
                                         <div className="mt-1 flex items-center gap-2">
                                           <input
@@ -6964,14 +6968,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           </button>
                                         </div>
                                       ) : (
-                                        <div className="mt-1 text-xs text-gray-400">No disponible</div>
+                                        <div className="mt-1 text-xs text-slate-500">No disponible</div>
                                       )}
                                     </div>
                                   )}
                                   <div className="md:col-span-2">
-                                    <div className="text-xs text-gray-500 mb-1">Productos</div>
+                                    <div className="text-xs text-slate-500 mb-1">Productos</div>
                                     {Array.isArray(cot.items) && cot.items.length > 0 ? (
-                                      <div className="space-y-1 text-xs text-gray-600">
+                                      <div className="space-y-1 text-xs text-slate-600">
                                         {cot.items.map(item => (
                                           <div key={`${cot.id}-${item.id}`} className="flex justify-between gap-3">
                                             <span className="truncate">
@@ -6982,7 +6986,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                         ))}
                                       </div>
                                     ) : (
-                                      <span className="text-xs text-gray-400">Sin productos</span>
+                                      <span className="text-xs text-slate-500">Sin productos</span>
                                     )}
                                   </div>
                                 </div>
@@ -6999,7 +7003,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       id="page-size-historial"
                       value={historialPage.pageSize}
                       onChange={(e) => updateTablePageSize('historial', Number(e.target.value))}
-                      className="px-2 py-1 border rounded"
+                      className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                     >
                       <option value={10}>10</option>
                       <option value={15}>15</option>
@@ -7029,20 +7033,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         {currentView === 'ordenes' && isFullAdmin && (
           <div className="space-y-4 view-enter">
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+            <EncabezadoPagina seccion="Operaciones" titulo="Órdenes activas" subtitulo="BO del OSO con proyecto, mes de facturación y montos AXIS / Intcomex." />
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-[220px]">
-                  <h2 className="text-base font-semibold text-slate-900">Ordenes Activas (OSO)</h2>
-                  <p className="text-xs text-slate-500">Filtra por BO o cliente para encontrar rápido.</p>
-                </div>
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                   {isAdmin ? (
                     <input
                       value={globalSearch}
                       onChange={(e) => setGlobalSearch(e.target.value)}
-                      placeholder="Buscar..."
+                      placeholder="Buscar…"
                       aria-label="Buscar"
-                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   ) : (
                     <input
@@ -7050,13 +7051,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={(e) => setOsoFilter(e.target.value)}
                       placeholder="Buscar BO o cliente"
                       aria-label="Buscar órdenes"
-                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   )}
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-40 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7066,7 +7067,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7074,10 +7075,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <option value="fact-month">Ordenar por mes facturación</option>
                     <option value="eta">Ordenar por ETA</option>
                   </select>
-                  <div className="relative w-full md:w-52">
+                  <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7117,9 +7118,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
-                    <option value="">Acciones...</option>
+                    <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
                     <option value="export">Exportar reporte</option>
                     <option value="copy">Copiar resumen</option>
@@ -7133,9 +7134,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
-                    <option value="">Informes...</option>
+                    <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
                     <option value="proximas">Próximas entregas</option>
                     <option value="axis">Reporte Axis</option>
@@ -7143,14 +7144,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                 </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                <span className="inline-flex items-center h-7 px-2.5 rounded-lg bg-slate-100 text-slate-700 tabular-nums">
                   Total: {osoStats.total} · Activas: {osoStats.activa} · Parciales: {osoStats.parcial} · Completas: {osoStats.completa} · Facturadas: {invoicedBos.length}
                 </span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 <button
                   onClick={() => setShowOsoFilters(prev => !prev)}
-                  className="px-2 py-1 rounded-full border text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
                 >
                   {showOsoFilters ? 'Ocultar filtros' : 'Más filtros'}
                 </button>
@@ -7166,7 +7167,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         key={item.key}
                         onClick={() => setOsoQuickFilter(item.key)}
-                        className={`px-2 py-1 rounded-full border text-xs ${osoQuickFilter === item.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                        className={`mq-btn mq-btn-xs ${osoQuickFilter === item.key ? 'mq-btn-primario' : 'mq-btn-secundario'}`}
                       >
                         {item.label}
                       </button>
@@ -7176,7 +7177,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={osoInvoiceMonth}
                         onChange={(e) => setOsoInvoiceMonth(e.target.value)}
-                        className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
+                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                       >
                         <option value="">Todos</option>
                         {invoiceMonthOptions.map(option => (
@@ -7215,7 +7216,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       id="page-size-ordenes"
                       value={ordenesPage.pageSize}
                       onChange={(e) => updateTablePageSize('ordenes', Number(e.target.value))}
-                      className="px-2 py-1 border rounded"
+                      className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
                     >
                       <option value={10}>10</option>
                       <option value={15}>15</option>
@@ -7242,11 +7243,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
 
             {invoicedBos.length > 0 && (
-              <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+              <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
-                    <h3 className="text-base font-semibold text-gray-800">
-                      Ordenes facturadas <span className="text-xs text-slate-500">({invoicedBos.length})</span>
+                    <h3 className="text-base font-semibold text-slate-800">
+                      Órdenes facturadas <span className="text-xs text-slate-500">({invoicedBos.length})</span>
                     </h3>
                     <p className="text-xs text-slate-500">BOs que ya no están en OSO y marcaste como facturados.</p>
                   </div>
@@ -7255,13 +7256,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       value={invoicedFilter}
                       onChange={(e) => setInvoicedFilter(e.target.value)}
                       placeholder="Buscar BO o cliente"
-                      className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700 w-40"
+                      className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white w-40"
                     />
                     <label className="text-slate-500">Ordenar por:</label>
                     <select
                       value={invoicedSort}
                       onChange={(e) => setInvoicedSort(e.target.value)}
-                      className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
+                      className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                     >
                       <option value="date">Fecha (reciente)</option>
                       <option value="lastSeen">Última vez en OSO</option>
@@ -7270,7 +7271,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     </select>
                     <button
                       onClick={() => setShowInvoicedSection(prev => !prev)}
-                      className="text-xs text-blue-600 hover:text-blue-700"
+                      className="mq-btn mq-btn-xs mq-btn-fantasma"
                     >
                       {showInvoicedSection ? 'Ocultar' : 'Mostrar'}
                     </button>
@@ -7292,7 +7293,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         </div>
                         <button
                           onClick={() => unmarkBoInvoiced(item.bo)}
-                          className="text-xs text-blue-600 hover:text-blue-700"
+                          className="mq-btn mq-btn-xs mq-btn-fantasma"
                         >
                           Reactivar
                         </button>
@@ -7307,24 +7308,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         {currentView === 'compras' && canViewCompras && (
           <div className="space-y-4 view-enter">
-            <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+            <EncabezadoPagina seccion="Operaciones" titulo="Vista compras" subtitulo="Estado de compra, despacho y vía de cada BO del OSO." />
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-[220px]">
-                  <h2 className="text-base font-semibold text-slate-900">Vista Compras (OSO)</h2>
-                  <p className="text-xs text-slate-500">Filtra por BO o cliente para encontrar rápido.</p>
-                </div>
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                   <input
                     value={globalSearch}
                     onChange={(e) => setGlobalSearch(e.target.value)}
-                    placeholder="Buscar..."
+                    placeholder="Buscar…"
                     aria-label="Buscar"
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
                   />
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-40 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7334,7 +7332,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7342,10 +7340,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <option value="fact-month">Ordenar por mes facturación</option>
                     <option value="eta">Ordenar por ETA</option>
                   </select>
-                  <div className="relative w-full md:w-52">
+                  <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7385,9 +7383,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-44 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
-                    <option value="">Acciones...</option>
+                    <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
                     <option value="export">Exportar reporte</option>
                     <option value="copy">Copiar resumen</option>
@@ -7401,9 +7399,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-full md:w-52 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
-                    <option value="">Informes...</option>
+                    <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
                     <option value="proximas">Próximas entregas</option>
                     <option value="axis">Reporte Axis</option>
@@ -7411,14 +7409,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+                <span className="inline-flex items-center h-7 px-2.5 rounded-lg bg-slate-100 text-slate-700 tabular-nums">
                   Total: {osoStats.total} · Activas: {osoStats.activa} · Parciales: {osoStats.parcial} · Completas: {osoStats.completa}
                 </span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                 <button
                   onClick={() => setShowOsoFilters(prev => !prev)}
-                  className="px-2 py-1 rounded-full border text-xs bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
                 >
                   {showOsoFilters ? 'Ocultar filtros' : 'Más filtros'}
                 </button>
@@ -7434,7 +7432,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         key={item.key}
                         onClick={() => setOsoQuickFilter(item.key)}
-                        className={`px-2 py-1 rounded-full border text-xs ${osoQuickFilter === item.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                        className={`mq-btn mq-btn-xs ${osoQuickFilter === item.key ? 'mq-btn-primario' : 'mq-btn-secundario'}`}
                       >
                         {item.label}
                       </button>
@@ -7444,7 +7442,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={osoInvoiceMonth}
                         onChange={(e) => setOsoInvoiceMonth(e.target.value)}
-                        className="px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700"
+                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                       >
                         <option value="">Todos</option>
                         {invoiceMonthOptions.map(option => (
@@ -7484,19 +7482,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {showMissingBosModal && missingBos.length > 0 && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-float w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h3 className="font-semibold">BO no encontrados en OSO</h3>
+                <h3 className="text-base font-semibold text-slate-900">BO no encontrados en OSO</h3>
                 <button
                   onClick={() => setShowMissingBosModal(false)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="mq-btn mq-btn-sm mq-btn-fantasma"
                 >
                   Cerrar
                 </button>
               </div>
               <div className="p-4 space-y-3">
-                <div className="text-sm text-gray-600">
+                <div className="text-sm text-slate-600">
                   Estos BO ya no están en OSO. ¿Marcar como facturados?
                 </div>
                 <div className="space-y-2 max-h-[320px] overflow-auto pr-1">
@@ -7506,19 +7504,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => markBoInvoiced(bo)}
-                          className="px-2 py-1 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                          className="mq-btn mq-btn-xs bg-emerald-600 text-white hover:bg-emerald-700"
                         >
                           Marcar facturado
                         </button>
                         <button
                           onClick={() => openDeleteBoModal(bo)}
-                          className="px-2 py-1 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700"
+                          className="mq-btn mq-btn-xs bg-rose-600 text-white hover:bg-rose-700"
                         >
                           Eliminar
                         </button>
                         <button
                           onClick={() => dismissMissingBo(bo)}
-                          className="px-2 py-1 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          className="mq-btn mq-btn-xs mq-btn-secundario"
                         >
                           Omitir
                         </button>
@@ -7532,13 +7530,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       missingBos.forEach(bo => markBoInvoiced(bo));
                       setShowMissingBosModal(false);
                     }}
-                    className="px-3 py-2 text-xs rounded-lg bg-slate-900 text-white hover:bg-slate-800"
+                    className="mq-btn mq-btn-sm mq-btn-primario"
                   >
                     Marcar todos
                   </button>
                   <button
                     onClick={() => setShowMissingBosModal(false)}
-                    className="px-3 py-2 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
                     Cerrar
                   </button>
@@ -7549,19 +7547,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {deleteBoTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto animate-scale-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-float w-full max-w-md max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h3 className="font-semibold">Eliminar BO {deleteBoTarget}</h3>
+                <h3 className="text-base font-semibold text-slate-900">Eliminar BO {deleteBoTarget}</h3>
                 <button
                   onClick={closeDeleteBoModal}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="mq-btn mq-btn-sm mq-btn-fantasma"
                 >
                   Cerrar
                 </button>
               </div>
               <div className="p-4 space-y-3">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-slate-600">
                   Indica el motivo de eliminación. Este comentario quedará en los registros.
                 </p>
                 <textarea
@@ -7580,17 +7578,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="flex items-center justify-end gap-2">
                   <button
                     onClick={closeDeleteBoModal}
-                    className="px-3 py-2 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
                     disabled={deleteBoLoading}
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={confirmDeleteBo}
-                    className="px-3 py-2 text-xs rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+                    className="mq-btn mq-btn-sm bg-rose-600 text-white hover:bg-rose-700"
                     disabled={deleteBoLoading}
                   >
-                    {deleteBoLoading ? 'Eliminando...' : 'Eliminar'}
+                    {deleteBoLoading ? 'Eliminando…' : 'Eliminar'}
                   </button>
                 </div>
               </div>
@@ -7599,53 +7597,53 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         )}
 
         {showOsoReportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-lg w-[96vw] h-[90vh] overflow-hidden flex flex-col animate-scale-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-3 animate-fade-in">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-float w-[96vw] h-[90vh] overflow-hidden flex flex-col animate-scale-in">
               <div className="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="font-semibold">Informe de órdenes activas</h3>
+                  <h3 className="text-base font-semibold text-slate-900">Informe de órdenes activas</h3>
                   <p className="text-xs text-slate-500">ETA estimado por línea = Entrega OOR + 15 días.</p>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   <button
                     onClick={() => setOsoReportMode('empresa')}
-                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'empresa' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    className={`mq-btn mq-btn-xs ${osoReportMode === 'empresa' ? 'mq-btn-primario' : 'mq-btn-secundario'}`}
                   >
                     Por empresa
                   </button>
                   <button
                     onClick={() => setOsoReportMode('proximas')}
-                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'proximas' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    className={`mq-btn mq-btn-xs ${osoReportMode === 'proximas' ? 'mq-btn-primario' : 'mq-btn-secundario'}`}
                   >
                     Próximas entregas
                   </button>
                   <button
                     onClick={() => setOsoReportMode('axis')}
-                    className={`px-2 py-1 rounded-lg border ${osoReportMode === 'axis' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    className={`mq-btn mq-btn-xs ${osoReportMode === 'axis' ? 'mq-btn-primario' : 'mq-btn-secundario'}`}
                   >
                     Reporte Axis
                   </button>
                   <button
                     onClick={exportOsoReportPdf}
-                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    className="mq-btn mq-btn-xs mq-btn-secundario"
                   >
                     Exportar PDF
                   </button>
                   <button
                     onClick={exportOsoReportExcel}
-                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    className="mq-btn mq-btn-xs mq-btn-secundario"
                   >
                     Exportar Excel
                   </button>
                   <button
                     onClick={() => setOsoReportEdits({})}
-                    className="px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    className="mq-btn mq-btn-xs mq-btn-secundario"
                   >
                     Limpiar cambios
                   </button>
                   <button
                     onClick={() => setShowOsoReportModal(false)}
-                    className="text-slate-500 hover:text-slate-700"
+                    className="mq-btn mq-btn-sm mq-btn-fantasma"
                   >
                     Cerrar
                   </button>
@@ -7670,7 +7668,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <div className="px-3 py-2 bg-slate-50 text-sm font-semibold text-slate-700">{empresa}</div>
                             <div className="overflow-auto">
                               <table className="w-full text-xs">
-                                <thead className="bg-slate-50 text-slate-600">
+                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
                                     <th className="px-2 py-2 text-left">PO Axis</th>
@@ -7772,7 +7770,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <div className="px-3 py-2 bg-slate-50 text-sm font-semibold text-slate-700">{empresa}</div>
                             <div className="overflow-auto">
                               <table className="w-full text-xs">
-                                <thead className="bg-slate-50 text-slate-600">
+                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
                                     <th className="px-2 py-2 text-left">PO Cliente</th>
@@ -7866,7 +7864,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             </div>
                             <div className="overflow-auto">
                               <table className="w-full text-xs">
-                                <thead className="bg-slate-50 text-slate-600">
+                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                                   <tr>
                                     <th className="px-2 py-2 text-left">BO</th>
                                     <th className="px-2 py-2 text-left">PO Cliente</th>
@@ -7974,7 +7972,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div key={`pdf-${empresa}`} className="mb-4">
                     <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
                     <table className="w-full text-xs border border-slate-200">
-                      <thead className="bg-slate-50 text-slate-600">
+                      <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
                           <th className="px-2 py-1 text-left">PO Axis</th>
@@ -8029,7 +8027,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div key={`pdf-axis-${empresa}`} className="mb-4">
                     <div className="font-semibold text-slate-700 mb-2">{empresa}</div>
                     <table className="w-full text-xs border border-slate-200">
-                      <thead className="bg-slate-50 text-slate-600">
+                      <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-2 py-1 text-left">BO</th>
                           <th className="px-2 py-1 text-left">PO Cliente</th>
@@ -8096,7 +8094,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   .sort((a, b) => toTs(a.etaEstimado) - toTs(b.etaEstimado));
                 return (
                   <table className="w-full text-xs border border-slate-200">
-                    <thead className="bg-slate-50 text-slate-600">
+                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-2 py-1 text-left">BO</th>
                         <th className="px-2 py-1 text-left">PO Cliente</th>
@@ -8141,15 +8139,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         {currentView === 'cotizador' && (
           <div className="view-enter">
-            <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
-              <div>
-                <h2 className="text-2xl leading-8 font-display text-slate-900">Cotización</h2>
-                <p className="text-sm text-slate-500">
-                  {(cliente.empresa?.trim() || cliente.nombre?.trim())
-                    ? `${cliente.empresa?.trim() || 'Empresa'} • ${cliente.nombre?.trim() || 'Cliente'}`
-                    : 'Completa los datos del cliente para comenzar.'}
-                </p>
-              </div>
+            <EncabezadoPagina
+              seccion="Ventas"
+              titulo="Cotización"
+              subtitulo={(cliente.empresa?.trim() || cliente.nombre?.trim())
+                ? `${cliente.empresa?.trim() || 'Empresa'} · ${cliente.nombre?.trim() || 'Cliente'}`
+                : 'Completa los datos del cliente para comenzar.'}
+            >
               {isAdmin && (
                 <>
                   <label
@@ -8167,10 +8163,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   />
                 </>
               )}
-            </div>
+            </EncabezadoPagina>
 
             <div className="space-y-3">
-            <section className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 px-4 py-3">
+            <section className="glass-card rounded-2xl shadow-card border border-white/70 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
                 <h3 className="mq-sobre">Cliente</h3>
               </div>
@@ -8187,7 +8183,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           onChange={e => setCliente(c => ({ ...c, empresa: e.target.value }))}
                           onBlur={e => { if (!e.target.value.trim()) setCliente(c => ({ ...c, empresa: 'N/A' })); }}
                           disabled={!canEditClienteBase}
-                          className={`${fieldInputClass} ${!canEditClienteBase ? 'bg-gray-50 text-gray-500' : ''}`}
+                          className={`${fieldInputClass} ${!canEditClienteBase ? 'bg-slate-50 text-slate-500' : ''}`}
                         />
                       </label>
                       <label className={fieldLabelClass}>
@@ -8198,7 +8194,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           onChange={e => setCliente(c => ({ ...c, nombre: e.target.value }))}
                           onBlur={e => { if (!e.target.value.trim()) setCliente(c => ({ ...c, nombre: 'N/A' })); }}
                           disabled={!canEditClienteBase}
-                          className={`${fieldInputClass} ${!canEditClienteBase ? 'bg-gray-50 text-gray-500' : ''}`}
+                          className={`${fieldInputClass} ${!canEditClienteBase ? 'bg-slate-50 text-slate-500' : ''}`}
                         />
                       </label>
                       {isAdmin ? (
@@ -8230,7 +8226,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             type="button"
                             onClick={() => setShowProjectRegistro(v => !v)}
                             aria-expanded={showProjectRegistro}
-                            className="self-start px-3 py-1.5 text-sm text-left text-blue-700 rounded-lg hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                            className="mq-btn mq-btn-sm mq-btn-fantasma self-start text-slate-900"
                           >
                             {showProjectRegistro ? '− Ocultar registro de proyecto' : '+ Registrar proyecto'}
                           </button>
@@ -8294,7 +8290,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
             </section>
 
-            <section className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70">
+            <section className="glass-card rounded-2xl shadow-card border border-white/70">
               {/* Barra de herramientas: fija arriba al bajar por el carrito (escritorio). */}
               <div className="lg:sticky lg:top-0 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
                 <div className="flex items-center gap-2">
@@ -8377,7 +8373,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               <select
                                 value={cotizacionPartnerCategory}
                                 onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
-                                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                               >
                                 <option>Partner Autorizado</option>
                                 <option>Partner Silver</option>
@@ -8456,7 +8452,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             catalogInputRef.current?.focus();
                             notify(`Agregado ${p.sku || p.mpn}`, { tipo: 'ok', duracion: 1800 });
                           }}
-                          className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-3 ${i === catalogActivo ? 'bg-blue-50 dark:bg-slate-800' : ''}`}
+                          className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-3 ${i === catalogActivo ? 'bg-slate-100' : ''}`}
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 min-w-0">
@@ -8563,35 +8559,36 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         {currentView === 'cuenta' && canViewAccount && (
           <div className="space-y-4 view-enter">
-            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
-              <div className="p-4 border-b bg-gray-50">
-                <h3 className="font-semibold">Mi cuenta</h3>
+            <EncabezadoPagina seccion="Cuenta" titulo="Mi cuenta" subtitulo="Tus datos, nivel de partner y contraseña." />
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200">
+                <h3 className="text-base font-semibold text-slate-900">Datos</h3>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Nombre
                   <input
                     value={user?.nombre || user?.usuario || ''}
                     readOnly
-                    className="px-3 py-2 border rounded text-sm text-gray-800 bg-gray-50"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Empresa
                   <input
                     value={user?.empresa || ''}
                     readOnly
-                    className="px-3 py-2 border rounded text-sm text-gray-800 bg-gray-50"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Nivel de partner
                   {canEditPartnerCategory ? (
                     <div className="flex items-center gap-2">
                       <select
                         value={ownPartnerCategory}
                         onChange={e => setOwnPartnerCategory(e.target.value)}
-                        className="px-3 py-2 border rounded text-sm text-gray-800 bg-white flex-1"
+                        className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white flex-1"
                       >
                         <option>Partner Autorizado</option>
                         <option>Partner Silver</option>
@@ -8601,7 +8598,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         onClick={updateOwnPartnerCategory}
                         disabled={updatingOwnPartnerCategory}
-                        className="px-3 py-2 bg-slate-900 text-white rounded text-xs hover:bg-slate-800 disabled:opacity-50"
+                        className="mq-btn mq-btn-primario"
                       >
                         Guardar
                       </button>
@@ -8610,41 +8607,41 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <input
                       value={user?.partner_category || 'Partner Autorizado'}
                       readOnly
-                      className="px-3 py-2 border rounded text-sm text-gray-800 bg-gray-50"
+                      className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
                     />
                   )}
                 </label>
               </div>
             </div>
 
-            <div className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 overflow-hidden">
-              <div className="p-4 border-b bg-gray-50">
-                <h3 className="font-semibold">Cambiar contraseña</h3>
+            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-200">
+                <h3 className="text-base font-semibold text-slate-900">Cambiar contraseña</h3>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
-                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Nueva contraseña
                   <input
                     type="password"
                     value={accountPassword}
                     onChange={e => setAccountPassword(e.target.value)}
-                    className="px-3 py-2 border rounded text-sm text-gray-800"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Confirmar contraseña
                   <input
                     type="password"
                     value={accountPasswordConfirm}
                     onChange={e => setAccountPasswordConfirm(e.target.value)}
-                    className="px-3 py-2 border rounded text-sm text-gray-800"
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <div>
                   <button
                     onClick={updateOwnPassword}
                     disabled={saving}
-                    className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 text-sm"
+                    className="mq-btn mq-btn-primario"
                   >
                     Guardar contraseña
                   </button>
@@ -8654,40 +8651,40 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {projectRegistroModal && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-float w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h3 className="font-semibold">Registro de proyecto</h3>
+                <h3 className="text-base font-semibold text-slate-900">Registro de proyecto</h3>
                 <button
                   onClick={() => setProjectRegistroModal(null)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="mq-btn mq-btn-sm mq-btn-fantasma"
                 >
                   Cerrar
                 </button>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 <div>
-                  <div className="text-xs text-gray-500">Cliente final</div>
-                  <div className="font-semibold text-gray-800">{projectRegistroModal.cliente_final || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">Cliente final</div>
+                  <div className="font-semibold text-slate-800">{projectRegistroModal.cliente_final || 'N/A'}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Nombre del proyecto</div>
-                  <div className="font-semibold text-gray-800">{projectRegistroModal.cliente_telefono || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">Nombre del proyecto</div>
+                  <div className="font-semibold text-slate-800">{projectRegistroModal.cliente_telefono || 'N/A'}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Fecha ejecución</div>
-                  <div className="font-semibold text-gray-800">{projectRegistroModal.fecha_ejecucion || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">Fecha ejecución</div>
+                  <div className="font-semibold text-slate-800">{projectRegistroModal.fecha_ejecucion || 'N/A'}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Fecha implementación</div>
-                  <div className="font-semibold text-gray-800">{projectRegistroModal.fecha_implementacion || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">Fecha implementación</div>
+                  <div className="font-semibold text-slate-800">{projectRegistroModal.fecha_implementacion || 'N/A'}</div>
                 </div>
                 <div className="md:col-span-2">
-                  <div className="text-xs text-gray-500">VMS a utilizar</div>
-                  <div className="font-semibold text-gray-800">{projectRegistroModal.vms || 'N/A'}</div>
+                  <div className="text-xs text-slate-500">VMS a utilizar</div>
+                  <div className="font-semibold text-slate-800">{projectRegistroModal.vms || 'N/A'}</div>
                 </div>
                 <div className="md:col-span-2">
-                  <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-600">
                     <input
                       type="checkbox"
                       checked={Boolean(dismissedRegistroById[projectRegistroModal.id])}
@@ -8706,11 +8703,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
         {compraPreviewCot && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-scale-in">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-float w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-scale-in">
               <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h3 className="font-semibold">Enviar a compras</h3>
-                <button onClick={() => setCompraPreviewCot(null)} className="text-gray-500 hover:text-gray-700">Cerrar</button>
+                <h3 className="text-base font-semibold text-slate-900">Enviar a compras</h3>
+                <button onClick={() => setCompraPreviewCot(null)} className="mq-btn mq-btn-sm mq-btn-fantasma">Cerrar</button>
               </div>
               <div className="p-4 space-y-3">
                 <div className="text-sm">
@@ -8721,7 +8718,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </p>
                 </div>
                 <div
-                  className="border rounded-lg p-3 bg-gray-50 text-sm"
+                  className="border rounded-lg p-3 bg-slate-50 text-sm"
                   dangerouslySetInnerHTML={{ __html: sanitizeCompraHtml(buildCompraHtml(compraPreviewCot)) }}
                 ></div>
                 <div className="flex flex-wrap gap-2">
@@ -8733,7 +8730,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </button>
                   <button
                     onClick={() => navigator.clipboard.writeText(`Compra ${getCompraOrigenLabel(compraPreviewCot)} - BO ${(boByCotizacionId[compraPreviewCot.id] || '').trim() || compraPreviewCot.id || 'XXXX'}`)}
-                    className="px-3 py-1.5 bg-slate-200 text-slate-800 rounded hover:bg-slate-300 text-sm"
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
                     Copiar asunto
                   </button>
@@ -8747,8 +8744,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             en la fila flex, su texto largo se quedaba con el ancho y dejaba el
             contenido del cliente en 0px. */}
         {!isAdmin && (
-          <footer className="mt-auto px-2 py-3 pb-24 lg:pb-3 text-xs leading-4 text-gray-500 border-t bg-white/70 dark:bg-slate-900/70 dark:border-slate-800">
-            <div className="w-[97%] mx-auto">
+          <footer className="mt-auto px-4 py-3 pb-24 lg:pb-3 lg:pr-56 text-[11px] leading-4 text-slate-500 border-t border-slate-200">
+            <div className="max-w-5xl">
               <p>
                 Plataforma de gestión de cotizaciones comerciales diseñada para la emisión de propuestas formales.
                 Solución desarrollada como iniciativa de optimización de procesos comerciales por Alexis González – Product Manager.

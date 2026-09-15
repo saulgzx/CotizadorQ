@@ -15,7 +15,7 @@ export default function ThemeToggle({ theme, onToggle }) {
       onClick={onToggle}
       aria-label="Cambiar tema"
       title={isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
-      className="relative px-2.5 py-2 rounded-xl text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10 transition-colors duration-200"
+      className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 transition-colors duration-200"
     >
       <span className="relative block w-[18px] h-[18px]">
         {/* Sol: visible en tema claro */}

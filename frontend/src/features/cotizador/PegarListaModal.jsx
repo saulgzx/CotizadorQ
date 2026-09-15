@@ -35,12 +35,12 @@ export default function PegarListaModal({ abierto, textoInicial = '', productos,
   };
 
   return (
-    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-black/40 p-4 pt-[8vh]' onClick={onCerrar}>
+    <div className='fixed inset-0 z-[65] flex items-start justify-center bg-slate-950/40 backdrop-blur-[2px] p-4 pt-[8vh]' onClick={onCerrar}>
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='pegar-lista-titulo'
-        className='flex max-h-[84vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-scale-in dark:bg-slate-900'
+        className='flex max-h-[84vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-float animate-scale-in dark:bg-slate-900'
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onCerrar();
@@ -124,14 +124,14 @@ export default function PegarListaModal({ abierto, textoInicial = '', productos,
         <div className='flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-3 dark:border-slate-700'>
           <span className='text-xs text-slate-500'>Ctrl+Enter agrega · Esc cierra</span>
           <div className='flex gap-2'>
-            <button type='button' onClick={onCerrar} className='rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100'>
+            <button type='button' onClick={onCerrar} className='mq-btn mq-btn-fantasma'>
               Cancelar
             </button>
             <button
               type='button'
               onClick={agregar}
               disabled={total === 0}
-              className='rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900'
+              className='mq-btn mq-btn-primario'
             >
               Agregar {total > 0 ? `${total} producto${total === 1 ? '' : 's'}` : ''}
             </button>

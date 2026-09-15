@@ -136,10 +136,10 @@ export default function ConnectionsMap() {
   const alerts = data?.alerts || [];
 
   return (
-    <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
+    <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Mapa de conexiones</h2>
+          <h2 className="text-lg font-semibold text-slate-800">Mapa de conexiones</h2>
           <p className="text-xs text-slate-500">
             Ubicación aproximada por IP (nivel ciudad) · {located.length} de {sessions.length} sesiones localizadas
             {data && data.geo_enabled === false && ' · geolocalización desactivada'}
@@ -150,7 +150,7 @@ export default function ConnectionsMap() {
         </div>
         <button
           onClick={() => load()}
-          className="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800"
+          className="mq-btn mq-btn-sm mq-btn-secundario"
         >
           Refrescar
         </button>

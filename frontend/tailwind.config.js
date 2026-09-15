@@ -7,6 +7,22 @@ export default {
   ],
   theme: {
     extend: {
+      // Grises fríos del sistema MyQuote: los tonos oscuros dejan de ser azul marino.
+      colors: {
+        slate: {
+          50: '#F7F8FA',
+          100: '#EEF0F3',
+          200: '#E1E4E8',
+          300: '#CBD0D6',
+          400: '#9AA4AF',
+          500: '#6B7480',
+          600: '#5A6472',
+          700: '#3A424C',
+          800: '#1F252C',
+          900: '#14181D',
+          950: '#0C0F12',
+        },
+      },
       fontFamily: {
         sans: ["'Plus Jakarta Sans'", "'Segoe UI'", 'system-ui', 'sans-serif'],
         mono: ["'JetBrains Mono'", 'ui-monospace', "'Cascadia Mono'", 'Consolas', 'monospace'],
