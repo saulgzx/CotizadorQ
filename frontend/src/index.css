@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Krona+One&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Krona+One&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,13 +7,45 @@
 @layer base {
   :root {
     --font-sans: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
-    --font-display: 'Krona One', 'Segoe UI', system-ui, sans-serif;
+    /* Krona One queda solo para la marca (.font-brand). */
+    --font-brand: 'Krona One', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+    /* Sistema visual MyQuote v1 */
+    --mq-ground: #F3F4F6;
+    --mq-surface: #FFFFFF;
+    --mq-surface-2: #F7F8FA;
+    --mq-line: #E1E4E8;
+    --mq-line-strong: #CBD0D6;
+    --mq-ink: #0F1216;
+    --mq-muted: #5A6472;
+    --mq-accent: #3050E8;
+    --mq-shadow-card: 0 1px 2px rgba(15, 18, 22, 0.05);
+    --mq-shadow-float: 0 12px 32px -12px rgba(15, 18, 22, 0.28);
+  }
+
+  .dark {
+    --mq-ground: #0C0F12;
+    --mq-surface: #14181D;
+    --mq-surface-2: #191E24;
+    --mq-line: #262D35;
+    --mq-line-strong: #36404A;
+    --mq-ink: #EEF1F4;
+    --mq-muted: #9AA4AF;
+    --mq-accent: #7F97FF;
+    --mq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --mq-shadow-float: 0 14px 36px -12px rgba(0, 0, 0, 0.7);
   }
 
   body {
     font-family: var(--font-sans);
-    color: #0f172a;
-    background-color: #f7f4ef;
+    color: #1C2127;
+    background-color: var(--mq-ground);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
   }
 
   *:focus-visible {
@@ -25,7 +57,7 @@
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
   select,
   textarea {
-    border-color: #e2e8f0;
+    border-color: var(--mq-line-strong);
     transition: border-color 120ms ease, box-shadow 120ms ease;
   }
 
@@ -33,8 +65,8 @@
   select:focus-visible,
   textarea:focus-visible {
     outline: none;
-    border-color: #93c5fd;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+    border-color: var(--mq-accent);
+    box-shadow: 0 0 0 3px rgba(48, 80, 232, 0.16);
   }
 
   input[type='checkbox'],
@@ -60,14 +92,61 @@
 }
 
 @layer utilities {
+  /* Títulos: Plus Jakarta Sans 700 con espaciado cerrado (antes Krona One). */
   .font-display {
-    font-family: var(--font-display);
-    letter-spacing: 0.02em;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .font-brand {
+    font-family: var(--font-brand);
+    letter-spacing: 0.01em;
   }
 
   .glass-card {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(14px);
+    background: var(--mq-surface);
+  }
+
+  .shadow-card { box-shadow: var(--mq-shadow-card); }
+  .shadow-float { box-shadow: var(--mq-shadow-float); }
+
+  /* Botones del sistema: alturas 32 / 40 / 44, radio 10 */
+  .mq-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.5rem;
+    padding: 0 1rem;
+    border-radius: 0.625rem;
+    border: 1px solid transparent;
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .mq-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .mq-btn-sm { height: 2rem; padding: 0 0.75rem; font-size: 0.8125rem; border-radius: 0.5rem; }
+  .mq-btn-lg { height: 2.75rem; padding: 0 1.25rem; font-size: 0.9375rem; }
+  .mq-btn-xs { height: 1.75rem; padding: 0 0.625rem; font-size: 0.75rem; border-radius: 0.4375rem; }
+  .mq-btn-primario { background: var(--mq-ink); color: var(--mq-surface); }
+  .mq-btn-primario:hover:not(:disabled) { opacity: 0.88; }
+  .mq-btn-secundario { background: var(--mq-surface); color: var(--mq-ink); border-color: var(--mq-line-strong); }
+  .mq-btn-secundario:hover:not(:disabled) { background: var(--mq-surface-2); }
+  .mq-btn-fantasma { background: transparent; color: var(--mq-muted); }
+  .mq-btn-fantasma:hover:not(:disabled) { background: var(--mq-surface-2); color: var(--mq-ink); }
+  .mq-btn-peligro { background: transparent; color: #B42318; border-color: var(--mq-line); }
+  .mq-btn-peligro:hover:not(:disabled) { background: #FBE8E6; }
+  .dark .mq-btn-peligro { color: #FF8A7F; }
+  .dark .mq-btn-peligro:hover:not(:disabled) { background: rgba(255, 138, 127, 0.13); }
+
+  .mq-sobre {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mq-muted);
   }
 }
 
@@ -146,47 +225,51 @@
 
 /* ---------- a) Fondo de la app ---------- */
 .app-bg {
-  background-color: #f7f4ef;
-  background-image:
-    radial-gradient(1200px circle at top left, #e0f2fe, transparent 55%),
-    radial-gradient(900px circle at bottom right, #fef3c7, transparent 60%);
+  background-color: var(--mq-ground);
 }
 
-.dark .app-bg {
-  background-color: #0b1220;
-  background-image:
-    radial-gradient(1200px circle at top left, rgba(30, 58, 138, 0.35), transparent 55%),
-    radial-gradient(900px circle at bottom right, rgba(180, 83, 9, 0.14), transparent 60%);
+/* Tarjetas: superficie sólida, borde de 1 px y sombra mínima (sin vidrio). */
+.glass-card {
+  background: var(--mq-surface);
+  border-color: var(--mq-line) !important;
+  box-shadow: var(--mq-shadow-card) !important;
+}
+
+/* Contraste mínimo legible para texto tenue (antes slate-400 ≈ 2.8:1). */
+.text-slate-400,
+.text-gray-400 {
+  color: #6B7480;
 }
 
 /* ---------- b) Modo oscuro retrofit ---------- */
 .dark {
   color-scheme: dark;
-  background-color: #0b1220;
+  background-color: #0C0F12;
 }
 
 .dark body {
-  background-color: #0b1220;
-  color: #e2e8f0;
+  background-color: #0C0F12;
+  color: #DCE1E6;
 }
 
 /* Superficies */
-.dark .bg-white { background-color: #0f172a; }
-.dark .bg-white\/70 { background-color: rgba(15, 23, 42, 0.7); }
-.dark .bg-white\/80 { background-color: rgba(15, 23, 42, 0.8); }
-.dark .bg-slate-50 { background-color: #1e293b; }
-.dark .bg-gray-50 { background-color: #1e293b; }
-.dark .bg-slate-100 { background-color: #1e293b; }
-.dark .bg-gray-100 { background-color: #1e293b; }
-.dark .bg-slate-200 { background-color: #334155; }
-.dark .bg-slate-900 { background-color: #1e293b; }
-.dark .bg-slate-800 { background-color: #334155; }
+.dark .bg-white { background-color: #14181D; }
+.dark .bg-white\/70 { background-color: rgba(20, 24, 29, 0.85); }
+.dark .bg-white\/80 { background-color: rgba(20, 24, 29, 0.9); }
+.dark .bg-white\/95 { background-color: rgba(20, 24, 29, 0.95); }
+.dark .bg-slate-50 { background-color: #191E24; }
+.dark .bg-gray-50 { background-color: #191E24; }
+.dark .bg-slate-100 { background-color: #1F252C; }
+.dark .bg-gray-100 { background-color: #1F252C; }
+.dark .bg-slate-200 { background-color: #2A323B; }
+.dark .bg-slate-900 { background-color: #EEF1F4; color: #0F1216; }
+.dark .bg-slate-800 { background-color: #2A323B; }
 .dark .bg-black\/40 { background-color: rgba(0, 0, 0, 0.65); }
 
 /* Hovers de superficie */
 .dark .hover\:bg-slate-50:hover { background-color: rgba(30, 41, 59, 0.7); }
 .dark .hover\:bg-gray-50:hover { background-color: rgba(30, 41, 59, 0.7); }
-.dark .hover\:bg-slate-800:hover { background-color: #475569; }
+.dark .hover\:bg-slate-800:hover { background-color: #FFFFFF; }
 .dark .hover\:bg-slate-100:hover { background-color: rgba(51, 65, 85, 0.6); }
 
 /* Textos */
@@ -199,8 +282,8 @@
 .dark .text-gray-600 { color: #94a3b8; }
 .dark .text-slate-500 { color: #94a3b8; }
 .dark .text-gray-500 { color: #94a3b8; }
-.dark .text-slate-400 { color: #64748b; }
-.dark .text-gray-400 { color: #64748b; }
+.dark .text-slate-400 { color: #8A94A0; }
+.dark .text-gray-400 { color: #8A94A0; }
 .dark .text-blue-600 { color: #60a5fa; }
 .dark .text-blue-700 { color: #93c5fd; }
 .dark .text-amber-700 { color: #fcd34d; }
@@ -208,8 +291,9 @@
 .dark .text-rose-700 { color: #fda4af; }
 
 /* Bordes y anillos */
-.dark .border-slate-200 { border-color: rgba(51, 65, 85, 0.6); }
-.dark .border-white\/70 { border-color: rgba(51, 65, 85, 0.6); }
+.dark .border-slate-200 { border-color: #262D35; }
+.dark .border-slate-300 { border-color: #36404A; }
+.dark .border-white\/70 { border-color: #262D35; }
 .dark .border-slate-900 { border-color: #cbd5e1; }
 .dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
 .dark .ring-blue-200 { --tw-ring-color: rgba(96, 165, 250, 0.35); }
@@ -225,26 +309,26 @@
 
 /* Glass card oscuro */
 .dark .glass-card {
-  background: rgba(15, 23, 42, 0.65);
-  border-color: rgba(51, 65, 85, 0.5);
+  background: var(--mq-surface);
+  border-color: var(--mq-line) !important;
 }
 
 /* Inputs / selects / textareas */
 .dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']),
 .dark select,
 .dark textarea {
-  background-color: #0f172a;
-  color: #e2e8f0;
-  border-color: rgba(51, 65, 85, 0.6);
+  background-color: #14181D;
+  color: #EEF1F4;
+  border-color: #36404A;
 }
 
-.dark select option { background-color: #0f172a; color: #e2e8f0; }
+.dark select option { background-color: #14181D; color: #EEF1F4; }
 
 .dark input:not([type='checkbox']):not([type='radio']):not([type='range']):focus-visible,
 .dark select:focus-visible,
 .dark textarea:focus-visible {
-  border-color: rgba(96, 165, 250, 0.6);
-  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+  border-color: #7F97FF;
+  box-shadow: 0 0 0 3px rgba(127, 151, 255, 0.22);
 }
 
 .dark input::placeholder,
@@ -315,14 +399,7 @@ a {
   transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 
-.glass-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px -16px rgba(15, 23, 42, 0.25);
-}
 
-.dark .glass-card:hover {
-  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.6);
-}
 
 button:active:not(:disabled) {
   transform: scale(0.98);
@@ -357,12 +434,12 @@ button:active:not(:disabled) {
 
 /* ---------- h) Focus visible accesible en ambos temas ---------- */
 :focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid #3050E8;
   outline-offset: 2px;
 }
 
 .dark :focus-visible {
-  outline-color: #60a5fa;
+  outline-color: #7F97FF;
 }
 
 /* ---------- i) Skeleton shimmer ---------- */
@@ -420,3 +497,14 @@ tbody tr {
     scroll-behavior: auto !important;
   }
 }
+
+/* Tintes suaves con opacidad (filas destacadas) en oscuro */
+.dark [class*="bg-green-50/"],
+.dark [class*="bg-emerald-50/"] { background-color: rgba(82, 201, 143, 0.07); }
+.dark [class*="bg-blue-50/"] { background-color: rgba(143, 164, 255, 0.07); }
+.dark [class*="bg-amber-50/"] { background-color: rgba(240, 181, 74, 0.07); }
+.dark [class*="bg-rose-50/"],
+.dark [class*="bg-red-50/"] { background-color: rgba(255, 138, 127, 0.06); }
+.dark .bg-green-50 { background-color: rgba(82, 201, 143, 0.12); }
+.dark .border-green-300 { border-color: rgba(82, 201, 143, 0.45); }
+.dark .border-amber-300 { border-color: rgba(240, 181, 74, 0.45); }

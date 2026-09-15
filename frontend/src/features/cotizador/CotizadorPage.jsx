@@ -71,6 +71,7 @@ import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
 import Resaltado from '../ui/Resaltado';
+import Icono from '../ui/Icono';
 import { EstadoVacio, FilasEsqueleto, ListaEsqueleto, TarjetasEsqueleto } from '../ui/Esqueleto';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
@@ -113,7 +114,7 @@ const NAV_ICON_PATHS = {
 };
 
 const NavIcon = ({ name, className = 'w-5 h-5' }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
     <path d={NAV_ICON_PATHS[name] || NAV_ICON_PATHS.menu} />
   </svg>
 );
@@ -4576,7 +4577,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <button
                   onClick={() => saveBoMeta(order)}
                   disabled={(!isDirty && !isAxisDirty(order) && !isIntcomexDirty(order)) || boSaving[order.bo]}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order) || isIntcomexDirty(order)) ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${(isDirty || isAxisDirty(order) || isIntcomexDirty(order)) ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400'} ${boSaving[order.bo] ? 'opacity-60' : ''}`}
                 >
                   {boSaving[order.bo] ? 'Guardando...' : 'Guardar'}
                 </button>
@@ -4593,7 +4594,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <button
                   onClick={() => savePurchaseMeta(order.bo)}
                   disabled={!isPurchaseDirty}
-                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isPurchaseDirty ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400'}`}
+                  className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap ${isPurchaseDirty ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400'}`}
                 >
                   Guardar cambios
                 </button>
@@ -5065,7 +5066,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 )}
                 <button
                   onClick={handleLogin}
-                  className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-blue-600 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 transition"
+                  className="mq-btn mq-btn-lg mq-btn-primario w-full"
                 >
                   Ingresar
                 </button>
@@ -5138,7 +5139,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </tbody>
             </table>
             <div className="mt-4 flex justify-end">
-              <div className="bg-blue-600 text-white px-6 py-3 rounded-lg">
+              <div className="bg-slate-900 text-white px-6 py-3 rounded-lg">
                 <span className="text-sm">TOTAL (No incluye IVA): </span>
                 <span className="text-xl font-bold">{formatCurrency(totalCotizacion)}</span>
               </div>
@@ -5166,17 +5167,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         </div>
         <div className="mt-4 flex justify-center gap-3 flex-wrap print:hidden">
-          <button onClick={() => setCurrentView('cotizador')} className="px-5 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+          <button onClick={() => setCurrentView('cotizador')} className="mq-btn mq-btn-fantasma">
             Volver
           </button>
-          <button onClick={exportCotizacionPdf} className="px-5 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800">
+          <button onClick={exportCotizacionPdf} className="mq-btn mq-btn-secundario">
             Exportar PDF
           </button>
-          <button onClick={exportCotizacionExcel} className="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+          <button onClick={exportCotizacionExcel} className="mq-btn mq-btn-secundario">
             Exportar Excel
           </button>
-          <button onClick={saveCotizacion} disabled={saving} className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-            {saving ? 'Guardando...' : 'Guardar Cotización'}
+          <button onClick={saveCotizacion} disabled={saving} className="mq-btn mq-btn-primario">
+            {saving ? 'Guardando…' : 'Guardar cotización'}
           </button>
         </div>
       </div>
@@ -5202,23 +5203,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // Modelo único de navegación: alimenta los pills de desktop, el drawer y la barra inferior móvil.
   const navItems = [
-    canViewDashboard && { key: 'dashboard', label: 'Dashboard', short: 'Inicio', icon: 'home' },
-    isFullAdmin && { key: 'ordenes', label: 'Ordenes Activas', short: 'Órdenes', icon: 'truck' },
-    (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', label: 'Vista Compras', short: 'Compras', icon: 'cart' },
-    isFullAdmin && { key: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
-    isFullAdmin && { key: 'usuarios', label: 'Gestión de usuarios', short: 'Usuarios', icon: 'users' },
-    canViewCotizador && { key: 'cotizador', label: 'Cotizador', short: 'Cotizar', icon: 'calc', badge: cotizacion.length > 0 ? cotizacion.length : null, badgeTone: 'blue' },
-    canViewStock && { key: 'stock', label: 'Stock disponible', short: 'Stock', icon: 'box' },
+    canViewCotizador && { key: 'cotizador', grupo: 'ventas', label: 'Cotizador', short: 'Cotizar', icon: 'calc', badge: cotizacion.length > 0 ? cotizacion.length : null, badgeTone: 'blue' },
     canViewHistorial && {
       key: 'historial',
-      label: isFullAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones',
+      grupo: 'ventas',
+      label: isFullAdmin ? 'Historial' : 'Mis cotizaciones',
       short: 'Historial',
       icon: 'clock',
       badge: isFullAdmin && historialCounts.registroPendientes > 0 ? historialCounts.registroPendientes : null,
       badgeTone: 'amber'
     },
-    canViewAccount && { key: 'cuenta', label: 'Mi cuenta', short: 'Cuenta', icon: 'user' }
+    canViewStock && { key: 'stock', grupo: 'ventas', label: 'Stock disponible', short: 'Stock', icon: 'box' },
+    canViewDashboard && { key: 'dashboard', grupo: 'ventas', label: 'Dashboard', short: 'Inicio', icon: 'home' },
+    isFullAdmin && { key: 'ordenes', grupo: 'operaciones', label: 'Órdenes activas', short: 'Órdenes', icon: 'truck' },
+    (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', grupo: 'operaciones', label: 'Vista compras', short: 'Compras', icon: 'cart' },
+    isFullAdmin && { key: 'admin', grupo: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
+    isFullAdmin && { key: 'usuarios', grupo: 'admin', label: 'Usuarios', short: 'Usuarios', icon: 'users' },
+    canViewAccount && { key: 'cuenta', grupo: 'cuenta', label: 'Mi cuenta', short: 'Cuenta', icon: 'user' }
   ].filter(Boolean).filter(item => !navRestriction || navRestriction.includes(item.key));
+  const NAV_GRUPOS = [['ventas', 'Ventas'], ['operaciones', 'Operaciones'], ['admin', 'Administración'], ['cuenta', 'Cuenta']];
+  const gruposNav = NAV_GRUPOS
+    .map(([clave, titulo]) => ({ clave, titulo, items: navItems.filter(item => item.grupo === clave) }))
+    .filter(g => g.items.length > 0);
+  // Con un solo grupo (clientes) no se muestran encabezados.
+  const mostrarTitulosNav = gruposNav.length > 1;
+  const vistaActual = navItems.find(item => item.key === currentView);
+  const claseNavItem = (activo, colapsado) => `relative w-full flex items-center gap-3 rounded-lg text-sm transition ${colapsado ? 'justify-center px-0 h-10' : 'px-3 h-9 text-left'} ${activo ? 'bg-slate-100 text-slate-900 font-semibold before:absolute before:-left-3 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-[var(--mq-ink)]' : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`;
   const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
   const bottomNavItems = BOTTOM_NAV_PRIORITY
     .map(key => navItems.find(item => item.key === key))
@@ -5240,55 +5250,62 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </a>
       )}
       <aside
-        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-white/60 dark:border-slate-800/60 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl transition-[width] duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-64'}`}
+        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-slate-200 bg-white transition-[width] duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-60'}`}
         aria-label="Barra lateral de navegación"
       >
-        <div className={`flex items-center gap-3 py-5 border-b border-slate-100/80 dark:border-slate-800 ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'}`}>
+        <div className={`flex items-center gap-3 h-16 ${sidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
           {sidebarCollapsed ? (
             <img src="/brand/myquote-app-icon-dark.svg" alt="MyQuote" className="w-10 h-10 shrink-0" />
           ) : (
             <div className="min-w-0 flex-1">
-              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-9 w-auto dark:invert" />
-              <div className="mt-1.5 text-xs text-slate-500 truncate">Cotización Axis / Qnap</div>
+              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
             </div>
           )}
         </div>
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Secciones">
-          {navItems.map(item => (
+        <nav className="flex-1 overflow-y-auto px-3 pb-3 space-y-5" aria-label="Secciones">
+          {gruposNav.map(grupo => (
+          <div key={grupo.clave} className="space-y-0.5">
+          {mostrarTitulosNav && (sidebarCollapsed
+            ? <div className="mx-2 mb-2 border-t border-slate-200" aria-hidden="true" />
+            : <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>)}
+          {grupo.items.map(item => (
             <button
               key={item.key}
               onClick={() => setCurrentView(item.key)}
               title={sidebarCollapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-3 rounded-xl text-sm font-medium transition ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5 text-left'} ${currentView === item.key ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10'}`}
+              aria-current={currentView === item.key ? 'page' : undefined}
+              className={claseNavItem(currentView === item.key, sidebarCollapsed)}
             >
               <span className="relative shrink-0">
-                <NavIcon name={item.icon} />
+                <NavIcon name={item.icon} className="w-[18px] h-[18px]" />
                 {sidebarCollapsed && item.badge ? (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center">
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-slate-900 text-white text-[9px] flex items-center justify-center">
                     {item.badge}
                   </span>
                 ) : null}
               </span>
               {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
               {!sidebarCollapsed && item.badge ? (
-                <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-xs rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
                   {item.badge}
                 </span>
               ) : null}
             </button>
           ))}
+          </div>
+          ))}
         </nav>
-        <div className="p-3 border-t border-slate-100/80 dark:border-slate-800 space-y-1">
+        <div className="p-3 border-t border-slate-200 space-y-1">
           <button
             onClick={() => setPaletteOpen(true)}
             title={sidebarCollapsed ? 'Buscar (Ctrl+K)' : undefined}
-            className={`w-full flex items-center gap-3 rounded-xl text-sm font-medium transition text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10 ${sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5 text-left'}`}
+            className={claseNavItem(false, sidebarCollapsed)}
           >
-            <NavIcon name="search" className="w-5 h-5 shrink-0" />
+            <NavIcon name="search" className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && (
               <>
                 <span className="flex-1 truncate">Buscar</span>
-                <kbd className="text-xs px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-600 text-slate-400">Ctrl K</kbd>
+                <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">Ctrl K</kbd>
               </>
             )}
           </button>
@@ -5335,7 +5352,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <button
             onClick={toggleSidebar}
             aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:bg-white/70 dark:hover:bg-white/10 text-xs"
+            className="w-full flex items-center justify-center gap-2 h-8 rounded-lg text-slate-500 hover:bg-slate-100 text-xs"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} aria-hidden="true">
               <path d="m15 6-6 6 6 6" />
@@ -5345,14 +5362,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="lg:hidden bg-white/80 backdrop-blur-xl border-b border-white/60 dark:border-slate-800/60 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between flex-wrap gap-3 gap-y-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="min-w-0">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
-                <h1 className="mt-1 text-sm sm:text-base font-display text-slate-700 truncate">Cotización Axis / Qnap - Intcomex</h1>
-                <p className="text-xs text-slate-500 truncate">Bienvenido, {user?.nombre || user?.usuario}</p>
-              </div>
+        <header className="lg:hidden bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40">
+          <div className="px-4 h-14 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <img src="/brand/myquote-symbol-web.svg" alt="MyQuote" className="h-7 w-7 shrink-0 dark:invert" />
+              <h1 className="text-base font-bold tracking-tight text-slate-900 truncate">{vistaActual?.label || 'MyQuote'}</h1>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
@@ -5360,7 +5374,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 type="button"
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label="Abrir menú"
-                className="p-2 rounded-xl text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+                className="grid h-10 w-10 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
               >
                 <NavIcon name="menu" className="w-6 h-6" />
               </button>
@@ -5391,21 +5405,27 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <NavIcon name="close" className="w-5 h-5" />
                 </button>
               </div>
-              <nav className="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Secciones">
-                {navItems.map(item => (
+              <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Secciones">
+                {gruposNav.map(grupo => (
+                <div key={grupo.clave} className="space-y-0.5">
+                {mostrarTitulosNav && <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>}
+                {grupo.items.map(item => (
                   <button
                     key={item.key}
                     onClick={() => { setCurrentView(item.key); setMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left transition ${currentView === item.key ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10'}`}
+                    aria-current={currentView === item.key ? 'page' : undefined}
+                    className={`${claseNavItem(currentView === item.key, false)} h-11`}
                   >
                     <NavIcon name={item.icon} />
                     <span className="flex-1 truncate">{item.label}</span>
                     {item.badge ? (
-                      <span className={`inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-xs rounded-full ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-blue-500 text-white'}`}>
+                      <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
                         {item.badge}
                       </span>
                     ) : null}
                   </button>
+                ))}
+                </div>
                 ))}
               </nav>
               <div className="p-3 border-t border-slate-100 dark:border-slate-800">
@@ -5472,12 +5492,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 key={item.key}
                 onClick={() => setCurrentView(item.key)}
                 aria-label={item.label}
-                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-xs font-medium transition ${currentView === item.key ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+                className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-xs font-medium transition ${currentView === item.key ? 'text-slate-900 font-semibold' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 <span className="relative">
                   <NavIcon name={item.icon} className="w-5 h-5" />
                   {item.badge ? (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center">
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-slate-900 text-white text-[9px] flex items-center justify-center">
                       {item.badge}
                     </span>
                   ) : null}
@@ -5585,7 +5605,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <tr>
                         <td colSpan={canViewCotizador ? 6 : 5}>
                           <EstadoVacio
-                            icono="🔎"
+                            icono="search"
                             titulo={stockCatalogQuery.trim() ? 'Sin coincidencias en stock' : 'No hay stock disponible'}
                             detalle={stockCatalogQuery.trim() ? 'Prueba con el MPN o parte del modelo.' : 'Cuando entre mercadería aparecerá aquí.'}
                           />
@@ -5662,7 +5682,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4">
               <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-gray-800">Empresas</h2>
+                  <h2 className="text-base font-semibold text-slate-900">Empresas</h2>
                   <span className="text-xs text-gray-500">{Object.keys(empresaConfigs).length}</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -5739,7 +5759,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         onClick={saveEmpresaConfig}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                        className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm"
                       >
                         Guardar empresa
                       </button>
@@ -5993,7 +6013,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           <button
                             onClick={() => deleteUsuario(selectedUser.id)}
                             disabled={usuariosLoading || isFixedAdmin}
-                            className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 text-xs"
+                            className="px-2 py-1 bg-white border border-rose-200 text-rose-700 rounded hover:bg-rose-50 disabled:opacity-50 text-xs"
                           >
                             Eliminar
                           </button>
@@ -6047,7 +6067,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       type="submit"
                       disabled={usuariosLoading}
-                      className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm md:col-span-3"
+                      className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 text-sm md:col-span-3"
                     >
                       Crear usuario
                     </button>
@@ -6119,7 +6139,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         onClick={() => updateTablePage('usuarios', Math.max(1, usuariosPage.page - 1))}
                         disabled={usuariosPage.page <= 1}
-                        className="px-2 py-1 border rounded disabled:opacity-40"
+                        className="mq-btn mq-btn-xs mq-btn-secundario"
                       >
                         Anterior
                       </button>
@@ -6127,7 +6147,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         onClick={() => updateTablePage('usuarios', Math.min(usuariosPage.totalPages, usuariosPage.page + 1))}
                         disabled={usuariosPage.page >= usuariosPage.totalPages}
-                        className="px-2 py-1 border rounded disabled:opacity-40"
+                        className="mq-btn mq-btn-xs mq-btn-secundario"
                       >
                         Siguiente
                       </button>
@@ -6141,7 +6161,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </Suspense>
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-gray-800">Sesiones activas</h2>
+                <h2 className="text-base font-semibold text-slate-900">Sesiones activas</h2>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => loadActiveSessions()}
@@ -6281,7 +6301,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {currentView === 'admin' && isFullAdmin && (
           <div className="space-y-4 view-enter">
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
-              <h2 className="text-lg font-semibold text-gray-800 mb-3">Listas de precio</h2>
+              <h2 className="text-base font-semibold text-slate-900 mb-3">Listas de precio</h2>
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <button
                   onClick={() => setAdminOrigin('QNAP')}
@@ -6331,7 +6351,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="px-3 py-2 border rounded-lg" />
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <button onClick={handleAddProduct} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                    <button onClick={handleAddProduct} disabled={saving} className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
                       {saving ? 'Guardando...' : 'Guardar'}
                     </button>
                     <button onClick={() => setShowAddForm(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">Cancelar</button>
@@ -6395,7 +6415,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     onClick={deleteSelectedProducts}
                     disabled={saving}
-                    className="px-2 py-1 text-xs bg-red-500 text-white rounded-md hover:bg-red-600 disabled:opacity-50"
+                    className="px-2 py-1 text-xs bg-white border border-rose-200 text-rose-700 rounded-md hover:bg-rose-50 disabled:opacity-50"
                   >
                     Eliminar seleccionados ({selectedIds.size})
                   </button>
@@ -6486,7 +6506,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     onClick={() => updateTablePage('productos', Math.max(1, productosPage.page - 1))}
                     disabled={productosPage.page <= 1}
-                    className="px-2 py-1 border rounded disabled:opacity-40"
+                    className="mq-btn mq-btn-xs mq-btn-secundario"
                   >
                     Anterior
                   </button>
@@ -6494,7 +6514,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     onClick={() => updateTablePage('productos', Math.min(productosPage.totalPages, productosPage.page + 1))}
                     disabled={productosPage.page >= productosPage.totalPages}
-                    className="px-2 py-1 border rounded disabled:opacity-40"
+                    className="mq-btn mq-btn-xs mq-btn-secundario"
                   >
                     Siguiente
                   </button>
@@ -6510,11 +6530,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
                 <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-800">Funnel de aprobacion</h2>
+                    <h2 className="text-base font-semibold text-slate-900">Funnel de aprobación</h2>
                     <p className="text-xs text-gray-500">
                       {(funnelFrom || funnelTo)
                         ? `Rango: ${funnelFrom || '...'} - ${funnelTo || '...'}${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`
-                        : `Ultimos ${funnelDays} dias${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`}
+                        : `Últimos ${funnelDays} días${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`}
                     </p>
                   </div>
                   <CollapsibleFilters label="Filtros del funnel">
@@ -6545,9 +6565,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       disabled={Boolean(funnelFrom || funnelTo)}
                       className={`px-2 py-1.5 border rounded-lg text-xs ${funnelFrom || funnelTo ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-slate-700'}`}
                     >
-                      <option value={7}>7 dias</option>
-                      <option value={30}>30 dias</option>
-                      <option value={90}>90 dias</option>
+                      <option value={7}>7 días</option>
+                      <option value={30}>30 días</option>
+                      <option value={90}>90 días</option>
                     </select>
                     <select
                       value={funnelEmpresa}
@@ -6590,12 +6610,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-lg font-semibold text-gray-800">{isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}</h2>
+                  <h2 className="text-base font-semibold text-slate-900">{isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}</h2>
                   {selectedHistorialIds.size > 0 && (
                     <button
                       onClick={deleteSelectedCotizaciones}
                       disabled={saving}
-                      className="px-2 py-1 text-xs bg-red-500 text-white rounded-md hover:bg-red-600 disabled:opacity-50"
+                      className="px-2 py-1 text-xs bg-white border border-rose-200 text-rose-700 rounded-md hover:bg-rose-50 disabled:opacity-50"
                     >
                       Eliminar seleccionados ({selectedHistorialIds.size})
                     </button>
@@ -6707,7 +6727,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="p-6 text-center text-red-600">{historialError}</div>
               ) : historialPage.total === 0 ? (
                 <EstadoVacio
-                  icono="🗂️"
+                  icono="carpeta"
                   titulo={historial.length > 0 ? 'Ninguna cotización coincide con los filtros' : 'Aún no hay cotizaciones'}
                   detalle={historial.length > 0 ? 'Quita algún filtro para ver más resultados.' : 'Las cotizaciones que generes aparecerán aquí.'}
                   accion={historial.length > 0
@@ -6861,7 +6881,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           const isRechazada = option.value === 'rechazada';
                                           const isAceptada = option.value === 'aprobada';
                                           const baseClass = isActive
-                                            ? 'bg-blue-600 text-white'
+                                            ? 'bg-slate-900 text-white'
                                             : 'bg-slate-100 text-slate-700 hover:bg-slate-200';
                                           const toneClass = isRechazada
                                             ? 'text-red-700 font-semibold'
@@ -6893,7 +6913,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       </div>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); setEditorCotizacionId(cot.id); }}
-                                        className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                                        className="mq-btn mq-btn-sm mq-btn-primario"
                                       >
                                         Editar cotización
                                       </button>
@@ -6904,20 +6924,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                     <div className="mt-1 flex flex-wrap gap-2">
                                       <button
                                         onClick={(e) => { e.stopPropagation(); exportHistorialPdf(cot); }}
-                                        className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800"
+                                        className="mq-btn mq-btn-xs mq-btn-secundario"
                                       >
                                         PDF
                                       </button>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); exportHistorialExcel(cot); }}
-                                        className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                        className="mq-btn mq-btn-xs mq-btn-secundario"
                                       >
                                         Excel
                                       </button>
                                       {isAdmin && (
                                         <button
                                           onClick={(e) => { e.stopPropagation(); exportHistorialAxis(cot); }}
-                                          className="px-2 py-1 text-xs bg-amber-500 text-white rounded hover:bg-amber-600"
+                                          className="mq-btn mq-btn-xs mq-btn-secundario"
                                         >
                                           Exportar a Axis
                                         </button>
@@ -6938,7 +6958,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                           />
                                           <button
                                             onClick={(e) => { e.stopPropagation(); enviarACompras(cot); }}
-                                            className="inline-flex px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                            className="mq-btn mq-btn-xs mq-btn-primario"
                                           >
                                             Enviar a compras
                                           </button>
@@ -6988,7 +7008,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={() => updateTablePage('historial', Math.max(1, historialPage.page - 1))}
                       disabled={historialPage.page <= 1}
-                      className="px-2 py-1 border rounded disabled:opacity-40"
+                      className="mq-btn mq-btn-xs mq-btn-secundario"
                     >
                       Anterior
                     </button>
@@ -6996,7 +7016,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={() => updateTablePage('historial', Math.min(historialPage.totalPages, historialPage.page + 1))}
                       disabled={historialPage.page >= historialPage.totalPages}
-                      className="px-2 py-1 border rounded disabled:opacity-40"
+                      className="mq-btn mq-btn-xs mq-btn-secundario"
                     >
                       Siguiente
                     </button>
@@ -7012,7 +7032,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-[220px]">
-                  <h2 className="text-lg font-semibold text-gray-800">Ordenes Activas (OSO)</h2>
+                  <h2 className="text-base font-semibold text-slate-900">Ordenes Activas (OSO)</h2>
                   <p className="text-xs text-slate-500">Filtra por BO o cliente para encontrar rápido.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -7173,7 +7193,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {osoLoading ? (
                 <ListaEsqueleto className="mt-4" />
               ) : ordenesPage.total === 0 ? (
-                <EstadoVacio icono="🚚" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
+                <EstadoVacio icono="truck" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
               ) : (
                 <div className="mt-4 space-y-4">
                   {safePinnedBos.length > 0 && (
@@ -7204,7 +7224,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={() => updateTablePage('ordenes', Math.max(1, ordenesPage.page - 1))}
                       disabled={ordenesPage.page <= 1}
-                      className="px-2 py-1 border rounded disabled:opacity-40"
+                      className="mq-btn mq-btn-xs mq-btn-secundario"
                     >
                       Anterior
                     </button>
@@ -7212,7 +7232,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={() => updateTablePage('ordenes', Math.min(ordenesPage.totalPages, ordenesPage.page + 1))}
                       disabled={ordenesPage.page >= ordenesPage.totalPages}
-                      className="px-2 py-1 border rounded disabled:opacity-40"
+                      className="mq-btn mq-btn-xs mq-btn-secundario"
                     >
                       Siguiente
                     </button>
@@ -7290,7 +7310,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-[220px]">
-                  <h2 className="text-lg font-semibold text-gray-800">Vista Compras (OSO)</h2>
+                  <h2 className="text-base font-semibold text-slate-900">Vista Compras (OSO)</h2>
                   <p className="text-xs text-slate-500">Filtra por BO o cliente para encontrar rápido.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -7441,7 +7461,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               {osoLoading ? (
                 <ListaEsqueleto className="mt-4" />
               ) : filteredOsoOrders.length === 0 ? (
-                <EstadoVacio icono="🚚" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
+                <EstadoVacio icono="truck" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
               ) : (
                 <div className="mt-4 space-y-4">
                   {safePinnedBos.length > 0 && (
@@ -8123,7 +8143,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <div className="view-enter">
             <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
               <div>
-                <h2 className="text-2xl font-display text-slate-900 dark:text-slate-100">Cotización</h2>
+                <h2 className="text-2xl leading-8 font-display text-slate-900">Cotización</h2>
                 <p className="text-sm text-slate-500">
                   {(cliente.empresa?.trim() || cliente.nombre?.trim())
                     ? `${cliente.empresa?.trim() || 'Empresa'} • ${cliente.nombre?.trim() || 'Cliente'}`
@@ -8134,9 +8154,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <>
                   <label
                     htmlFor="project-upload"
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-slate-200 rounded-xl bg-white text-slate-700 hover:bg-slate-50 cursor-pointer dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
-                    <span aria-hidden="true">⤒</span> Cargar proyecto
+                    <Icono nombre="subir" /> Cargar proyecto
                   </label>
                   <input
                     id="project-upload"
@@ -8152,7 +8172,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <div className="space-y-3">
             <section className="glass-card rounded-2xl shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)] border border-white/70 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cliente</h3>
+                <h3 className="mq-sobre">Cliente</h3>
               </div>
               <div className={`grid grid-cols-1 sm:grid-cols-2 ${isAdmin ? 'lg:grid-cols-4' : ''} gap-2`}>
                 {(() => {
@@ -8325,10 +8345,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     type="button"
                     onClick={() => setPegarListaTexto('')}
-                    className="h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"
+                    className="mq-btn mq-btn-lg mq-btn-secundario shrink-0"
+                    aria-label="Pegar lista"
                     title="Pega SKU y cantidades desde un correo o Excel"
                   >
-                    Pegar lista
+                    <Icono nombre="portapapeles" />
+                    <span className="hidden sm:inline">Pegar lista</span>
                   </button>
                 </div>
 
@@ -8368,10 +8390,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                 type="button"
                                 onClick={() => setSemaforoAbierto(v => !v)}
                                 aria-expanded={semaforoAbierto}
-                                className={`h-8 inline-flex items-center gap-1.5 rounded-md px-2 text-xs font-medium ${semaforoAbierto ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                                className={`mq-btn mq-btn-sm ${semaforoAbierto ? 'mq-btn-primario' : 'mq-btn-fantasma'}`}
                                 title="Mínimo aceptable y objetivo de margen"
                               >
-                                <span aria-hidden="true">⚙</span> Semáforo de margen
+                                <Icono nombre="ajustes" /> Semáforo de margen
                               </button>
                             )}
                           </div>
@@ -8402,7 +8424,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={clearCotizacion}
                       disabled={cotizacion.length === 0}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:text-slate-300 disabled:hover:bg-transparent dark:hover:bg-rose-500/10 dark:disabled:text-slate-600"
+                      className="mq-btn mq-btn-xs mq-btn-peligro"
                     >
                       Vaciar carrito
                     </button>
@@ -8485,11 +8507,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             {/* Total siempre a la vista mientras se arma la cotización. */}
             {cotizacion.length > 0 && (
               <div className={`sticky ${isClient ? 'bottom-20' : 'bottom-20 lg:bottom-3'} z-30`}>
-                <div className="flex items-center justify-between gap-3 flex-wrap rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-[0_12px_40px_-12px_rgba(15,23,42,0.35)] backdrop-blur dark:bg-slate-900/95 dark:border-slate-700">
+                <div className="flex items-center justify-between gap-3 flex-wrap rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-float">
                   <div className="flex items-center gap-x-5 gap-y-1 flex-wrap min-w-0">
                     <div>
                       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Total</div>
-                      <div className="text-xl font-bold text-slate-900 dark:text-white tabular-nums">{formatCurrency(totalCotizacion)}</div>
+                      <div className="text-[22px] leading-7 font-bold text-slate-900 tabular-nums">{formatCurrency(totalCotizacion)}</div>
                     </div>
                     {resumenMargenCarrito && (
                       <>
@@ -8519,7 +8541,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     {isAdmin && (
                       <button
                         onClick={exportCotizacionAxis}
-                        className="h-10 rounded-xl border border-amber-300 px-3 text-sm font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                        className="mq-btn mq-btn-secundario"
                       >
                         Exportar a Axis
                       </button>
@@ -8527,7 +8549,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <button
                       onClick={() => generarCotizacion()}
                       title="Ctrl+Enter"
-                      className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
+                      className="mq-btn mq-btn-primario px-5"
                     >
                       Generar cotización
                     </button>
@@ -8579,7 +8601,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <button
                         onClick={updateOwnPartnerCategory}
                         disabled={updatingOwnPartnerCategory}
-                        className="px-3 py-2 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50"
+                        className="px-3 py-2 bg-slate-900 text-white rounded text-xs hover:bg-slate-800 disabled:opacity-50"
                       >
                         Guardar
                       </button>
@@ -8622,7 +8644,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <button
                     onClick={updateOwnPassword}
                     disabled={saving}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                    className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 text-sm"
                   >
                     Guardar contraseña
                   </button>
@@ -8705,7 +8727,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => copyHtmlToClipboard(buildCompraTableHtml(compraPreviewCot))}
-                    className="px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm"
+                    className="mq-btn mq-btn-sm mq-btn-primario"
                   >
                     Copiar tabla HTML
                   </button>

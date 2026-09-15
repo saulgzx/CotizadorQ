@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import NumeroInput from '../ui/NumeroInput';
+import Icono from '../ui/Icono';
 import MargenChip from './MargenChip';
 import { formatCurrency } from './cotizadorHelpers';
 import { partesEntrega } from './entregaStock';
@@ -26,7 +27,7 @@ const TITULO_ALERTA = {
 const chip = 'inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium';
 
 const BotonMover = ({ onClick, disabled, label, children }) => (
-  <button type='button' onClick={onClick} disabled={disabled} aria-label={label} className='px-1 text-slate-400 hover:text-slate-700 disabled:opacity-30'>
+  <button type='button' onClick={onClick} disabled={disabled} aria-label={label} title={label} className='grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent'>
     {children}
   </button>
 );
@@ -36,9 +37,10 @@ const BotonQuitar = ({ item, onQuitar }) => (
     type='button'
     onClick={() => onQuitar(item.id)}
     aria-label={`Quitar ${item.sku || item.mpn}`}
-    className='rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10'
+    title='Quitar'
+    className='grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10'
   >
-    ✕
+    <Icono nombre='close' />
   </button>
 );
 
@@ -49,8 +51,8 @@ const Etiqueta = ({ children }) => (
 const CeldaProducto = ({ item, isAdmin, onCambio }) => (
   <div className='min-w-0'>
     <div className='mb-1 flex flex-wrap items-center gap-1.5'>
-      <span className={`rounded px-1.5 text-xs font-semibold ${(item.origen || 'QNAP') === 'AXIS' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'}`}>
-        {item.marca || item.origen}
+      <span className={`rounded-md px-1.5 text-[11px] font-bold uppercase tracking-wide ${(item.origen || 'QNAP') === 'AXIS' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'}`}>
+        {item.origen || item.marca}
       </span>
       <span className='font-mono text-xs text-slate-600 dark:text-slate-300'>{item.sku && item.sku !== 'To Create' ? item.sku : 'SKU por crear'}</span>
       <span className='font-mono text-xs text-slate-400'>{item.mpn}</span>
@@ -69,7 +71,7 @@ const CeldaProducto = ({ item, isAdmin, onCambio }) => (
   </div>
 );
 
-// Entrega como etiquetas; el texto completo (el que va al PDF) se edita con ✎.
+// Entrega como etiquetas; el texto completo (el que va al PDF) se edita con el lápiz.
 const CeldaEntrega = ({ item, editable, onCambio }) => {
   const [editando, setEditando] = useState(false);
   const partes = partesEntrega(item.tiempo, item.cant);
@@ -113,9 +115,9 @@ const CeldaEntrega = ({ item, editable, onCambio }) => {
           onClick={() => setEditando(true)}
           aria-label='Editar entrega'
           title='Editar el texto de entrega'
-          className='rounded px-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800'
+          className='grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700'
         >
-          ✎
+          <Icono nombre='lapiz' className='h-3.5 w-3.5' />
         </button>
       )}
     </div>
@@ -147,7 +149,7 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
               {partner.replace('Partner ', '')} −{formatCurrency(rebatePartner(item, partner))}
               {rebateProyecto > 0 && ` · proy. −${formatCurrency(rebateProyecto)}`}
             </span>
-            <span className='text-slate-400 transition group-open:rotate-180' aria-hidden='true'>▾</span>
+            <span className='text-slate-400 transition group-open:rotate-180'><Icono nombre='abajo' className='h-3.5 w-3.5' /></span>
           </summary>
           <div className='flex flex-col gap-1 border-t border-slate-200 p-2 dark:border-slate-700'>
             <select
@@ -208,7 +210,9 @@ export default function CarritoLineas({
   if (items.length === 0) {
     return (
       <div className='flex flex-col items-center gap-1 px-4 py-12 text-center text-sm text-slate-500'>
-        <span className='mb-1 text-3xl' aria-hidden='true'>🛒</span>
+        <span className='mb-2 grid h-11 w-11 place-items-center rounded-full bg-slate-100 text-slate-500'>
+          <Icono nombre='cart' className='h-5 w-5' />
+        </span>
         <p className='font-medium text-slate-700 dark:text-slate-200'>El carrito está vacío</p>
         <p>Busca por SKU, MPN o modelo, o usa «Pegar lista».</p>
       </div>
@@ -304,9 +308,9 @@ export default function CarritoLineas({
             <li key={item.id} className={`space-y-2 p-3 ${fondo}`} title={titulo}>
               <div className='flex items-start gap-2'>
                 <div className='flex flex-col items-center text-xs'>
-                  <BotonMover onClick={() => onMover(index, -1)} disabled={index === 0} label='Subir línea'>▲</BotonMover>
+                  <BotonMover onClick={() => onMover(index, -1)} disabled={index === 0} label='Subir línea'><Icono nombre='arriba' className='h-3.5 w-3.5' /></BotonMover>
                   <span className='text-slate-400'>{index + 1}</span>
-                  <BotonMover onClick={() => onMover(index, 1)} disabled={index === items.length - 1} label='Bajar línea'>▼</BotonMover>
+                  <BotonMover onClick={() => onMover(index, 1)} disabled={index === items.length - 1} label='Bajar línea'><Icono nombre='abajo' className='h-3.5 w-3.5' /></BotonMover>
                 </div>
                 <div className='min-w-0 flex-1'>
                   <CeldaProducto item={item} isAdmin onCambio={onCambio} />
@@ -364,9 +368,9 @@ export default function CarritoLineas({
                 <tr key={item.id} className={`align-top ${fondo}`} title={titulo}>
                   <td className={`px-1 py-2 ${alerta ? `border-l-2 ${alerta === 'bajo_piso' ? 'border-rose-400' : 'border-amber-400'}` : ''}`}>
                     <div className='flex flex-col items-center text-xs'>
-                      <BotonMover onClick={() => onMover(index, -1)} disabled={index === 0} label='Subir línea'>▲</BotonMover>
+                      <BotonMover onClick={() => onMover(index, -1)} disabled={index === 0} label='Subir línea'><Icono nombre='arriba' className='h-3.5 w-3.5' /></BotonMover>
                       <span className='text-slate-400'>{index + 1}</span>
-                      <BotonMover onClick={() => onMover(index, 1)} disabled={index === items.length - 1} label='Bajar línea'>▼</BotonMover>
+                      <BotonMover onClick={() => onMover(index, 1)} disabled={index === items.length - 1} label='Bajar línea'><Icono nombre='abajo' className='h-3.5 w-3.5' /></BotonMover>
                     </div>
                   </td>
                   <td className='min-w-[220px] px-2 py-2'>

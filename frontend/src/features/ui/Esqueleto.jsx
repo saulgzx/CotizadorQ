@@ -1,4 +1,5 @@
 import React from 'react';
+import Icono from './Icono';
 
 // Marcadores de carga: muestran la forma de lo que viene en vez de un "Cargando…".
 
@@ -53,17 +54,19 @@ export function TarjetasEsqueleto({ cantidad = 4, className = '' }) {
 }
 
 /** Estado vacío con ícono, explicación y acción opcional. */
-export function EstadoVacio({ icono = '📭', titulo, detalle, accion }) {
+export function EstadoVacio({ icono = 'bandeja', titulo, detalle, accion }) {
   return (
     <div className='flex flex-col items-center gap-1 px-4 py-10 text-center text-sm text-slate-500'>
-      <span className='mb-1 text-3xl' aria-hidden='true'>{icono}</span>
+      <span className='mb-2 grid h-11 w-11 place-items-center rounded-full bg-slate-100 text-slate-500'>
+        <Icono nombre={icono} className='h-5 w-5' />
+      </span>
       <p className='font-medium text-slate-700 dark:text-slate-200'>{titulo}</p>
       {detalle && <p>{detalle}</p>}
       {accion && (
         <button
           type='button'
           onClick={accion.onClick}
-          className='mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900'
+          className='mq-btn mq-btn-primario mt-3'
         >
           {accion.label}
         </button>
