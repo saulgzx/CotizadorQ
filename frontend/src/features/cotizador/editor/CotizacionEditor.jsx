@@ -282,6 +282,11 @@ const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => 
 const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
   const esAxis = linea.origen === 'AXIS';
   const sinDisty = !(Number(linea.precio_disty) > 0);
+  // Nivel de descuento que dio Axis en la linea, sobre el precio de lista disty.
+  const listaDisty = Number(linea.precio_disty) || 0;
+  const descuentoAxisPct = esAxis && listaDisty > 0
+    ? (((Number(linea.rebate_partner) || 0) + (Number(linea.rebate_proyecto) || 0)) / listaDisty) * 100
+    : null;
   return (
     <div className='flex w-40 flex-col gap-1'>
       {sinDisty && !linea.nueva ? (
@@ -328,6 +333,17 @@ const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
               <span className='mt-1 text-xs uppercase text-slate-400'>Rebate proyecto</span>
               <NumeroInput value={linea.rebate_proyecto} onCommit={(v) => onCambio('rebate_proyecto', v)} ariaLabel='Rebate proyecto' />
             </>
+          )}
+          {descuentoAxisPct !== null && (
+            <span className='text-right text-xs text-slate-500'>
+              Desc. Axis{' '}
+              <span
+                title={`Rebate total sobre el precio de lista disty (${formatCurrency(listaDisty)})`}
+                className='font-semibold tabular-nums text-sky-700'
+              >
+                −{descuentoAxisPct.toFixed(1)}%
+              </span>
+            </span>
           )}
           <span className='text-right text-xs text-slate-500'>
             Final <span className='font-semibold tabular-nums text-slate-700'>{formatCurrency(linea.costo_unitario || 0)}</span>
