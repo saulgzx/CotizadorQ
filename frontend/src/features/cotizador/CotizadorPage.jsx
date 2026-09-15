@@ -71,6 +71,7 @@ import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
 import Resaltado from '../ui/Resaltado';
+import { EstadoVacio, FilasEsqueleto, ListaEsqueleto, TarjetasEsqueleto } from '../ui/Esqueleto';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
 
@@ -5516,13 +5517,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <span className="text-xs text-gray-500">{filteredStockCatalog.length} ítems</span>
                   <button
                     onClick={exportStockExcel}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700"
                   >
                     Exportar Excel
                   </button>
                   <button
                     onClick={exportStockPdf}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-white hover:bg-slate-800"
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700"
                   >
                     Exportar PDF
                   </button>
@@ -5530,13 +5531,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
               <div className="p-4 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center gap-3">
-                  <input
-                    type="text"
-                    placeholder="Buscar por marca, SKU, MPN o descripción..."
-                    value={stockCatalogQuery}
-                    onChange={e => setStockCatalogQuery(e.target.value)}
-                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
-                  />
+                  <div className="relative flex-1">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                    </span>
+                    <input
+                      type="text"
+                      aria-label="Buscar en stock"
+                      placeholder="Buscar por marca, SKU, MPN o descripción…"
+                      value={stockCatalogQuery}
+                      onChange={e => setStockCatalogQuery(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm"
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
                     {(isCotizadorStockAdmin ? ['AXIS'] : ['all', 'AXIS', 'QNAP']).map(origin => (
                       <button
@@ -5568,11 +5575,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {stockCatalogLoading && (
-                      <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Cargando stock...</td>
-                      </tr>
-                    )}
+                    {stockCatalogLoading && <FilasEsqueleto filas={6} columnas={canViewCotizador ? 6 : 5} />}
                     {!stockCatalogLoading && stockCatalogError && (
                       <tr>
                         <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
@@ -5580,7 +5583,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.length === 0 && (
                       <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Sin resultados.</td>
+                        <td colSpan={canViewCotizador ? 6 : 5}>
+                          <EstadoVacio
+                            icono="🔎"
+                            titulo={stockCatalogQuery.trim() ? 'Sin coincidencias en stock' : 'No hay stock disponible'}
+                            detalle={stockCatalogQuery.trim() ? 'Prueba con el MPN o parte del modelo.' : 'Cuando entre mercadería aparecerá aquí.'}
+                          />
+                        </td>
                       </tr>
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.map((item, idx) => (
@@ -5609,7 +5618,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <td className="px-4 py-3">{item.sku || 'N/A'}</td>
                         <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
                         <td className="px-4 py-3 text-right tabular-nums">
-                          <div className="font-semibold text-slate-700">{formatStockQuantity(item.quantity) || '0'}</div>
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-500/30">{formatStockQuantity(item.quantity) || '0'}</span>
                           {Number(item.asignado) > 0 && (
                             <div className="text-xs text-gray-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
                               {formatStockQuantity(item.asignado)} asignada{Number(item.asignado) === 1 ? '' : 's'} de {formatStockQuantity(item.stock_bodega)}
@@ -6560,7 +6569,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </div>
                 {funnelError && <div className="mt-2 text-sm text-rose-600">{funnelError}</div>}
                 {funnelLoading ? (
-                  <div className="mt-4 text-sm text-gray-500">Cargando funnel...</div>
+                  <TarjetasEsqueleto className="mt-4" />
                 ) : (
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                     {funnelStages.map(stage => (
@@ -6661,28 +6670,50 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 </button>
               </div>
               {isAdmin && (
-                <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-600">
-                  {COTIZACION_ESTADOS.map(option => (
-                    <label key={option.value} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={(historialFilters.estados || []).includes(option.value)}
-                        onChange={() => toggleEstadoFilter(option.value)}
-                      />
-                      <span className="font-semibold">{option.short}</span>
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-500">Estado:</span>
+                  {['enviada', 'revision', 'aprobada', 'rechazada'].map(value => ({
+                    value,
+                    nombre: { enviada: 'Enviada', revision: 'En revisión', aprobada: 'Aceptada', rechazada: 'Rechazada' }[value]
+                  })).map(option => {
+                    const activo = (historialFilters.estados || []).includes(option.value);
+                    const total = historial.filter(c => normalizeEstado(c.estado) === option.value).length;
+                    const tono = {
+                      enviada: 'border-blue-200 text-blue-700',
+                      revision: 'border-slate-200 text-slate-700',
+                      aprobada: 'border-emerald-200 text-emerald-700 dark:text-emerald-300',
+                      rechazada: 'border-rose-200 text-rose-700'
+                    }[option.value] || 'border-slate-200 text-slate-700';
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => toggleEstadoFilter(option.value)}
+                        aria-pressed={activo}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium transition ${activo ? 'bg-slate-900 border-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : `bg-white hover:bg-slate-50 ${tono}`}`}
+                      >
+                        {option.nombre}
+                        <span className={`rounded-full px-1.5 tabular-nums ${activo ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>{total}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
             <div className="glass-card rounded-2xl shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)] border border-white/70 overflow-hidden">
               {historialLoading ? (
-                <div className="p-6 text-center text-gray-500">Cargando...</div>
+                <table className="w-full text-sm"><tbody><FilasEsqueleto filas={6} columnas={7} /></tbody></table>
               ) : historialError ? (
                 <div className="p-6 text-center text-red-600">{historialError}</div>
               ) : historialPage.total === 0 ? (
-                <div className="p-6 text-center text-gray-500">No hay cotizaciones guardadas.</div>
+                <EstadoVacio
+                  icono="🗂️"
+                  titulo={historial.length > 0 ? 'Ninguna cotización coincide con los filtros' : 'Aún no hay cotizaciones'}
+                  detalle={historial.length > 0 ? 'Quita algún filtro para ver más resultados.' : 'Las cotizaciones que generes aparecerán aquí.'}
+                  accion={historial.length > 0
+                    ? { label: 'Limpiar filtros', onClick: () => { setGlobalSearch(''); setHistorialFilters({ fecha: '', cliente: '', pid: '', proyecto: '', producto: '', estados: [] }); } }
+                    : (canViewCotizador ? { label: 'Nueva cotización', onClick: () => setCurrentView('cotizador') } : undefined)}
+                />
               ) : (
                 <div className="max-h-[60vh] overflow-auto">
                   <table className="w-full min-w-[1080px] text-sm">
@@ -7140,9 +7171,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
               {osoError && <div className="mt-2 text-sm text-rose-600">{osoError}</div>}
               {osoLoading ? (
-                <div className="mt-4 text-sm text-gray-500">Cargando ordenes...</div>
+                <ListaEsqueleto className="mt-4" />
               ) : ordenesPage.total === 0 ? (
-                <div className="mt-4 text-sm text-gray-500">Sin ordenes activas.</div>
+                <EstadoVacio icono="🚚" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
               ) : (
                 <div className="mt-4 space-y-4">
                   {safePinnedBos.length > 0 && (
@@ -7408,9 +7439,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               </div>
               {osoError && <div className="mt-2 text-sm text-rose-600">{osoError}</div>}
               {osoLoading ? (
-                <div className="mt-4 text-sm text-gray-500">Cargando ordenes...</div>
+                <ListaEsqueleto className="mt-4" />
               ) : filteredOsoOrders.length === 0 ? (
-                <div className="mt-4 text-sm text-gray-500">Sin ordenes activas.</div>
+                <EstadoVacio icono="🚚" titulo="Sin órdenes activas" detalle="Prueba quitando filtros o cambiando el mes de facturación." />
               ) : (
                 <div className="mt-4 space-y-4">
                   {safePinnedBos.length > 0 && (
