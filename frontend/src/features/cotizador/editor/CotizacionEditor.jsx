@@ -341,7 +341,7 @@ const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
                 title={`Rebate total sobre el precio de lista disty (${formatCurrency(listaDisty)})`}
                 className='font-semibold tabular-nums text-sky-700'
               >
-                −{descuentoAxisPct.toFixed(1)}%
+                {descuentoAxisPct.toFixed(1)}%
               </span>
             </span>
           )}
