@@ -159,7 +159,7 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
                 title={`Descuento Axis de la linea: rebate total sobre el precio de lista disty (${formatCurrency(listaDisty)})`}
                 className='shrink-0 rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
               >
-                −{pctLinea.toFixed(1)}%
+                {pctLinea.toFixed(1)}%
               </span>
             )}
             <span className='text-slate-400 transition group-open:rotate-180'><Icono nombre='abajo' className='h-3.5 w-3.5' /></span>
