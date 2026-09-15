@@ -69,6 +69,7 @@ import AtajosAyuda from './AtajosAyuda';
 import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
+import NumeroInput from '../ui/NumeroInput';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
@@ -116,6 +117,25 @@ const NavIcon = ({ name, className = 'w-5 h-5' }) => (
 
 // Agrupa controles de filtro: en desktop siempre visibles, en móvil colapsados
 // tras un botón "Filtros" para despejar la pantalla.
+// GP global en %: se puede borrar y reescribir; al salir vacío vuelve al último valor válido.
+function GpGlobalCampo({ etiqueta, gp, onCambio }) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+      {etiqueta}
+      <span className="relative inline-flex">
+        <NumeroInput
+          value={Number.isFinite(gp) ? Math.round(gp * 1000) / 10 : null}
+          decimales={1}
+          onCommit={onCambio}
+          ariaLabel={`${etiqueta} %`}
+          className="h-8 w-20 pr-6"
+        />
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">%</span>
+      </span>
+    </label>
+  );
+}
+
 function CollapsibleFilters({ label = 'Filtros', children, className = '' }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1376,13 +1396,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     });
   };
 
-  const formatGpPercent = (gp) => {
-    if (!Number.isFinite(gp)) return '';
-    return (Math.round(gp * 1000) / 10).toString();
-  };
-
+  // value llega en porcentaje (15 = 15%) desde GpGlobalCampo.
   const updateGlobalMargin = (origin, value) => {
-    const parsed = parseGp(value, CONSTANTS.DEFAULT_GP);
+    const pct = Number(value);
+    if (!Number.isFinite(pct) || pct < 0 || pct >= 99.9) return;
+    const parsed = pct / 100;
     if (origin === 'AXIS') {
       setCotizacionGpGlobalAxis(parsed);
       return;
@@ -8283,33 +8301,23 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     {isAdmin && (
                       <div className="flex items-center gap-2 flex-wrap">
                         {!isCotizadorStockAdmin && (
-                          <label className="flex items-center gap-1 text-xs text-gray-500">
-                            GP QNAP
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={formatGpPercent(cotizacionGpGlobalQnap)}
-                              onChange={e => updateGlobalMargin('QNAP', e.target.value)}
-                              className="w-14 px-2 py-0.5 border rounded text-xs"
-                            />
-                          </label>
-                        )}
-                        <label className="flex items-center gap-1 text-xs text-gray-500">
-                          GP AXIS
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={formatGpPercent(cotizacionGpGlobalAxis)}
-                            onChange={e => updateGlobalMargin('AXIS', e.target.value)}
-                            className="w-14 px-2 py-0.5 border rounded text-xs"
+                          <GpGlobalCampo
+                            etiqueta="GP QNAP"
+                            gp={cotizacionGpGlobalQnap}
+                            onCambio={v => updateGlobalMargin('QNAP', v)}
                           />
-                        </label>
-                        <label className="flex items-center gap-1 text-xs text-gray-500">
+                        )}
+                        <GpGlobalCampo
+                          etiqueta="GP AXIS"
+                          gp={cotizacionGpGlobalAxis}
+                          onCambio={v => updateGlobalMargin('AXIS', v)}
+                        />
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
                           Partner
                           <select
                             value={cotizacionPartnerCategory}
                             onChange={e => handleCotizacionPartnerCategoryChange(e.target.value)}
-                            className="px-2 py-0.5 border rounded text-xs"
+                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                           >
                             <option>Partner Autorizado</option>
                             <option>Partner Silver</option>

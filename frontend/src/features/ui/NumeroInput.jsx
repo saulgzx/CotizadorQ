@@ -52,7 +52,7 @@ export default function NumeroInput({
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
       }}
-      className={`w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-right text-sm tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 ${className}`}
+      className={`${/(^|\s)w-/.test(className) ? '' : 'w-full '}rounded-md border border-slate-200 bg-white px-2 py-1 text-right text-sm tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 ${className}`}
     />
   );
 }

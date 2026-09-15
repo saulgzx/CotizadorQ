@@ -102,7 +102,7 @@ export default function SemaforoMargenAjustes() {
               max='99'
               value={borrador[marca].piso}
               onChange={(e) => cambiar(marca, 'piso', e.target.value)}
-              className='w-20 rounded border px-2 py-1 text-sm'
+              className='h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-right text-sm tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
             />
           </label>
           <label className='flex flex-col gap-0.5' htmlFor={`margen-objetivo-${marca}`}>
@@ -115,7 +115,7 @@ export default function SemaforoMargenAjustes() {
               max='99'
               value={borrador[marca].objetivo}
               onChange={(e) => cambiar(marca, 'objetivo', e.target.value)}
-              className='w-20 rounded border px-2 py-1 text-sm'
+              className='h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-right text-sm tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
             />
           </label>
         </fieldset>
