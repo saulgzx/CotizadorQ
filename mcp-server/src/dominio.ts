@@ -140,7 +140,8 @@ const conCreacion = (plazo: string, dias: number | null): string =>
 export const infoEntrega = (
   producto: Producto,
   lectura: LecturaStock,
-  diasCreacionSku: number
+  diasCreacionSku: number,
+  cantidad?: number
 ): InfoEntrega => {
   const estado = skuEstado(producto);
   const dias = estado === 'por_crear' ? diasCreacionSku : null;
@@ -149,7 +150,14 @@ export const infoEntrega = (
 
   let entrega: string | null = null;
   if (lectura.verificado) {
-    const base = tieneUnidades(unidades) ? `${unidades} ${SUFIJO_ENTREGA_STOCK}` : catalogo;
+    let base = catalogo;
+    if (tieneUnidades(unidades)) {
+      base = `${unidades} ${SUFIJO_ENTREGA_STOCK}`;
+      // Stock parcial: lo que falta llega con el plazo de importacion (ETA).
+      if (cantidad !== undefined && Number(unidades) < cantidad) {
+        base += ` | diferencia ${catalogo || 'ETA por confirmar'}`;
+      }
+    }
     entrega = base ? conCreacion(base, dias) : null;
   }
 

@@ -71,6 +71,7 @@ import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
+import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
 const margenCotizacion = (cot) => {
@@ -1819,17 +1820,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         if (!(Number(item?.quantity) > 0)) return;
         map[key] = item.quantity;
       });
+      // Las entregas del carrito se recalculan en el efecto de entregas al cambiar el mapa.
       setStockByMpn(map);
-      setCotizacion(prev => prev.map(item => {
-        const stockText = getStockEntregaText(item.mpn, map);
-        if (stockText) return { ...item, tiempo: stockText };
-        // Si ya no hay disponible (p. ej. quedó asignado en OSO), la línea vuelve al plazo del catálogo.
-        if (String(item.tiempo || '').endsWith(STOCK_DELIVERY_SUFFIX)) {
-          const catalogo = productos.find(p => p.id === item.id);
-          return { ...item, tiempo: catalogo?.tiempo || 'ETA por confirmar' };
-        }
-        return item;
-      }));
     } catch (error) {
       console.error('Error cargando stock:', error);
       setStockByMpn({});
@@ -2342,9 +2334,31 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       partnerCategory: producto.origen === 'AXIS' ? cotizacionPartnerCategory : undefined,
       rebateProject: producto.origen === 'AXIS' ? 0 : undefined,
       gpOverride: null,
+      tiempoCatalogo: producto.tiempo,
       tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
     }]);
   };
+
+  // Entrega de cada línea según stock disponible y cantidad: si el pedido supera el
+  // stock, se agrega "| diferencia <ETA>". Solo toca entregas generadas por el sistema.
+  useEffect(() => {
+    setCotizacion(prev => {
+      let cambio = false;
+      const next = prev.map(item => {
+        const eta = item.tiempoCatalogo ?? productos.find(p => p.id === item.id)?.tiempo ?? '';
+        if (!esEntregaAutomatica(item.tiempo, eta)) return item;
+        const texto = textoEntregaLinea({
+          disponible: stockByMpn[normalizeLookupKey(item.mpn)],
+          cantidad: item.cant,
+          etaCatalogo: eta
+        });
+        if (!texto || texto === item.tiempo) return item;
+        cambio = true;
+        return { ...item, tiempo: texto };
+      });
+      return cambio ? next : prev;
+    });
+  }, [cotizacion, stockByMpn, productos]);
 
   const applyPartnerCategoryToAxis = (category) => {
     setCotizacionPartnerCategory(category);
@@ -2508,6 +2522,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             partnerCategory: producto.origen === 'AXIS' ? cotizacionPartnerCategory : undefined,
             rebateProject: producto.origen === 'AXIS' ? 0 : undefined,
             gpOverride: null,
+            tiempoCatalogo: producto.tiempo,
             tiempo: getStockEntregaText(producto.mpn) || producto.tiempo
           });
         }
@@ -3333,6 +3348,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               gpOverrideInput: '',
               rebateProject: isAxis ? rebateProject : 0,
               partnerCategory: isAxis ? cotizacionPartnerCategory : undefined,
+              tiempoCatalogo: match.tiempo,
               tiempo: stockText || match.tiempo
             });
           }

@@ -83,7 +83,7 @@ const celda = (texto: string) => texto.replace(/\|/g, '/');
 const tablaLineas = (lineas: LineaResuelta[], lectura: LecturaStock): string => {
   if (lineas.length === 0) return '_Sin lineas resueltas._';
   const filas = lineas.map((l) => {
-    const entrega = infoEntrega(l.producto, lectura, DIAS_CREACION_SKU);
+    const entrega = infoEntrega(l.producto, lectura, DIAS_CREACION_SKU, l.cantidad);
     const marca = MARCA_COINCIDENCIA[l.coincidencia] ?? '';
     const rotulo = rotulos({ eol: esEol(l.producto, EOL_EXTRA), sku_estado: entrega.sku_estado });
     return (
@@ -121,7 +121,7 @@ const lineasJson = (lineas: LineaResuelta[], lectura: LecturaStock) =>
     precio_total: l.precio_total,
     stock: l.stock,
     eol: esEol(l.producto, EOL_EXTRA),
-    ...infoEntrega(l.producto, lectura, DIAS_CREACION_SKU)
+    ...infoEntrega(l.producto, lectura, DIAS_CREACION_SKU, l.cantidad)
   }));
 
 const bloqueNoResueltos = (noResueltos: SkuNoResuelto[]): string =>

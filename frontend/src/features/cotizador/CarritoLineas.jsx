@@ -206,7 +206,7 @@ export default function CarritoLineas({
                   <textarea
                     value={item.tiempo || ''}
                     onChange={(e) => onCambio(item.id, 'tiempo', e.target.value)}
-                    rows={2}
+                    rows={3}
                     aria-label='Tiempo de entrega'
                     className={`${textoBase} resize-y text-xs`}
                   />

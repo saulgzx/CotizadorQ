@@ -65,6 +65,15 @@ describe('T0.2 · no afirmar un plazo que no se verifico', () => {
     assert.match(info.entrega || '', /^3 unidades disponible en entrega inmediata/);
   });
 
+  test('stock parcial: disponible inmediato y la diferencia con el plazo ETA', () => {
+    const lectura = vivo({ 'TS-435XEU-4G-US': 4 });
+    assert.equal(
+      infoEntrega(nas, lectura, 7, 7).entrega,
+      '4 unidades disponible en entrega inmediata, salvo venta previa | diferencia 8 - 10 semanas tras OC'
+    );
+    assert.doesNotMatch(infoEntrega(nas, lectura, 7, 4).entrega || '', /diferencia/);
+  });
+
   test('0 disponible cuenta como sin stock: sin unidades y plazo de catalogo', () => {
     const lectura = vivo({ 'TS-435XEU-4G-US': 0 });
     assert.equal(unidadesDe(lectura, nas), null);
