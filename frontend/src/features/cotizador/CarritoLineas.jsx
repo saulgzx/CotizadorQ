@@ -130,6 +130,11 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
   const esAxis = (item.origen || 'QNAP') === 'AXIS';
   const partner = item.partnerCategory || partnerDefault;
   const rebateProyecto = Number(item.rebateProject) || 0;
+  // Nivel de descuento que dio Axis en la linea, sobre el precio de lista
+  // disty: es el numero con el que se negocia, no el monto suelto.
+  const listaDisty = Number(item.precio) || 0;
+  const descuentoPct = (rebate) => (listaDisty > 0 ? (rebate / listaDisty) * 100 : null);
+  const pctLinea = descuentoPct(rebatePartner(item, partner) + rebateProyecto);
   return (
     <div className='flex flex-col gap-1 text-xs'>
       {item.costoChile > 0 ? (
@@ -145,10 +150,18 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
       {esAxis && (
         <details className='group rounded-md border border-slate-200 dark:border-slate-700'>
           <summary className='flex cursor-pointer list-none items-center justify-between gap-1 px-2 py-1 text-slate-600 dark:text-slate-300'>
-            <span className='truncate'>
+            <span className='min-w-0 truncate'>
               {partner.replace('Partner ', '')} −{formatCurrency(rebatePartner(item, partner))}
               {rebateProyecto > 0 && ` · proy. −${formatCurrency(rebateProyecto)}`}
             </span>
+            {pctLinea !== null && (
+              <span
+                title={`Descuento Axis de la linea: rebate total sobre el precio de lista disty (${formatCurrency(listaDisty)})`}
+                className='shrink-0 rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
+              >
+                −{pctLinea.toFixed(1)}%
+              </span>
+            )}
             <span className='text-slate-400 transition group-open:rotate-180'><Icono nombre='abajo' className='h-3.5 w-3.5' /></span>
           </summary>
           <div className='flex flex-col gap-1 border-t border-slate-200 p-2 dark:border-slate-700'>
@@ -158,11 +171,15 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
               aria-label='Categoría de partner'
               className={`${textoBase} text-xs`}
             >
-              {PARTNERS.map((p) => (
-                <option key={p} value={p}>
-                  {p.replace('Partner ', '')} · {formatCurrency(rebatePartner(item, p))}
-                </option>
-              ))}
+              {PARTNERS.map((p) => {
+                const pct = descuentoPct(rebatePartner(item, p));
+                return (
+                  <option key={p} value={p}>
+                    {p.replace('Partner ', '')} · {formatCurrency(rebatePartner(item, p))}
+                    {pct !== null && ` · ${pct.toFixed(1)}%`}
+                  </option>
+                );
+              })}
             </select>
             <Etiqueta>Rebate proyecto</Etiqueta>
             <NumeroInput value={item.rebateProject ?? 0} onCommit={(v) => onCambio(item.id, 'rebateProject', v)} ariaLabel='Rebate proyecto' />
