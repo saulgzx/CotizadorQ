@@ -16,6 +16,25 @@ export const textoEntregaLinea = ({ disponible, cantidad, etaCatalogo }) => {
   return base;
 };
 
+const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const PATRON_STOCK = new RegExp(`^(\\d+(?:\\.\\d+)?) ${escapar(STOCK_DELIVERY_SUFFIX)}(?: \\| diferencia (.+))?$`);
+
+/**
+ * Descompone el texto de entrega para mostrarlo como etiquetas.
+ * { inmediata, pendiente, eta } si viene de stock; { texto } si es un plazo libre.
+ */
+export const partesEntrega = (tiempo, cantidad) => {
+  const t = String(tiempo || '').trim();
+  const m = t.match(PATRON_STOCK);
+  if (!m) return { texto: t };
+  const inmediata = Number(m[1]);
+  return {
+    inmediata,
+    pendiente: m[2] ? Math.max(Number(cantidad) - inmediata, 0) : 0,
+    eta: m[2] || null
+  };
+};
+
 /** La entrega fue generada por el sistema (no escrita a mano) y se puede recalcular. */
 export const esEntregaAutomatica = (tiempo, etaCatalogo) => {
   const t = String(tiempo || '').trim();
