@@ -36,7 +36,11 @@ const MAX_CONTINUACIONES = 6;
 const JOB_TTL_MS = 30 * 60 * 1000;
 
 const leerConfig = (env = process.env) => ({
-  apiKey: String(env.ANTHROPIC_API_KEY || '').trim(),
+  // Sin comillas ni espacios: es comun pegarla asi en Railway.
+  apiKey: String(env.ANTHROPIC_API_KEY || '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .trim(),
   model: String(env.IA_MODEL || 'claude-opus-5-5').trim(),
   effort: ['low', 'medium', 'high', 'xhigh', 'max'].includes(env.IA_EFFORT)
     ? env.IA_EFFORT
@@ -291,7 +295,8 @@ const crearGestorConsultas = ({
         {
           event: 'ia_consulta_error',
           status: error?.status,
-          tipo: error?.name
+          tipo: error?.name,
+          detalle: detalleApi(error)
         },
         'Fallo la consulta al asistente IA'
       );
@@ -344,16 +349,25 @@ const crearGestorConsultas = ({
   };
 };
 
+// Motivo que entrega la API (p. ej. "invalid x-api-key"); no contiene secretos.
+const detalleApi = (error) => {
+  const e = error?.error?.error || error?.error || {};
+  const texto = [e.type, e.message].filter(Boolean).join(': ');
+  return texto ? ` Detalle: ${String(texto).slice(0, 300)}` : '';
+};
+
 const mensajeError = (error) => {
   const status = error?.status;
-  if (status === 401 || status === 403)
-    return 'La API key de Anthropic no es válida o no tiene permisos.';
+  const detalle = detalleApi(error);
+  if (status === 401)
+    return `Anthropic rechazó la API key (401). Revisa ANTHROPIC_API_KEY.${detalle}`;
+  if (status === 403)
+    return `La API key no tiene permiso para este pedido (403).${detalle}`;
   if (status === 429)
-    return 'Se alcanzó el límite de uso de la API de Anthropic. Intenta en unos minutos.';
+    return `Se alcanzó el límite de uso de la API de Anthropic. Intenta en unos minutos.${detalle}`;
   if (status === 529 || status >= 500)
     return 'La API de Anthropic está saturada. Intenta en unos minutos.';
-  if (status === 400)
-    return 'La API rechazó el pedido. Revisa la configuración del asistente (conector MyQuote).';
+  if (status === 400) return `La API rechazó el pedido (400).${detalle}`;
   return 'No se pudo completar la consulta. Intenta de nuevo.';
 };
 
