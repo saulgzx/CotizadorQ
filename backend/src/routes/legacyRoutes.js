@@ -4188,6 +4188,53 @@ const ensureCotizacionNumero = async () => {
   }
 };
 
+// --- Asistente IA (solo admin) ---------------------------------------------
+const Anthropic = require('@anthropic-ai/sdk');
+const asistenteIA = require('../services/asistenteIA');
+const iaConfig = asistenteIA.leerConfig();
+const iaConsultas = asistenteIA.crearGestorConsultas({
+  config: iaConfig,
+  logger,
+  crearCliente: (config) => new (Anthropic.default || Anthropic)({ apiKey: config.apiKey })
+});
+const iaRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `ia:${req.user?.id || req.ip}`,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas consultas al asistente IA. Espera unos minutos.' }
+});
+
+app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
+  const pendientes = asistenteIA.faltantes(iaConfig);
+  res.json({ habilitado: pendientes.length === 0, faltantes: pendientes, modelo: iaConfig.model });
+});
+
+app.post('/api/ia/consultas', authenticateToken, requireAdmin, iaRateLimiter, (req, res) => {
+  const pendientes = asistenteIA.faltantes(iaConfig);
+  if (pendientes.length) {
+    return res.status(503).json({ error: `Asistente IA sin configurar: falta ${pendientes.join(', ')}` });
+  }
+  try {
+    const entrada = asistenteIA.validarEntrada(req.body);
+    return res.status(202).json(iaConsultas.iniciar({ usuarioId: req.user.id, entrada }));
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.status ? error.message : 'Error del servidor' });
+  }
+});
+
+app.get('/api/ia/consultas/:id', authenticateToken, requireAdmin, (req, res) => {
+  const consulta = iaConsultas.obtener({ usuarioId: req.user.id, id: req.params.id });
+  if (!consulta) return res.status(404).json({ error: 'Consulta no encontrada' });
+  return res.json(consulta);
+});
+
+app.delete('/api/ia/consultas/:id', authenticateToken, requireAdmin, (req, res) => {
+  const ok = iaConsultas.cancelar({ usuarioId: req.user.id, id: req.params.id });
+  return ok ? res.json({ ok: true }) : res.status(404).json({ error: 'Consulta no encontrada' });
+});
+
 const startServer = async (port = PORT) => {
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);

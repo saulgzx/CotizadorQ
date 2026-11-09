@@ -569,3 +569,34 @@ export const stockAPI = {
   },
 };
 
+
+// API del Asistente IA (solo admin). Las consultas corren en el backend y se
+// consulta su avance hasta que terminan.
+const leerError = async (response, porDefecto) => {
+  const data = await response.json().catch(() => ({}));
+  return new Error(data.error || porDefecto);
+};
+
+export const iaAPI = {
+  estado: async () => {
+    const response = await fetchWithAuth('/api/ia/estado');
+    if (!response.ok) throw await leerError(response, 'Error consultando el asistente IA');
+    return response.json();
+  },
+  iniciar: async ({ marca, mensajes }) => {
+    const response = await fetchWithAuth('/api/ia/consultas', {
+      method: 'POST',
+      body: JSON.stringify({ marca, mensajes })
+    });
+    if (!response.ok) throw await leerError(response, 'No se pudo iniciar la consulta');
+    return response.json();
+  },
+  obtener: async (id) => {
+    const response = await fetchWithAuth(`/api/ia/consultas/${encodeURIComponent(id)}`);
+    if (!response.ok) throw await leerError(response, 'No se pudo leer la consulta');
+    return response.json();
+  },
+  cancelar: async (id) => {
+    await fetchWithAuth(`/api/ia/consultas/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+};

@@ -1,79 +1,33 @@
 import {
-  construirPrompt,
-  construirDestino,
-  configVacia,
-  normalizarConfig,
-  urlProyectoValida,
+  construirMensajeInicial,
+  textoDeContenido,
   extraerListaDeRespuesta
 } from './asistenteIA';
 
-describe('asistente IA: prompt y destino', () => {
-  test('el prompt invoca la skill de la marca e incluye el requerimiento', () => {
-    const p = construirPrompt({
-      marca: 'QNAP',
-      requerimiento: 'Cotizar TS-464',
-      cliente: 'Acme'
-    });
-    expect(p).toContain('preventa-qnap');
-    expect(p).toContain('Cliente: Acme');
-    expect(p).toContain('Cotizar TS-464');
-    expect(p).toContain('LISTA COTIZADORQ');
+describe('asistente IA: mensaje y contenido', () => {
+  test('el primer mensaje lleva los datos del cliente y el requerimiento', () => {
     expect(
-      construirPrompt({ marca: 'AXIS', requerimiento: 'x', pedirLista: false })
-    ).not.toContain('LISTA COTIZADORQ');
-  });
-
-  test('Claude sin proyecto abre un chat nuevo con el prompt en ?q=', () => {
-    const d = construirDestino({
-      proveedor: 'claude',
-      marca: 'AXIS',
-      config: configVacia(),
-      prompt: 'hola mundo'
-    });
-    expect(d.prefill).toBe(true);
-    expect(new URL(d.url).searchParams.get('q')).toBe('hola mundo');
-  });
-
-  test('con proyecto configurado abre el proyecto y usa el portapapeles', () => {
-    const config = configVacia();
-    config.proyectos.claude.AXIS = 'https://claude.ai/project/abc';
-    const d = construirDestino({
-      proveedor: 'claude',
-      marca: 'AXIS',
-      config,
-      prompt: 'x'
-    });
-    expect(d).toEqual({
-      url: 'https://claude.ai/project/abc',
-      usaProyecto: true,
-      prefill: false
-    });
-  });
-
-  test('prompt demasiado largo no va en la URL', () => {
-    const d = construirDestino({
-      proveedor: 'chatgpt',
-      marca: 'QNAP',
-      config: configVacia(),
-      prompt: 'a'.repeat(9000)
-    });
-    expect(d).toEqual({
-      url: 'https://chatgpt.com/',
-      usaProyecto: false,
-      prefill: false
-    });
-  });
-
-  test('solo acepta URLs https del dominio del proveedor', () => {
-    expect(urlProyectoValida('claude', 'https://claude.ai/project/1')).toBe(
-      true
+      construirMensajeInicial({
+        requerimiento: ' Cotizar TS-464 ',
+        cliente: 'Acme',
+        notas: 'urgente'
+      })
+    ).toBe(
+      'Cliente: Acme\nNotas internas (no van en el correo): urgente\n\nRequerimiento:\nCotizar TS-464'
     );
-    expect(urlProyectoValida('claude', 'javascript:alert(1)')).toBe(false);
-    expect(urlProyectoValida('claude', 'https://evil.com/claude.ai/')).toBe(
-      false
+    expect(construirMensajeInicial({ requerimiento: 'x' })).toBe(
+      'Requerimiento:\nx'
     );
-    expect(urlProyectoValida('otra', 'http://inseguro.com')).toBe(false);
-    expect(normalizarConfig({ proveedor: 'nope' }).proveedor).toBe('claude');
+  });
+
+  test('el texto visible ignora bloques de herramientas', () => {
+    const contenido = [
+      { type: 'mcp_tool_use' },
+      { type: 'text', text: 'Hola' },
+      { type: 'thinking' },
+      { type: 'text', text: 'Chao' }
+    ];
+    expect(textoDeContenido(contenido)).toBe('Hola\n\nChao');
   });
 });
 

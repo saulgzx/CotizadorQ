@@ -1,53 +1,66 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
 import Icono from '../ui/Icono';
 import { notify } from '../ui/toast';
+import { iaAPI } from '../../api';
+import MarkdownVista from './MarkdownVista';
 import {
   MARCAS,
-  PROVEEDORES,
-  cargarConfig,
-  guardarConfig,
-  construirPrompt,
-  construirDestino,
-  urlProyectoValida,
-  extraerListaDeRespuesta
+  construirMensajeInicial,
+  extraerListaDeRespuesta,
+  textoDeContenido
 } from './asistenteIA';
+import { markdownAHtml, markdownATexto, separarPreview } from './markdown';
 
-const claveBorrador = (usuario) =>
-  `mq.ia.borrador.${String(usuario || 'anon').toLowerCase()}`;
-const BORRADOR_VACIO = {
+const INTERVALO_MS = 1200;
+const claveSesion = (usuario) =>
+  `mq.ia.chat.${String(usuario || 'anon').toLowerCase()}`;
+const FORM_VACIO = {
   marca: 'AXIS',
   cliente: '',
   contacto: '',
-  requerimiento: '',
   notas: '',
-  respuesta: ''
+  requerimiento: ''
 };
 
-const leerBorrador = (usuario) => {
+const leerSesion = (usuario) => {
   try {
+    const data = JSON.parse(
+      sessionStorage.getItem(claveSesion(usuario)) || '{}'
+    );
     return {
-      ...BORRADOR_VACIO,
-      ...JSON.parse(sessionStorage.getItem(claveBorrador(usuario)) || '{}')
+      form: { ...FORM_VACIO, ...(data.form || {}) },
+      turnos: Array.isArray(data.turnos) ? data.turnos : []
     };
   } catch {
-    return { ...BORRADOR_VACIO };
+    return { form: { ...FORM_VACIO }, turnos: [] };
   }
 };
 
-const copiar = async (texto) => {
+const claseCampo =
+  'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
+
+const copiarConFormato = async (markdown) => {
+  const html = markdownAHtml(markdown);
+  const texto = markdownATexto(markdown);
   try {
-    await navigator.clipboard.writeText(texto);
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new window.ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([texto], { type: 'text/plain' })
+        })
+      ]);
+    } else {
+      await navigator.clipboard.writeText(texto);
+    }
     return true;
   } catch {
     return false;
   }
 };
 
-const claseCampo =
-  'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
-
-function Segmentado({ opciones, valor, onCambio, etiqueta }) {
+function Segmentado({ opciones, valor, onCambio, etiqueta, deshabilitado }) {
   return (
     <div
       role="radiogroup"
@@ -60,8 +73,9 @@ function Segmentado({ opciones, valor, onCambio, etiqueta }) {
           type="button"
           role="radio"
           aria-checked={valor === o.clave}
+          disabled={deshabilitado}
           onClick={() => onCambio(o.clave)}
-          className={`h-8 rounded-md px-3 text-sm font-medium transition ${
+          className={`h-8 rounded-md px-3 text-sm font-medium transition disabled:cursor-not-allowed ${
             valor === o.clave
               ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
               : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
@@ -74,278 +88,264 @@ function Segmentado({ opciones, valor, onCambio, etiqueta }) {
   );
 }
 
-function Tarjeta({ paso, titulo, subtitulo, children, acciones }) {
+function Respuesta({ texto, onCargarLista }) {
+  const { preview } = separarPreview(texto);
+  const lista = extraerListaDeRespuesta(texto);
+  const tieneLista = lista.origen !== 'texto';
   return (
-    <section className="glass-card overflow-hidden rounded-2xl border border-white/70 shadow-card">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold text-slate-900">
-            {paso && <span className="mr-2 text-slate-400">{paso}</span>}
-            {titulo}
-          </h3>
-          {subtitulo && <p className="text-xs text-slate-500">{subtitulo}</p>}
-        </div>
-        {acciones}
+    <div className="space-y-3">
+      <MarkdownVista texto={texto} />
+      <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <button
+          type="button"
+          className="mq-btn mq-btn-sm mq-btn-secundario"
+          onClick={async () =>
+            notify(
+              (await copiarConFormato(preview))
+                ? 'Preview copiado: pégalo en Outlook'
+                : 'No se pudo copiar',
+              {}
+            )
+          }
+        >
+          <Icono nombre="portapapeles" />
+          Copiar preview para Outlook
+        </button>
+        <button
+          type="button"
+          className="mq-btn mq-btn-sm mq-btn-fantasma"
+          onClick={async () =>
+            notify(
+              (await copiarConFormato(texto))
+                ? 'Respuesta copiada'
+                : 'No se pudo copiar',
+              {}
+            )
+          }
+        >
+          Copiar todo
+        </button>
+        {tieneLista && (
+          <button
+            type="button"
+            className="mq-btn mq-btn-sm mq-btn-primario"
+            onClick={() => onCargarLista(lista.texto)}
+          >
+            <Icono nombre="cart" />
+            Cargar al cotizador
+          </button>
+        )}
       </div>
-      <div className="space-y-3 p-4">{children}</div>
-    </section>
+    </div>
   );
 }
 
 /**
- * Tab "Asistente IA": el requerimiento se resuelve en la sesion personal de IA
- * del usuario (sus tokens, sus proyectos y skills de preventa) y la respuesta
- * vuelve al cotizador como lista de productos.
+ * Tab "Asistente IA": el requerimiento se resuelve dentro de MyQuote. El backend
+ * llama a Claude con las skills de preventa y el conector MyQuote; nada se abre
+ * fuera de la app.
  */
 export default function AsistenteIAView({ usuario, onCargarLista }) {
-  const [config, setConfig] = useState(() => cargarConfig(usuario));
-  const [borrador, setBorrador] = useState(() => leerBorrador(usuario));
-  const [proyectosAbiertos, setProyectosAbiertos] = useState(false);
-  const [verPrompt, setVerPrompt] = useState(false);
+  const inicial = useRef(leerSesion(usuario)).current;
+  const [form, setForm] = useState(inicial.form);
+  const [turnos, setTurnos] = useState(inicial.turnos);
+  const [servicio, setServicio] = useState(null);
+  const [consulta, setConsulta] = useState(null); // { id, texto, pasos }
+  const [seguimiento, setSeguimiento] = useState('');
+  const [error, setError] = useState('');
+  const finRef = useRef(null);
 
   useEffect(() => {
-    setConfig(cargarConfig(usuario));
-    setBorrador(leerBorrador(usuario));
-  }, [usuario]);
+    iaAPI
+      .estado()
+      .then(setServicio)
+      .catch((e) => setServicio({ habilitado: false, error: e.message }));
+  }, []);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(claveBorrador(usuario), JSON.stringify(borrador));
-    } catch {
-      /* sin almacenamiento: el borrador vive solo en memoria */
-    }
-  }, [usuario, borrador]);
-
-  const set = (campo) => (e) =>
-    setBorrador((b) => ({ ...b, [campo]: e?.target ? e.target.value : e }));
-  const proveedor = PROVEEDORES[config.proveedor];
-  const marca = MARCAS[borrador.marca];
-
-  const prompt = useMemo(
-    () =>
-      construirPrompt({
-        marca: borrador.marca,
-        requerimiento: borrador.requerimiento,
-        cliente: borrador.cliente,
-        contacto: borrador.contacto,
-        notas: borrador.notas,
-        pedirLista: config.pedirLista
-      }),
-    [borrador, config.pedirLista]
-  );
-  const destino = useMemo(
-    () =>
-      construirDestino({
-        proveedor: config.proveedor,
-        marca: borrador.marca,
-        config,
-        prompt
-      }),
-    [config, borrador.marca, prompt]
-  );
-  const extraida = useMemo(
-    () => extraerListaDeRespuesta(borrador.respuesta),
-    [borrador.respuesta]
-  );
-  const lineasExtraidas = extraida.texto
-    ? extraida.texto.split('\n').filter(Boolean).length
-    : 0;
-
-  const actualizarConfig = (cambio) => {
-    setConfig((prev) => {
-      const next =
-        typeof cambio === 'function' ? cambio(prev) : { ...prev, ...cambio };
-      guardarConfig(usuario, next);
-      return next;
-    });
-  };
-
-  const setProyecto = (prov, m, url) =>
-    actualizarConfig((prev) => ({
-      ...prev,
-      proyectos: {
-        ...prev.proyectos,
-        [prov]: { ...prev.proyectos[prov], [m]: url }
-      }
-    }));
-
-  const abrir = () => {
-    if (!borrador.requerimiento.trim()) {
-      notify('Pega primero el requerimiento del cliente', { tipo: 'error' });
-      return;
-    }
-    if (!destino.url) {
-      notify(
-        `Configura la URL de tu IA para ${marca.nombre} en "Mis proyectos"`,
-        { tipo: 'error' }
+      sessionStorage.setItem(
+        claveSesion(usuario),
+        JSON.stringify({ form, turnos })
       );
-      setProyectosAbiertos(true);
-      return;
+    } catch {
+      /* sin almacenamiento: la conversacion vive en memoria */
     }
-    // El portapapeles se pide antes de abrir la pestaña: despues el documento pierde el foco.
-    const copia = copiar(prompt);
-    window.open(destino.url, '_blank', 'noopener,noreferrer');
-    copia.then((ok) => {
-      if (destino.prefill) {
-        notify(`Abierto en ${proveedor.nombre} con el requerimiento cargado`, {
-          tipo: 'ok'
-        });
-      } else if (ok) {
-        notify(`Prompt copiado. Pégalo en ${proveedor.nombre} (Ctrl+V)`, {
-          tipo: 'ok',
-          duracion: 7000
-        });
-      } else {
-        notify('No se pudo copiar el prompt: usa "Copiar prompt"', {
-          tipo: 'error'
-        });
+  }, [usuario, form, turnos]);
+
+  const enCurso = !!consulta;
+  const iniciada = turnos.length > 0;
+  const marca = MARCAS[form.marca];
+
+  const enviar = useCallback(
+    async (nuevosTurnos) => {
+      setError('');
+      setTurnos(nuevosTurnos);
+      const mensajes = nuevosTurnos.map((t) =>
+        t.rol === 'user'
+          ? { role: 'user', content: t.texto }
+          : { role: 'assistant', content: t.contenido }
+      );
+      try {
+        const c = await iaAPI.iniciar({ marca: form.marca, mensajes });
+        setConsulta({ id: c.id, texto: '', pasos: [] });
+      } catch (e) {
+        setTurnos(nuevosTurnos.slice(0, -1));
+        setError(e.message);
+        return false;
       }
-    });
+      return true;
+    },
+    [form.marca]
+  );
+
+  // Avance de la consulta en curso.
+  useEffect(() => {
+    if (!consulta?.id) return undefined;
+    let vigente = true;
+    const timer = setInterval(async () => {
+      try {
+        const c = await iaAPI.obtener(consulta.id);
+        if (!vigente) return;
+        if (c.estado === 'en_curso') {
+          setConsulta((prev) =>
+            prev?.id === c.id
+              ? { ...prev, texto: c.texto, pasos: c.pasos }
+              : prev
+          );
+          return;
+        }
+        clearInterval(timer);
+        setConsulta(null);
+        if (c.estado === 'lista') {
+          setTurnos((prev) => [
+            ...prev,
+            {
+              rol: 'assistant',
+              contenido: c.contenido,
+              texto: textoDeContenido(c.contenido) || c.texto
+            }
+          ]);
+        } else if (c.estado === 'error') {
+          setError(c.error || 'La consulta falló');
+          setTurnos((prev) => {
+            const ultimo = prev[prev.length - 1];
+            if (prev.length > 1 && ultimo?.rol === 'user')
+              setSeguimiento(ultimo.texto);
+            return prev.length > 1 ? prev.slice(0, -1) : prev;
+          });
+        }
+      } catch (e) {
+        if (!vigente) return;
+        clearInterval(timer);
+        setConsulta(null);
+        setError(e.message);
+      }
+    }, INTERVALO_MS);
+    return () => {
+      vigente = false;
+      clearInterval(timer);
+    };
+  }, [consulta?.id]);
+
+  useEffect(() => {
+    finRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' });
+  }, [turnos.length]);
+
+  const consultar = () => {
+    if (!form.requerimiento.trim()) return;
+    enviar([{ rol: 'user', texto: construirMensajeInicial(form) }]);
   };
 
-  const copiarPrompt = async () => {
-    notify(
-      (await copiar(prompt)) ? 'Prompt copiado' : 'No se pudo copiar el prompt',
-      {}
+  const responder = async () => {
+    const texto = seguimiento.trim();
+    if (!texto) return;
+    setSeguimiento('');
+    const ok = await enviar([...turnos, { rol: 'user', texto }]);
+    if (!ok) setSeguimiento(texto);
+  };
+
+  const reintentar = () => {
+    if (turnos.length === 1 && turnos[0].rol === 'user') enviar(turnos);
+  };
+
+  const cancelar = async () => {
+    if (!consulta) return;
+    await iaAPI.cancelar(consulta.id).catch(() => {});
+    setConsulta(null);
+    setTurnos((prev) =>
+      prev[prev.length - 1]?.rol === 'user' && prev.length > 1
+        ? prev.slice(0, -1)
+        : prev
     );
   };
 
-  const cargar = () => {
-    if (!extraida.texto) return;
-    onCargarLista(extraida.texto);
+  const nueva = () => {
+    if (enCurso) return;
+    setTurnos([]);
+    setSeguimiento('');
+    setError('');
+    setForm((f) => ({ ...FORM_VACIO, marca: f.marca }));
   };
 
-  const opcionesProveedor = Object.values(PROVEEDORES);
-  const proyectosConfigurados = Object.keys(MARCAS).filter((m) =>
-    urlProyectoValida(config.proveedor, config.proyectos[config.proveedor]?.[m])
-  ).length;
+  const set = (campo) => (e) =>
+    setForm((f) => ({ ...f, [campo]: e.target.value }));
+  const sinConfigurar = servicio && !servicio.habilitado;
+  const primerTurnoFallido = turnos.length === 1 && !enCurso && !!error;
 
   return (
     <div className="view-enter space-y-4">
       <EncabezadoPagina
         seccion="Ventas"
         titulo="Asistente IA"
-        subtitulo="Resuelve requerimientos con tu propia sesión de IA: tus tokens, tus proyectos y tus skills de preventa."
+        subtitulo="Resuelve requerimientos Axis y QNAP con tus skills de preventa y precios reales de MyQuote, sin salir de la app."
       >
-        <Segmentado
-          etiqueta="Proveedor de IA"
-          opciones={opcionesProveedor}
-          valor={config.proveedor}
-          onCambio={(p) => actualizarConfig({ proveedor: p })}
-        />
-        <button
-          type="button"
-          className="mq-btn mq-btn-secundario"
-          onClick={() => setProyectosAbiertos((v) => !v)}
-          aria-expanded={proyectosAbiertos}
-        >
-          <Icono nombre="carpeta" />
-          Mis proyectos
-          <span className="rounded-full bg-slate-100 px-1.5 text-xs tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {proyectosConfigurados}/2
-          </span>
-        </button>
+        {iniciada && (
+          <button
+            type="button"
+            className="mq-btn mq-btn-secundario"
+            onClick={nueva}
+            disabled={enCurso}
+          >
+            Nueva consulta
+          </button>
+        )}
       </EncabezadoPagina>
 
-      {proyectosAbiertos && (
-        <Tarjeta
-          titulo={`Mis proyectos en ${proveedor.nombre}`}
-          subtitulo={`${proveedor.ayudaProyecto} Se guarda solo en este navegador.`}
-          acciones={
-            <button
-              type="button"
-              className="mq-btn mq-btn-sm mq-btn-fantasma"
-              onClick={() => setProyectosAbiertos(false)}
-            >
-              Listo
-            </button>
-          }
-        >
-          <div className="grid gap-3 md:grid-cols-2">
-            {Object.values(MARCAS).map((m) => {
-              const url = config.proyectos[config.proveedor]?.[m.clave] || '';
-              const valida = urlProyectoValida(config.proveedor, url);
-              return (
-                <label
-                  key={m.clave}
-                  className="flex flex-col gap-1 text-xs text-slate-500"
-                >
-                  <span className="flex items-center justify-between">
-                    <span>
-                      Proyecto {m.nombre}{' '}
-                      <span className="text-slate-400">· skill {m.skill}</span>
-                    </span>
-                    {url && (
-                      <span
-                        className={
-                          valida ? 'text-emerald-600' : 'text-rose-600'
-                        }
-                      >
-                        {valida ? 'Configurado' : 'URL no válida'}
-                      </span>
-                    )}
-                  </span>
-                  <input
-                    type="url"
-                    inputMode="url"
-                    value={url}
-                    onChange={(e) =>
-                      setProyecto(
-                        config.proveedor,
-                        m.clave,
-                        e.target.value.trim()
-                      )
-                    }
-                    placeholder={
-                      proveedor.urlNueva
-                        ? `${proveedor.urlNueva}  (vacío = chat nuevo)`
-                        : 'https://…'
-                    }
-                    className={`${claseCampo} h-10`}
-                  />
-                </label>
-              );
-            })}
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={config.pedirLista}
-              onChange={(e) =>
-                actualizarConfig({ pedirLista: e.target.checked })
-              }
-            />
-            Pedir a la IA un bloque «{'LISTA COTIZADORQ'}» para cargar los
-            productos al cotizador
-          </label>
-          <p className="text-xs text-slate-500">
-            Sin proyecto se abre un chat nuevo: las skills y el conector MyQuote
-            de tu cuenta siguen disponibles si los tienes activados en{' '}
-            {proveedor.nombre}.
-          </p>
-        </Tarjeta>
+      {sinConfigurar && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          {servicio.error
+            ? servicio.error
+            : `El asistente aún no está configurado en el servidor. Falta: ${(servicio.faltantes || []).join(', ')}.`}
+        </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Tarjeta
-          paso="1"
-          titulo="Requerimiento"
-          subtitulo={marca.descripcion}
-          acciones={
-            <Segmentado
-              etiqueta="Marca"
-              opciones={Object.values(MARCAS)}
-              valor={borrador.marca}
-              onCambio={(m) => setBorrador((b) => ({ ...b, marca: m }))}
-            />
-          }
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
+      <section className="glass-card overflow-hidden rounded-2xl border border-white/70 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-900">
+              Requerimiento
+            </h3>
+            <p className="text-xs text-slate-500">
+              Skill {marca.skill} · {marca.descripcion}
+            </p>
+          </div>
+          <Segmentado
+            etiqueta="Marca"
+            opciones={Object.values(MARCAS)}
+            valor={form.marca}
+            deshabilitado={iniciada}
+            onCambio={(m) => setForm((f) => ({ ...f, marca: m }))}
+          />
+        </div>
+        <div className="space-y-3 p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs text-slate-500">
               Cliente
               <input
-                value={borrador.cliente}
+                value={form.cliente}
                 onChange={set('cliente')}
+                disabled={iniciada}
                 placeholder="Empresa"
                 className={`${claseCampo} h-10`}
               />
@@ -353,9 +353,20 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
             <label className="flex flex-col gap-1 text-xs text-slate-500">
               Contacto
               <input
-                value={borrador.contacto}
+                value={form.contacto}
                 onChange={set('contacto')}
+                disabled={iniciada}
                 placeholder="Nombre de pila"
+                className={`${claseCampo} h-10`}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Notas internas
+              <input
+                value={form.notas}
+                onChange={set('notas')}
+                disabled={iniciada}
+                placeholder="Ej.: ya tiene switch PoE"
                 className={`${claseCampo} h-10`}
               />
             </label>
@@ -363,117 +374,136 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
           <label className="flex flex-col gap-1 text-xs text-slate-500">
             Correo o requerimiento del cliente
             <textarea
-              value={borrador.requerimiento}
+              value={form.requerimiento}
               onChange={set('requerimiento')}
-              rows={9}
+              disabled={iniciada}
+              rows={iniciada ? 3 : 8}
               placeholder={
-                borrador.marca === 'AXIS'
+                form.marca === 'AXIS'
                   ? 'Pega el correo: "Necesito cotizar 4 P1475-LE con soporte de poste y PoE…"'
                   : 'Pega el correo: "Necesitamos un NAS de 4 bahías para respaldo de 8 TB…"'
               }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) consultar();
+              }}
               className={`${claseCampo} resize-y py-2`}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-500">
-            Notas internas (opcional)
-            <input
-              value={borrador.notas}
-              onChange={set('notas')}
-              placeholder="Ej.: el cliente ya tiene switch PoE"
-              className={`${claseCampo} h-10`}
-            />
-          </label>
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button
-              type="button"
-              className="mq-btn mq-btn-primario"
-              onClick={abrir}
-              disabled={!borrador.requerimiento.trim()}
-            >
-              Abrir en {proveedor.nombre}
-              {destino.usaProyecto ? ` · proyecto ${marca.nombre}` : ''}
-            </button>
-            <button
-              type="button"
-              className="mq-btn mq-btn-secundario"
-              onClick={copiarPrompt}
-              disabled={!borrador.requerimiento.trim()}
-            >
-              <Icono nombre="portapapeles" />
-              Copiar prompt
-            </button>
-            <button
-              type="button"
-              className="mq-btn mq-btn-fantasma"
-              onClick={() => setVerPrompt((v) => !v)}
-              aria-expanded={verPrompt}
-            >
-              {verPrompt ? 'Ocultar prompt' : 'Ver prompt'}
-            </button>
-          </div>
-          <p className="text-xs text-slate-500">
-            {destino.prefill
-              ? `El requerimiento llega cargado al chat de ${proveedor.nombre}.`
-              : `Se abre ${destino.usaProyecto ? `tu proyecto ${marca.nombre}` : proveedor.nombre} y el prompt queda copiado: solo pega con Ctrl+V.`}
-          </p>
-          {verPrompt && (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700 dark:bg-slate-950 dark:text-slate-300">
-              {prompt}
-            </pre>
-          )}
-        </Tarjeta>
-
-        <Tarjeta
-          paso="2"
-          titulo="Traer la respuesta"
-          subtitulo="Pega lo que respondió la IA para cargar los productos al carrito."
-          acciones={
-            borrador.respuesta && (
+          {!iniciada && (
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="mq-btn mq-btn-sm mq-btn-fantasma"
-                onClick={() => setBorrador((b) => ({ ...b, respuesta: '' }))}
+                className="mq-btn mq-btn-primario"
+                onClick={consultar}
+                disabled={!form.requerimiento.trim() || sinConfigurar}
               >
-                Limpiar
+                <Icono nombre="search" />
+                Consultar a la IA
               </button>
-            )
-          }
-        >
-          <textarea
-            value={borrador.respuesta}
-            onChange={set('respuesta')}
-            rows={12}
-            placeholder={
-              'Pega aquí la respuesta completa (tabla del preview o bloque LISTA COTIZADORQ)'
-            }
-            className={`${claseCampo} resize-y py-2 font-mono text-xs`}
-          />
-          {borrador.respuesta.trim() && (
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-              {extraida.origen === 'bloque' &&
-                `Encontré el bloque LISTA COTIZADORQ con ${lineasExtraidas} línea${lineasExtraidas === 1 ? '' : 's'}.`}
-              {extraida.origen === 'tabla' &&
-                `Encontré la tabla de la cotización con ${lineasExtraidas} producto${lineasExtraidas === 1 ? '' : 's'}.`}
-              {extraida.origen === 'texto' &&
-                'No encontré tabla ni bloque: se intentará leer el texto línea por línea.'}
+              <span className="text-xs text-slate-500">
+                Ctrl+Enter · Puede tardar uno o dos minutos: consulta precio y
+                stock en vivo.
+              </span>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+        </div>
+      </section>
+
+      {turnos.slice(1).map((t, i) =>
+        t.rol === 'assistant' ? (
+          <section
+            key={i}
+            className="glass-card rounded-2xl border border-white/70 p-4 shadow-card"
+          >
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Respuesta
+            </div>
+            <Respuesta texto={t.texto} onCargarLista={onCargarLista} />
+          </section>
+        ) : (
+          <div
+            key={i}
+            className="ml-auto max-w-2xl whitespace-pre-wrap rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white dark:bg-slate-700"
+          >
+            {t.texto}
+          </div>
+        )
+      )}
+
+      {enCurso && (
+        <section
+          className="glass-card rounded-2xl border border-white/70 p-4 shadow-card"
+          aria-live="polite"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+              {consulta.pasos.length
+                ? consulta.pasos[consulta.pasos.length - 1]
+                : 'Analizando el requerimiento…'}
+            </div>
             <button
               type="button"
-              className="mq-btn mq-btn-primario"
-              onClick={cargar}
-              disabled={!extraida.texto}
+              className="mq-btn mq-btn-xs mq-btn-fantasma"
+              onClick={cancelar}
             >
-              <Icono nombre="cart" />
-              Cargar al cotizador
+              Cancelar
             </button>
-            <span className="text-xs text-slate-500">
-              Revisas cada producto antes de agregarlo.
-            </span>
           </div>
-        </Tarjeta>
-      </div>
+          {consulta.pasos.length > 1 && (
+            <ul className="mb-3 space-y-0.5 text-xs text-slate-500">
+              {consulta.pasos.slice(0, -1).map((p, i) => (
+                <li key={i}>✓ {p}</li>
+              ))}
+            </ul>
+          )}
+          {consulta.texto && <MarkdownVista texto={consulta.texto} />}
+        </section>
+      )}
+
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
+          <span>{error}</span>
+          {primerTurnoFallido && (
+            <button
+              type="button"
+              className="mq-btn mq-btn-sm mq-btn-secundario"
+              onClick={reintentar}
+            >
+              Reintentar
+            </button>
+          )}
+        </div>
+      )}
+
+      {iniciada &&
+        turnos[turnos.length - 1]?.rol === 'assistant' &&
+        !enCurso && (
+          <section className="glass-card rounded-2xl border border-white/70 p-3 shadow-card">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={seguimiento}
+                onChange={(e) => setSeguimiento(e.target.value)}
+                rows={2}
+                placeholder='Pide un ajuste: "agrega el midspan", "cambia a 6 unidades", "sin la tarjeta SD"…'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey))
+                    responder();
+                }}
+                className={`${claseCampo} resize-y py-2`}
+              />
+              <button
+                type="button"
+                className="mq-btn mq-btn-primario shrink-0"
+                onClick={responder}
+                disabled={!seguimiento.trim()}
+              >
+                Enviar
+              </button>
+            </div>
+          </section>
+        )}
+      <div ref={finRef} />
     </div>
   );
 }
