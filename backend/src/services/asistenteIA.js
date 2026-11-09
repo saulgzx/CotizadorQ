@@ -1,14 +1,16 @@
 // Asistente IA de preventa (Axis / QNAP).
 //
-// El backend llama a la API de Claude con las skills de preventa como
-// instrucciones de sistema. Precios, stock y plazos salen del servidor MCP de
-// MyQuote (el mismo conector que se usa desde claude.ai), conectado del lado de
-// Anthropic. Solo se habilitan sus herramientas de lectura: desde la web nunca
-// se graba una cotizacion.
+// Dos modos:
+// - "agente" (IA_AGENTE_TOKEN definido): las consultas quedan en una cola y
+//   las resuelve el agente que corre en el equipo del usuario (agente-ia/), con
+//   Claude Code, su suscripcion, sus skills y su conector MyQuote. El agente
+//   solo hace conexiones salientes: pide trabajo y devuelve el resultado.
+// - "api": el backend llama a la API de Claude con las skills como
+//   instrucciones y el conector MyQuote del lado de Anthropic (requiere
+//   ANTHROPIC_API_KEY y se cobra por uso).
 //
-// Las consultas corren en segundo plano y el navegador consulta su avance: una
-// respuesta con varias busquedas puede tardar minutos y el proxy de Vercel
-// corta los pedidos largos.
+// En ambos casos la consulta corre en segundo plano y quien la pidio (el tab
+// web o el webhook de WhatsApp) consulta su avance o recibe el resultado.
 
 const fs = require('fs');
 const path = require('path');
@@ -47,15 +49,30 @@ const leerConfig = (env = process.env) => ({
     : 'medium',
   mcpUrl: String(env.MYQUOTE_MCP_URL || '').trim(),
   mcpToken: String(env.MYQUOTE_MCP_TOKEN || '').trim(),
-  maxTokens: Number(env.IA_MAX_TOKENS) > 0 ? Number(env.IA_MAX_TOKENS) : 32000
+  maxTokens: Number(env.IA_MAX_TOKENS) > 0 ? Number(env.IA_MAX_TOKENS) : 32000,
+  agenteToken: String(env.IA_AGENTE_TOKEN || '').trim(),
+  // Usuarios de MyQuote que pueden usar el asistente (coma-separados). Vacio: todos los admin.
+  usuarios: String(env.IA_USUARIOS || '')
+    .split(',')
+    .map((u) => u.trim().toLowerCase())
+    .filter(Boolean)
 });
 
+const modo = (config) => (config.agenteToken ? 'agente' : 'api');
+
 const faltantes = (config) =>
-  [
-    !config.apiKey && 'ANTHROPIC_API_KEY',
-    !config.mcpUrl && 'MYQUOTE_MCP_URL',
-    !config.mcpToken && 'MYQUOTE_MCP_TOKEN'
-  ].filter(Boolean);
+  modo(config) === 'agente'
+    ? []
+    : [
+        !config.apiKey &&
+          'ANTHROPIC_API_KEY (o IA_AGENTE_TOKEN para usar el agente)',
+        !config.mcpUrl && 'MYQUOTE_MCP_URL',
+        !config.mcpToken && 'MYQUOTE_MCP_TOKEN'
+      ].filter(Boolean);
+
+const usuarioPermitido = (config, usuario) =>
+  config.usuarios.length === 0 ||
+  config.usuarios.includes(String(usuario || '').toLowerCase());
 
 // --- Instrucciones -----------------------------------------------------------
 
@@ -99,6 +116,53 @@ const construirSistema = (marca) => {
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
   ].join('\n');
   return `${entorno}\n\n${leerSkill(m.skill)}`;
+};
+
+// --- Instrucciones para el agente (Claude Code ya tiene las skills) -----------
+
+const textoDeContenido = (contenido) =>
+  (Array.isArray(contenido) ? contenido : [])
+    .filter((b) => b?.type === 'text' && b.text)
+    .map((b) => b.text)
+    .join('\n\n');
+
+const FORMATO_WEB = [
+  'La respuesta se muestra como Markdown en MyQuote. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla va como tabla Markdown.',
+  `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
+].join('\n');
+
+const FORMATO_WHATSAPP = [
+  'La respuesta se lee en WhatsApp, que no muestra tablas ni títulos Markdown. Usa *negrita* con un asterisco y listas con guion.',
+  'Entrega el preview como una línea por producto: «Cant. x SKU · MPN · Descripción · P. Unit. · P. Total · Entrega». Después, el control interno resumido en pocas líneas.',
+  'Sé breve: es para leer en el teléfono.'
+].join('\n');
+
+/** Texto completo que el agente le pasa a Claude Code. */
+const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
+  const m = MARCAS[marca];
+  const skill = m
+    ? `Usa la skill ${m.skill}.`
+    : 'Usa la skill de preventa que corresponda: preventa-axis para Axis o videovigilancia, preventa-qnap para QNAP o almacenamiento. Si no se puede saber, pregunta.';
+  const instrucciones = [
+    '<instrucciones_myquote>',
+    `Respondes un requerimiento de preventa recibido por ${canal === 'whatsapp' ? 'WhatsApp' : 'el tab Asistente IA de MyQuote'} (Intcomex Chile).`,
+    skill,
+    'Precios, stock y plazos solo con el conector MyQuote (buscar_productos, consultar_producto, simular_cotizacion). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
+    'No ejecutes comandos ni modifiques archivos.',
+    canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
+    '</instrucciones_myquote>'
+  ].join('\n');
+  const previos = mensajes.slice(0, -1);
+  const ultimo = mensajes[mensajes.length - 1].content;
+  if (!previos.length) return `${instrucciones}\n\n${ultimo}`;
+  const historial = previos
+    .map((msg) =>
+      msg.role === 'user'
+        ? `<usuario>\n${msg.content}\n</usuario>`
+        : `<asistente>\n${textoDeContenido(msg.content)}\n</asistente>`
+    )
+    .join('\n\n');
+  return `${instrucciones}\n\n<conversacion_previa>\n${historial}\n</conversacion_previa>\n\nNuevo mensaje del usuario:\n${ultimo}`;
 };
 
 // --- Validacion de la conversacion --------------------------------------------
@@ -212,6 +276,11 @@ const describirHerramienta = (bloque) => {
 
 // --- Consultas en segundo plano ---------------------------------------------
 
+const AGENTE_CONECTADO_MS = 90 * 1000; // sin pedir trabajo en este lapso: desconectado
+const AGENTE_SIN_LATIDO_MS = 3 * 60 * 1000; // consulta tomada sin avance: se devuelve a la cola
+const COLA_MAX_ESPERA_MS = 5 * 60 * 1000; // nadie la tomo: falla
+const AGENTE_MAX_CHARS = 200000;
+
 const crearGestorConsultas = ({
   crearCliente,
   config = leerConfig(),
@@ -219,12 +288,9 @@ const crearGestorConsultas = ({
   ahora = () => Date.now()
 }) => {
   const consultas = new Map();
-
-  const limpiar = () => {
-    const limite = ahora() - JOB_TTL_MS;
-    for (const [id, c] of consultas)
-      if (c.actualizada < limite) consultas.delete(id);
-  };
+  const cola = [];
+  let esperas = []; // agentes esperando trabajo (long polling)
+  let agenteVisto = 0;
 
   const vista = (c) => ({
     id: c.id,
@@ -236,7 +302,49 @@ const crearGestorConsultas = ({
     uso: c.uso
   });
 
-  const ejecutar = async (c, { marca, mensajes }) => {
+  const finalizar = (c, cambios) => {
+    Object.assign(c, cambios, { actualizada: ahora() });
+    const idx = cola.indexOf(c);
+    if (idx >= 0) cola.splice(idx, 1);
+    if (c.alTerminar) {
+      const cb = c.alTerminar;
+      c.alTerminar = null;
+      Promise.resolve()
+        .then(() => cb(vista(c), c))
+        .catch((error) =>
+          logger.error?.(
+            { event: 'ia_al_terminar_error', msg: error?.message },
+            'Fallo el aviso de fin de consulta'
+          )
+        );
+    }
+  };
+
+  const revisarVencidas = () => {
+    const t = ahora();
+    for (const [id, c] of consultas) {
+      if (c.actualizada < t - JOB_TTL_MS && c.estado !== 'en_curso')
+        consultas.delete(id);
+    }
+    for (const c of [...cola]) {
+      if (c.estado !== 'en_curso') continue;
+      if (c.tomadaEn && c.actualizada < t - AGENTE_SIN_LATIDO_MS) {
+        // El agente la tomo y dejo de reportar (se reinicio o se corto la red).
+        c.tomadaEn = null;
+        c.pasos.push('El servidor IA dejó de responder: reintentando');
+        c.actualizada = t;
+      } else if (!c.tomadaEn && c.creada < t - COLA_MAX_ESPERA_MS) {
+        finalizar(c, {
+          estado: 'error',
+          error:
+            'El servidor IA de casa no tomó la consulta. Revisa que el miniPC y el agente estén encendidos.'
+        });
+      }
+    }
+  };
+
+  // --- modo API ---------------------------------------------------------------
+  const ejecutarApi = async (c, { marca, mensajes }) => {
     const cliente = crearCliente(config);
     const historial = [...mensajes];
     const contenido = [];
@@ -275,7 +383,9 @@ const crearGestorConsultas = ({
             new Error(
               'La IA no pudo responder este requerimiento. Reformúlalo e intenta de nuevo.'
             ),
-            { publico: true }
+            {
+              publico: true
+            }
           );
         }
         if (mensaje.stop_reason !== 'pause_turn') break;
@@ -285,12 +395,13 @@ const crearGestorConsultas = ({
           content: [...contenido]
         });
       }
-      c.contenido = contenido;
-      c.estado = 'lista';
+      finalizar(c, { estado: 'lista', contenido });
     } catch (error) {
       if (c.cancelada) return;
-      c.estado = 'error';
-      c.error = error.publico ? error.message : mensajeError(error);
+      finalizar(c, {
+        estado: 'error',
+        error: error.publico ? error.message : mensajeError(error)
+      });
       logger.error?.(
         {
           event: 'ia_consulta_error',
@@ -302,13 +413,49 @@ const crearGestorConsultas = ({
       );
     } finally {
       c.stream = null;
-      c.actualizada = ahora();
     }
   };
 
+  // --- modo agente ------------------------------------------------------------
+  const paraAgente = (c) => {
+    c.tomadaEn = ahora();
+    c.actualizada = ahora();
+    if (c.pasos.length === 1 && c.pasos[0].startsWith('En cola')) c.pasos = [];
+    c.pasos.push('El servidor IA tomó la consulta');
+    return { id: c.id, prompt: c.prompt, canal: c.canal, marca: c.marca };
+  };
+
+  const siguienteLibre = () =>
+    cola.find((c) => c.estado === 'en_curso' && !c.tomadaEn);
+
+  const despertarAgente = () => {
+    while (esperas.length) {
+      const c = siguienteLibre();
+      if (!c) return;
+      const espera = esperas.shift();
+      clearTimeout(espera.timer);
+      espera.resolver(paraAgente(c));
+    }
+  };
+
+  const tomada = (id) => {
+    const c = consultas.get(id);
+    return c && c.tomadaEn && c.estado === 'en_curso' ? c : null;
+  };
+
   return {
-    iniciar({ usuarioId, entrada }) {
-      limpiar();
+    modo: () => modo(config),
+
+    estadoAgente() {
+      return {
+        conectado:
+          agenteVisto > 0 && ahora() - agenteVisto < AGENTE_CONECTADO_MS,
+        vistoEn: agenteVisto || null
+      };
+    },
+
+    iniciar({ usuarioId, entrada, canal = 'web', alTerminar = null }) {
+      revisarVencidas();
       const enCurso = [...consultas.values()].filter(
         (c) => c.usuarioId === usuarioId && c.estado === 'en_curso'
       );
@@ -320,6 +467,8 @@ const crearGestorConsultas = ({
       const c = {
         id: crypto.randomUUID(),
         usuarioId,
+        canal,
+        marca: entrada.marca || null,
         estado: 'en_curso',
         texto: '',
         pasos: [],
@@ -327,23 +476,97 @@ const crearGestorConsultas = ({
         error: null,
         uso: null,
         cancelada: false,
-        actualizada: ahora()
+        creada: ahora(),
+        actualizada: ahora(),
+        alTerminar
       };
       consultas.set(c.id, c);
-      ejecutar(c, entrada);
+      if (modo(config) === 'agente') {
+        c.prompt = construirPromptAgente({
+          marca: entrada.marca,
+          mensajes: entrada.mensajes,
+          canal
+        });
+        c.pasos.push('En cola: esperando al servidor IA de casa');
+        cola.push(c);
+        despertarAgente();
+      } else {
+        ejecutarApi(c, entrada);
+      }
       return vista(c);
     },
+
     obtener({ usuarioId, id }) {
+      revisarVencidas();
       const c = consultas.get(id);
       if (!c || c.usuarioId !== usuarioId) return null;
       return vista(c);
     },
+
     cancelar({ usuarioId, id }) {
       const c = consultas.get(id);
       if (!c || c.usuarioId !== usuarioId) return false;
       c.cancelada = true;
-      c.estado = 'cancelada';
       c.stream?.abort();
+      finalizar(c, { estado: 'cancelada', alTerminar: null });
+      return true;
+    },
+
+    // --- API del agente ---
+    /** Espera hasta esperaMs por una consulta; null si no hay. */
+    tomarTrabajo({ esperaMs = 25000 } = {}) {
+      agenteVisto = ahora();
+      revisarVencidas();
+      const c = siguienteLibre();
+      if (c) return Promise.resolve(paraAgente(c));
+      return new Promise((resolver) => {
+        const espera = { resolver };
+        espera.timer = setTimeout(() => {
+          esperas = esperas.filter((e) => e !== espera);
+          agenteVisto = ahora();
+          resolver(null);
+        }, esperaMs);
+        esperas.push(espera);
+      });
+    },
+
+    /** Avance parcial: texto acumulado y/o un paso nuevo. Devuelve false si ya no aplica (cancelada). */
+    avanceAgente(id, { texto, paso } = {}) {
+      agenteVisto = ahora();
+      const c = tomada(id);
+      if (!c) return false;
+      if (typeof texto === 'string') c.texto = texto.slice(0, AGENTE_MAX_CHARS);
+      if (paso) c.pasos.push(String(paso).slice(0, 160));
+      c.actualizada = ahora();
+      return true;
+    },
+
+    liberarTrabajo(id) {
+      const c = tomada(id);
+      if (!c) return false;
+      c.tomadaEn = null;
+      c.pasos = c.pasos.filter((p) => p !== 'El servidor IA tomó la consulta');
+      despertarAgente();
+      return true;
+    },
+
+    terminarAgente(id, { texto, error } = {}) {
+      agenteVisto = ahora();
+      const c = tomada(id);
+      if (!c) return false;
+      if (error) {
+        finalizar(c, {
+          estado: 'error',
+          error: `El servidor IA no pudo responder: ${String(error).slice(0, 300)}`
+        });
+      } else {
+        const final = String(texto || c.texto || '').slice(0, AGENTE_MAX_CHARS);
+        finalizar(c, {
+          estado: 'lista',
+          texto: final,
+          contenido: [{ type: 'text', text: final }]
+        });
+      }
       return true;
     }
   };
@@ -373,6 +596,10 @@ const mensajeError = (error) => {
 
 module.exports = {
   MARCAS,
+  modo,
+  usuarioPermitido,
+  textoDeContenido,
+  construirPromptAgente,
   HERRAMIENTAS_MYQUOTE,
   leerConfig,
   faltantes,

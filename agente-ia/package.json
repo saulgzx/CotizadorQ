@@ -1,0 +1,14 @@
+{
+  "name": "myquote-agente-ia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agente que resuelve las consultas del Asistente IA de MyQuote con Claude Code en el equipo del usuario",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node agente.mjs",
+    "test": "node --test test/agente.test.mjs"
+  }
+}

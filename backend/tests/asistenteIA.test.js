@@ -4,7 +4,10 @@ const {
   construirSistema,
   crearGestorConsultas,
   faltantes,
-  leerConfig
+  leerConfig,
+  modo,
+  usuarioPermitido,
+  construirPromptAgente
 } = require('../src/services/asistenteIA');
 
 const config = leerConfig({
@@ -42,13 +45,19 @@ describe('asistente IA', () => {
     );
   });
 
-  test('exige las tres variables de configuracion', () => {
-    expect(faltantes(leerConfig({}))).toEqual([
-      'ANTHROPIC_API_KEY',
-      'MYQUOTE_MCP_URL',
-      'MYQUOTE_MCP_TOKEN'
-    ]);
+  test('exige configuracion solo en modo API', () => {
+    expect(faltantes(leerConfig({}))).toHaveLength(3);
     expect(faltantes(config)).toEqual([]);
+    const agente = leerConfig({ IA_AGENTE_TOKEN: 'secreto' });
+    expect(modo(agente)).toBe('agente');
+    expect(faltantes(agente)).toEqual([]);
+  });
+
+  test('IA_USUARIOS limita quien usa el asistente', () => {
+    const c = leerConfig({ IA_USUARIOS: 'Alexis, otro' });
+    expect(usuarioPermitido(c, 'alexis')).toBe(true);
+    expect(usuarioPermitido(c, 'jleon')).toBe(false);
+    expect(usuarioPermitido(leerConfig({}), 'cualquiera')).toBe(true);
   });
 
   test('valida la conversacion', () => {
@@ -222,5 +231,121 @@ describe('asistente IA', () => {
     expect(c.estado).toBe('error');
     expect(c.error).toMatch(/API key/);
     expect(c.error).toContain('authentication_error: invalid x-api-key');
+  });
+
+  describe('modo agente', () => {
+    const configAgente = leerConfig({ IA_AGENTE_TOKEN: 'secreto' });
+    const entrada = {
+      marca: 'AXIS',
+      mensajes: [{ role: 'user', content: 'Cotizar P1475-LE' }]
+    };
+
+    test('el prompt lleva la skill, el formato del canal y la conversacion previa', () => {
+      const web = construirPromptAgente(entrada);
+      expect(web).toContain('preventa-axis');
+      expect(web).toContain('LISTA COTIZADORQ');
+      expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
+      const wa = construirPromptAgente({
+        marca: null,
+        canal: 'whatsapp',
+        mensajes: [
+          { role: 'user', content: 'nas 30tb' },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Propuesta TS-464' }]
+          },
+          { role: 'user', content: 'y sin discos?' }
+        ]
+      });
+      expect(wa).toContain('preventa-axis para Axis');
+      expect(wa).toContain('WhatsApp');
+      expect(wa).toContain('<asistente>\nPropuesta TS-464');
+      expect(wa.endsWith('y sin discos?')).toBe(true);
+    });
+
+    test('el agente toma la consulta, informa avance y la termina', async () => {
+      let t = 1000;
+      const terminadas = [];
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() },
+        ahora: () => t
+      });
+      expect(gestor.estadoAgente().conectado).toBe(false);
+      const { id } = gestor.iniciar({
+        usuarioId: 1,
+        entrada,
+        alTerminar: (v) => terminadas.push(v.estado)
+      });
+      expect(gestor.obtener({ usuarioId: 1, id }).pasos).toEqual([
+        'En cola: esperando al servidor IA de casa'
+      ]);
+
+      const trabajo = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(trabajo).toMatchObject({ id, canal: 'web', marca: 'AXIS' });
+      expect(trabajo.prompt).toContain('Cotizar P1475-LE');
+      expect(gestor.estadoAgente().conectado).toBe(true);
+      expect(await gestor.tomarTrabajo({ esperaMs: 10 })).toBeNull();
+
+      expect(
+        gestor.avanceAgente(id, {
+          texto: 'Andrea.',
+          paso: 'Consultando precio y stock: P1475-LE'
+        })
+      ).toBe(true);
+      expect(gestor.obtener({ usuarioId: 1, id })).toMatchObject({
+        texto: 'Andrea.',
+        estado: 'en_curso'
+      });
+      expect(gestor.terminarAgente(id, { texto: 'Andrea. Final' })).toBe(true);
+      const fin = gestor.obtener({ usuarioId: 1, id });
+      expect(fin.estado).toBe('lista');
+      expect(fin.contenido).toEqual([{ type: 'text', text: 'Andrea. Final' }]);
+      await new Promise((r) => setImmediate(r));
+      expect(terminadas).toEqual(['lista']);
+      expect(gestor.avanceAgente(id, { texto: 'x' })).toBe(false);
+    });
+
+    test('un agente esperando recibe la consulta apenas llega', async () => {
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() }
+      });
+      const espera = gestor.tomarTrabajo({ esperaMs: 5000 });
+      const { id } = gestor.iniciar({ usuarioId: 1, entrada });
+      expect((await espera).id).toBe(id);
+    });
+
+    test('vuelve a la cola si el agente deja de reportar y falla si nadie la toma', async () => {
+      let t = 0;
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() },
+        ahora: () => t
+      });
+      const a = gestor.iniciar({ usuarioId: 1, entrada });
+      await gestor.tomarTrabajo({ esperaMs: 10 });
+      t = 4 * 60 * 1000; // sin latido por 4 min
+      const otraVez = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(otraVez.id).toBe(a.id);
+
+      const b = gestor.iniciar({ usuarioId: 2, entrada });
+      t += 6 * 60 * 1000; // nadie la toma en 6 min
+      const vencida = gestor.obtener({ usuarioId: 2, id: b.id });
+      expect(vencida.estado).toBe('error');
+      expect(vencida.error).toMatch(/miniPC/);
+    });
+
+    test('cancelar avisa al agente con un rechazo', async () => {
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() }
+      });
+      const { id } = gestor.iniciar({ usuarioId: 1, entrada });
+      await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(gestor.cancelar({ usuarioId: 1, id })).toBe(true);
+      expect(gestor.avanceAgente(id, { texto: 'x' })).toBe(false);
+      expect(gestor.terminarAgente(id, { texto: 'x' })).toBe(false);
+    });
   });
 });

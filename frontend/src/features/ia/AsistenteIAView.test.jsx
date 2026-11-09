@@ -76,4 +76,20 @@ describe('AsistenteIAView', () => {
     });
     expect(screen.getByText(/Falta: ANTHROPIC_API_KEY/)).toBeInTheDocument();
   });
+
+  test('muestra si el servidor de casa esta conectado', async () => {
+    iaAPI.estado.mockResolvedValue({
+      habilitado: true,
+      faltantes: [],
+      modo: 'agente',
+      agente: { conectado: false }
+    });
+    await act(async () => {
+      render(<AsistenteIAView usuario="alexis" onCargarLista={() => {}} />);
+    });
+    expect(screen.getByText('Servidor IA desconectado')).toBeInTheDocument();
+    expect(
+      screen.getByText(/espera hasta 5 minutos en cola/)
+    ).toBeInTheDocument();
+  });
 });

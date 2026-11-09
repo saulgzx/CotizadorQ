@@ -155,11 +155,22 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
   const [error, setError] = useState('');
   const finRef = useRef(null);
 
+  // Estado del servicio; en modo agente se refresca para mostrar si el miniPC esta conectado.
   useEffect(() => {
-    iaAPI
-      .estado()
-      .then(setServicio)
-      .catch((e) => setServicio({ habilitado: false, error: e.message }));
+    let vigente = true;
+    const leer = () =>
+      iaAPI
+        .estado()
+        .then((s) => vigente && setServicio(s))
+        .catch(
+          (e) => vigente && setServicio({ habilitado: false, error: e.message })
+        );
+    leer();
+    const timer = setInterval(leer, 30000);
+    return () => {
+      vigente = false;
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -291,6 +302,7 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
   const set = (campo) => (e) =>
     setForm((f) => ({ ...f, [campo]: e.target.value }));
   const sinConfigurar = servicio && !servicio.habilitado;
+  const agente = servicio?.modo === 'agente' ? servicio.agente : null;
   const primerTurnoFallido = turnos.length === 1 && !enCurso && !!error;
 
   return (
@@ -300,6 +312,23 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
         titulo="Asistente IA"
         subtitulo="Resuelve requerimientos Axis y QNAP con tus skills de preventa y precios reales de MyQuote, sin salir de la app."
       >
+        {agente && (
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+              agente.conectado
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+            }`}
+            title="El servidor de casa resuelve las consultas con tu suscripción de Claude"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${agente.conectado ? 'bg-emerald-500' : 'bg-amber-500'}`}
+            />
+            {agente.conectado
+              ? 'Servidor IA conectado'
+              : 'Servidor IA desconectado'}
+          </span>
+        )}
         {iniciada && (
           <button
             type="button"
@@ -316,7 +345,16 @@ export default function AsistenteIAView({ usuario, onCargarLista }) {
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
           {servicio.error
             ? servicio.error
-            : `El asistente aún no está configurado en el servidor. Falta: ${(servicio.faltantes || []).join(', ')}.`}
+            : servicio.permitido === false
+              ? 'El asistente IA no está habilitado para tu usuario.'
+              : `El asistente aún no está configurado en el servidor. Falta: ${(servicio.faltantes || []).join(', ')}.`}
+        </div>
+      )}
+
+      {agente && !agente.conectado && !sinConfigurar && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          El servidor IA de casa no está conectado. Puedes enviar la consulta:
+          espera hasta 5 minutos en cola a que el miniPC la tome.
         </div>
       )}
 
