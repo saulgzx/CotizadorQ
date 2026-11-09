@@ -125,8 +125,11 @@ journalctl -u myquote-agente -f
 2. **General**: nombre `MyQuote agente IA`, marca **Ejecutar tanto si el usuario
    inició sesión como si no**.
 3. **Desencadenadores** → Nuevo → **Al iniciar el sistema**.
-4. **Acciones** → Nuevo → Programa: `node`, Argumentos: `agente.mjs`,
-   Iniciar en: la carpeta `agente-ia` completa.
+4. **Acciones** → Nuevo → Programa: `C:\Program Files\nodejs\node.exe`,
+   Argumentos: `agente.mjs`, Iniciar en: la carpeta `agente-ia` completa.
+   En `.env`, pon la ruta completa de Claude Code:
+   `CLAUDE_BIN=C:\Users\TU_USUARIO\.local\bin\claude.exe` (la tarea programada
+   no siempre ve el mismo PATH que tu sesión).
 5. **Configuración**: marca **Si la tarea no se ejecuta, reiniciarla cada 1 minuto**.
 
 Ponle al miniPC el arranque automático tras un corte de luz (opción de la BIOS

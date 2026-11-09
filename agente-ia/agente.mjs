@@ -152,7 +152,8 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     mkdirSync(config.carpetaTrabajo, { recursive: true });
     const hijo = spawnImpl(config.claude, argumentosClaude(config), {
       cwd: config.carpetaTrabajo,
-      shell: process.platform === 'win32',
+      // En Windows, "claude" sin ruta necesita el shell para resolverse; un .exe con ruta completa no.
+      shell: process.platform === 'win32' && !/\.exe$/i.test(config.claude),
       stdio: ['pipe', 'pipe', 'pipe']
     });
     const estado = { texto: '', final: null, error: null, terminado: false };
