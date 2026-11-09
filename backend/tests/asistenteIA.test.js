@@ -36,6 +36,12 @@ const esperar = async (gestor, args) => {
 };
 
 describe('asistente IA', () => {
+  test('limpia comillas alrededor de la API key', () => {
+    expect(leerConfig({ ANTHROPIC_API_KEY: ' "sk-ant-api03-x" ' }).apiKey).toBe(
+      'sk-ant-api03-x'
+    );
+  });
+
   test('exige las tres variables de configuracion', () => {
     expect(faltantes(leerConfig({}))).toEqual([
       'ANTHROPIC_API_KEY',
@@ -191,7 +197,18 @@ describe('asistente IA', () => {
             stream: () => ({
               on: () => {},
               finalMessage: () =>
-                Promise.reject(Object.assign(new Error('x'), { status: 401 }))
+                Promise.reject(
+                  Object.assign(new Error('x'), {
+                    status: 401,
+                    error: {
+                      type: 'error',
+                      error: {
+                        type: 'authentication_error',
+                        message: 'invalid x-api-key'
+                      }
+                    }
+                  })
+                )
             })
           }
         }
@@ -204,5 +221,6 @@ describe('asistente IA', () => {
     const c = await esperar(gestor, { usuarioId: 1, id });
     expect(c.estado).toBe('error');
     expect(c.error).toMatch(/API key/);
+    expect(c.error).toContain('authentication_error: invalid x-api-key');
   });
 });
