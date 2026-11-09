@@ -1,5 +1,11 @@
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from '@testing-library/react';
 import AsistenteIAView from './AsistenteIAView';
 import { iaAPI } from '../../api';
 
@@ -18,10 +24,8 @@ const RESPUESTA =
 describe('AsistenteIAView', () => {
   beforeEach(() => {
     sessionStorage.clear();
-    vi.useFakeTimers();
     iaAPI.estado.mockResolvedValue({ habilitado: true, faltantes: [] });
   });
-  afterEach(() => vi.useRealTimers());
 
   test('consulta en el backend, muestra la respuesta y la carga al cotizador', async () => {
     iaAPI.iniciar.mockResolvedValue({ id: 'c1', estado: 'en_curso' });
@@ -48,12 +52,14 @@ describe('AsistenteIAView', () => {
       ]
     });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1300);
-    });
-    expect(
-      screen.getByText('100010879', { selector: 'td' })
-    ).toBeInTheDocument();
+    // La vista consulta el avance cada 1,2 s.
+    await waitFor(
+      () =>
+        expect(
+          screen.getByText('100010879', { selector: 'td' })
+        ).toBeInTheDocument(),
+      { timeout: 4000 }
+    );
     fireEvent.click(
       screen.getByRole('button', { name: /Cargar al cotizador/ })
     );
