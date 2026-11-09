@@ -38,6 +38,7 @@ export const VIEW_TO_ROUTE = {
   dashboard: '/dashboard',
   cotizador: '/cotizador',
   historial: '/historial',
+  ia: '/ia',
   usuarios: '/admin/usuarios',
   ordenes: '/admin/ordenes',
   login: '/login'
@@ -47,6 +48,7 @@ export const ROUTE_TO_VIEW = {
   '/dashboard': 'dashboard',
   '/cotizador': 'cotizador',
   '/historial': 'historial',
+  '/ia': 'ia',
   '/admin/usuarios': 'usuarios',
   '/admin/ordenes': 'ordenes',
   '/login': 'cotizador'
