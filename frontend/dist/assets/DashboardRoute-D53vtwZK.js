@@ -1,1 +1,0 @@
-import{j as o}from"./query-vendor-ShmBudP0.js";import"./react-vendor-BfgX6osy.js";import{C as r}from"./CotizadorPage-Bhggu1pO.js";import"./index-DKEgTgCk.js";import"./sanitize-vendor-A66Cw1IH.js";function s(){return o.jsx(r,{routeView:"dashboard"})}export{s as default};
