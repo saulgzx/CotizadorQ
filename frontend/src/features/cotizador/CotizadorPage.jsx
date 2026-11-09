@@ -96,6 +96,7 @@ const margenCotizacion = (cot) => {
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
 const CotizacionEditor = lazy(() => import('./editor/CotizacionEditor'));
+const AsistenteIAView = lazy(() => import('../ia/AsistenteIAView'));
 
 const NAV_ICON_PATHS = {
   home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
@@ -111,6 +112,7 @@ const NAV_ICON_PATHS = {
   search: 'M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z',
   sun: 'M12 3v2M12 19v2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M3 12h2M19 12h2M5.2 18.8l1.4-1.4M17.4 6.6l1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
   close: 'M6 18 18 6M6 6l12 12',
+  sparkles: 'M9.8 4.5 11 8.2a2 2 0 0 0 1.3 1.3l3.7 1.2-3.7 1.2a2 2 0 0 0-1.3 1.3L9.8 17l-1.2-3.8a2 2 0 0 0-1.3-1.3L3.6 10.7l3.7-1.2a2 2 0 0 0 1.3-1.3zM18 3v4M16 5h4M17.5 16v3M16 17.5h3',
   logout: 'M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M18.75 15.75 21.75 12l-3-3.75M9 12h12.75'
 };
 
@@ -289,6 +291,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canViewStock = !isComprasOnlyUser;
   const canViewHistorial = !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
+  // Asistente IA: solo personal interno (usa la sesion de IA y las skills de cada usuario).
+  const canViewIA = isAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
   const navRestriction = RESTRICTED_NAV_BY_USER[normalizeText(user?.usuario)] || null;
@@ -2024,7 +2028,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return;
     }
     const blockedForClient = new Set(['admin', 'usuarios', 'ordenes']);
-    if (blockedForClient.has(currentView)) {
+    if (blockedForClient.has(currentView) || (currentView === 'ia' && !canViewIA)) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
     }
@@ -2035,7 +2039,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (isComprasOnlyUser && (currentView === 'cotizador' || currentView === 'stock' || currentView === 'historial' || currentView === 'cuenta' || currentView === 'dashboard')) {
       setCurrentView('compras');
     }
-  }, [isFullAdmin, isCotizadorStockAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser]);
+  }, [isFullAdmin, isCotizadorStockAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser, canViewIA]);
 
   useEffect(() => {
     if (isLoggedIn && location.pathname === '/login') {
@@ -5211,6 +5215,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // Modelo único de navegación: alimenta los pills de desktop, el drawer y la barra inferior móvil.
   const navItems = [
     canViewCotizador && { key: 'cotizador', grupo: 'ventas', label: 'Cotizador', short: 'Cotizar', icon: 'calc', badge: cotizacion.length > 0 ? cotizacion.length : null, badgeTone: 'blue' },
+    canViewIA && { key: 'ia', grupo: 'ventas', label: 'Asistente IA', short: 'IA', icon: 'sparkles' },
     canViewHistorial && {
       key: 'historial',
       grupo: 'ventas',
@@ -5530,6 +5535,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
+          </Suspense>
+        )}
+        {currentView === 'ia' && canViewIA && (
+          <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
+            <AsistenteIAView
+              usuario={user?.usuario}
+              onCargarLista={(texto) => {
+                setCurrentView('cotizador');
+                setPegarListaTexto(texto);
+              }}
+            />
           </Suspense>
         )}
         {currentView === 'stock' && (
