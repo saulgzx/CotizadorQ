@@ -53,6 +53,19 @@ jobs:
       - name: Build
         run: npm run build
 
+  agente-ia:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agente-ia
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Test
+        run: npm test
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

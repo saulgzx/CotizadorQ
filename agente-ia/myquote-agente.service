@@ -1,0 +1,18 @@
+# Servicio systemd para Linux. Ver README.md, paso 6.
+# Cambia TU_USUARIO por tu usuario de Linux (el mismo con que iniciaste sesion en Claude Code).
+[Unit]
+Description=Agente IA de MyQuote (Claude Code)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=TU_USUARIO
+WorkingDirectory=/home/TU_USUARIO/CotizadorQ/agente-ia
+ExecStart=/usr/bin/env node agente.mjs
+Restart=always
+RestartSec=10
+Environment=PATH=/home/TU_USUARIO/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

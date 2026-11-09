@@ -67,7 +67,15 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
-app.use(express.json({ limit: '10mb' }));
+app.use(
+  express.json({
+    limit: '10mb',
+    // El webhook de WhatsApp valida la firma de Meta sobre el cuerpo crudo.
+    verify: (req, res, buf) => {
+      if (req.originalUrl.startsWith('/api/whatsapp/')) req.rawBody = buf;
+    }
+  })
+);
 
 // ConexiÃ³n a PostgreSQL
 // DATABASE_SSL_REJECT_UNAUTHORIZED=true exige certificado válido del servidor de BD
@@ -4191,48 +4199,201 @@ const ensureCotizacionNumero = async () => {
 // --- Asistente IA (solo admin) ---------------------------------------------
 const Anthropic = require('@anthropic-ai/sdk');
 const asistenteIA = require('../services/asistenteIA');
+const { crearWhatsApp } = require('../services/whatsapp');
 const iaConfig = asistenteIA.leerConfig();
 const iaConsultas = asistenteIA.crearGestorConsultas({
   config: iaConfig,
   logger,
-  crearCliente: (config) => new (Anthropic.default || Anthropic)({ apiKey: config.apiKey })
+  crearCliente: (config) =>
+    new (Anthropic.default || Anthropic)({ apiKey: config.apiKey })
 });
+const iaWhatsApp = crearWhatsApp({ gestor: iaConsultas, logger });
 const iaRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 30,
   keyGenerator: (req) => `ia:${req.user?.id || req.ip}`,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Demasiadas consultas al asistente IA. Espera unos minutos.' }
+  message: {
+    error: 'Demasiadas consultas al asistente IA. Espera unos minutos.'
+  }
 });
+
+// IA_USUARIOS limita el asistente a ciertas cuentas (el agente usa la suscripcion de una persona).
+const requireUsuarioIA = (req, res, next) =>
+  asistenteIA.usuarioPermitido(iaConfig, req.user?.usuario)
+    ? next()
+    : res
+        .status(403)
+        .json({ error: 'El asistente IA no está habilitado para tu usuario' });
 
 app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
   const pendientes = asistenteIA.faltantes(iaConfig);
-  res.json({ habilitado: pendientes.length === 0, faltantes: pendientes, modelo: iaConfig.model });
+  const permitido = asistenteIA.usuarioPermitido(iaConfig, req.user?.usuario);
+  res.json({
+    habilitado: pendientes.length === 0 && permitido,
+    faltantes: pendientes,
+    permitido,
+    modo: iaConsultas.modo(),
+    agente: iaConsultas.modo() === 'agente' ? iaConsultas.estadoAgente() : null,
+    whatsapp: iaWhatsApp.habilitado(),
+    modelo: iaConsultas.modo() === 'api' ? iaConfig.model : null
+  });
 });
 
-app.post('/api/ia/consultas', authenticateToken, requireAdmin, iaRateLimiter, (req, res) => {
-  const pendientes = asistenteIA.faltantes(iaConfig);
-  if (pendientes.length) {
-    return res.status(503).json({ error: `Asistente IA sin configurar: falta ${pendientes.join(', ')}` });
+app.post(
+  '/api/ia/consultas',
+  authenticateToken,
+  requireAdmin,
+  requireUsuarioIA,
+  iaRateLimiter,
+  (req, res) => {
+    const pendientes = asistenteIA.faltantes(iaConfig);
+    if (pendientes.length) {
+      return res
+        .status(503)
+        .json({
+          error: `Asistente IA sin configurar: falta ${pendientes.join(', ')}`
+        });
+    }
+    try {
+      const entrada = asistenteIA.validarEntrada(req.body);
+      return res
+        .status(202)
+        .json(iaConsultas.iniciar({ usuarioId: req.user.id, entrada }));
+    } catch (error) {
+      return res
+        .status(error.status || 500)
+        .json({ error: error.status ? error.message : 'Error del servidor' });
+    }
   }
-  try {
-    const entrada = asistenteIA.validarEntrada(req.body);
-    return res.status(202).json(iaConsultas.iniciar({ usuarioId: req.user.id, entrada }));
-  } catch (error) {
-    return res.status(error.status || 500).json({ error: error.status ? error.message : 'Error del servidor' });
+);
+
+app.get(
+  '/api/ia/consultas/:id',
+  authenticateToken,
+  requireAdmin,
+  (req, res) => {
+    const consulta = iaConsultas.obtener({
+      usuarioId: req.user.id,
+      id: req.params.id
+    });
+    if (!consulta)
+      return res.status(404).json({ error: 'Consulta no encontrada' });
+    return res.json(consulta);
   }
+);
+
+app.delete(
+  '/api/ia/consultas/:id',
+  authenticateToken,
+  requireAdmin,
+  (req, res) => {
+    const ok = iaConsultas.cancelar({
+      usuarioId: req.user.id,
+      id: req.params.id
+    });
+    return ok
+      ? res.json({ ok: true })
+      : res.status(404).json({ error: 'Consulta no encontrada' });
+  }
+);
+
+// --- Agente IA (miniPC del usuario). Se autentica con IA_AGENTE_TOKEN. ---------
+const agenteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+const requireAgente = (req, res, next) => {
+  const esperado = Buffer.from(iaConfig.agenteToken || '');
+  const recibido = Buffer.from(
+    /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1]?.trim() || ''
+  );
+  if (
+    !esperado.length ||
+    esperado.length !== recibido.length ||
+    !require('crypto').timingSafeEqual(esperado, recibido)
+  ) {
+    return res.status(401).json({ error: 'Agente no autorizado' });
+  }
+  return next();
+};
+
+app.get(
+  '/api/ia/agente/trabajo',
+  agenteLimiter,
+  requireAgente,
+  async (req, res) => {
+    const esperaMs =
+      Math.min(Math.max(Number(req.query.espera) || 25, 1), 50) * 1000;
+    let cerrado = false;
+    req.on('close', () => {
+      cerrado = true;
+    });
+    const trabajo = await iaConsultas.tomarTrabajo({ esperaMs });
+    if (cerrado) {
+      // El agente corto la conexion antes de recibirla: vuelve a la cola.
+      if (trabajo) iaConsultas.liberarTrabajo(trabajo.id);
+      return undefined;
+    }
+    return trabajo ? res.json(trabajo) : res.status(204).end();
+  }
+);
+
+app.post(
+  '/api/ia/agente/trabajo/:id/avance',
+  agenteLimiter,
+  requireAgente,
+  (req, res) => {
+    const ok = iaConsultas.avanceAgente(req.params.id, {
+      texto: req.body?.texto,
+      paso: req.body?.paso
+    });
+    return ok
+      ? res.json({ ok: true })
+      : res.status(410).json({ error: 'La consulta ya no está activa' });
+  }
+);
+
+app.post(
+  '/api/ia/agente/trabajo/:id/fin',
+  agenteLimiter,
+  requireAgente,
+  (req, res) => {
+    const ok = iaConsultas.terminarAgente(req.params.id, {
+      texto: req.body?.texto,
+      error: req.body?.error
+    });
+    return ok
+      ? res.json({ ok: true })
+      : res.status(410).json({ error: 'La consulta ya no está activa' });
+  }
+);
+
+// --- WhatsApp (webhook de Meta) -----------------------------------------------
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const challenge = iaWhatsApp.verificar(req.query);
+  return challenge !== null
+    ? res.status(200).send(challenge)
+    : res.status(403).end();
 });
 
-app.get('/api/ia/consultas/:id', authenticateToken, requireAdmin, (req, res) => {
-  const consulta = iaConsultas.obtener({ usuarioId: req.user.id, id: req.params.id });
-  if (!consulta) return res.status(404).json({ error: 'Consulta no encontrada' });
-  return res.json(consulta);
-});
-
-app.delete('/api/ia/consultas/:id', authenticateToken, requireAdmin, (req, res) => {
-  const ok = iaConsultas.cancelar({ usuarioId: req.user.id, id: req.params.id });
-  return ok ? res.json({ ok: true }) : res.status(404).json({ error: 'Consulta no encontrada' });
+app.post('/api/whatsapp/webhook', (req, res) => {
+  if (!iaWhatsApp.habilitado()) return res.status(404).end();
+  if (!iaWhatsApp.firmaValida(req.rawBody, req.headers['x-hub-signature-256']))
+    return res.status(401).end();
+  res.status(200).end(); // Meta exige respuesta rapida; la IA contesta despues por WhatsApp.
+  iaWhatsApp
+    .procesar(req.body)
+    .catch((error) =>
+      logger.error(
+        { event: 'whatsapp_procesar_error', msg: error?.message },
+        'Fallo el procesamiento del WhatsApp'
+      )
+    );
+  return undefined;
 });
 
 const startServer = async (port = PORT) => {
