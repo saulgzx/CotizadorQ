@@ -1,7 +1,6 @@
-// Asistente IA: arma el prompt de un requerimiento y lo abre en la sesion
-// personal del usuario (Claude, ChatGPT, Gemini...). CotizadorQ no llama a
-// ninguna API de IA: el modelo corre en la cuenta del usuario, con sus tokens,
-// sus proyectos, sus skills (preventa-axis / preventa-qnap) y su conector MyQuote.
+// Asistente IA: utilidades del tab. La consulta corre en el backend de MyQuote
+// (API de Claude + skills de preventa + conector MyQuote); aqui se arma el
+// mensaje y se lee la respuesta para cargarla al cotizador.
 
 export const MARCAS = {
   AXIS: {
@@ -18,173 +17,31 @@ export const MARCAS = {
   }
 };
 
-// `prefill`: el proveedor acepta el prompt en la URL (?q=). Los demas reciben
-// el prompt por portapapeles.
-export const PROVEEDORES = {
-  claude: {
-    clave: 'claude',
-    nombre: 'Claude',
-    urlNueva: 'https://claude.ai/new',
-    prefill: (url) => /^https:\/\/claude\.ai\/new\/?(\?|$)/.test(url),
-    ayudaProyecto:
-      'Abre tu proyecto en claude.ai y copia la URL (claude.ai/project/…).',
-    patronProyecto: /^https:\/\/claude\.ai\//
-  },
-  chatgpt: {
-    clave: 'chatgpt',
-    nombre: 'ChatGPT',
-    urlNueva: 'https://chatgpt.com/',
-    prefill: (url) =>
-      /^https:\/\/chatgpt\.com\//.test(url) && !/\/c\/[^/?]+/.test(url),
-    ayudaProyecto:
-      'URL de tu GPT o proyecto (chatgpt.com/g/… o chatgpt.com/g/…/project).',
-    patronProyecto: /^https:\/\/chatgpt\.com\//
-  },
-  gemini: {
-    clave: 'gemini',
-    nombre: 'Gemini',
-    urlNueva: 'https://gemini.google.com/app',
-    prefill: () => false,
-    ayudaProyecto: 'URL de tu Gem (gemini.google.com/gem/…).',
-    patronProyecto: /^https:\/\/gemini\.google\.com\//
-  },
-  otra: {
-    clave: 'otra',
-    nombre: 'Otra',
-    urlNueva: '',
-    prefill: () => false,
-    ayudaProyecto: 'URL https de la IA que uses.',
-    patronProyecto: /^https:\/\//
-  }
-};
-
-// Mas alla de esto la URL se corta en algunos navegadores/proxies: se usa solo
-// el portapapeles.
-const MAX_LARGO_URL = 7000;
-
 export const MARCADOR_LISTA = 'LISTA COTIZADORQ';
 
-export const configVacia = () => ({
-  proveedor: 'claude',
-  proyectos: {
-    claude: { AXIS: '', QNAP: '' },
-    chatgpt: { AXIS: '', QNAP: '' },
-    gemini: { AXIS: '', QNAP: '' },
-    otra: { AXIS: '', QNAP: '' }
-  },
-  pedirLista: true
-});
-
-const claveStorage = (usuario) =>
-  `mq.ia.config.${String(usuario || 'anon').toLowerCase()}`;
-
-export const normalizarConfig = (cruda) => {
-  const base = configVacia();
-  if (!cruda || typeof cruda !== 'object') return base;
-  const proveedor = PROVEEDORES[cruda.proveedor]
-    ? cruda.proveedor
-    : base.proveedor;
-  const proyectos = { ...base.proyectos };
-  for (const p of Object.keys(PROVEEDORES)) {
-    for (const m of Object.keys(MARCAS)) {
-      const url = cruda.proyectos?.[p]?.[m];
-      proyectos[p] = {
-        ...proyectos[p],
-        [m]: typeof url === 'string' ? url.trim() : ''
-      };
-    }
-  }
-  return { proveedor, proyectos, pedirLista: cruda.pedirLista !== false };
-};
-
-export const cargarConfig = (usuario) => {
-  try {
-    return normalizarConfig(
-      JSON.parse(localStorage.getItem(claveStorage(usuario)) || 'null')
-    );
-  } catch {
-    return configVacia();
-  }
-};
-
-export const guardarConfig = (usuario, config) => {
-  try {
-    localStorage.setItem(
-      claveStorage(usuario),
-      JSON.stringify(normalizarConfig(config))
-    );
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-// Solo https y del dominio del proveedor: la URL se abre en una pestaña nueva.
-export const urlProyectoValida = (proveedor, url) => {
-  const p = PROVEEDORES[proveedor];
-  if (!p || !url) return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === 'https:' && p.patronProyecto.test(u.href);
-  } catch {
-    return false;
-  }
-};
-
-export const construirPrompt = ({
-  marca,
+/** Primer mensaje de la conversacion: datos del cliente + requerimiento. */
+export const construirMensajeInicial = ({
   requerimiento,
   cliente = '',
   contacto = '',
-  notas = '',
-  pedirLista = true
+  notas = ''
 }) => {
-  const m = MARCAS[marca] || MARCAS.AXIS;
-  const lineas = [
-    `Usa la skill ${m.skill} para responder este requerimiento ${m.nombre}.`,
-    'Consulta precios, stock y plazos con el conector MyQuote (no uses precios de memoria).'
-  ];
-  const datos = [
-    cliente && `Cliente: ${cliente.trim()}`,
-    contacto && `Contacto: ${contacto.trim()}`
-  ].filter(Boolean);
-  if (datos.length) lineas.push('', ...datos);
+  const lineas = [];
+  if (cliente.trim()) lineas.push(`Cliente: ${cliente.trim()}`);
+  if (contacto.trim()) lineas.push(`Contacto: ${contacto.trim()}`);
   if (notas.trim())
-    lineas.push('', 'Notas internas (no van en el correo):', notas.trim());
-  lineas.push(
-    '',
-    'Requerimiento:',
-    '"""',
-    String(requerimiento || '').trim(),
-    '"""'
-  );
-  if (pedirLista) {
-    lineas.push(
-      '',
-      `Al final, después del bloque interno, agrega un bloque de código titulado ${MARCADOR_LISTA} con una línea por producto cotizado: SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios.`
-    );
-  }
+    lineas.push(`Notas internas (no van en el correo): ${notas.trim()}`);
+  if (lineas.length) lineas.push('');
+  lineas.push('Requerimiento:', String(requerimiento || '').trim());
   return lineas.join('\n');
 };
 
-/**
- * Destino a abrir: el proyecto configurado para la marca o un chat nuevo.
- * Si el proveedor acepta prefill y el prompt cabe, va en ?q=.
- */
-export const construirDestino = ({ proveedor, marca, config, prompt }) => {
-  const p = PROVEEDORES[proveedor] || PROVEEDORES.claude;
-  const proyecto = config?.proyectos?.[p.clave]?.[marca] || '';
-  const usaProyecto = urlProyectoValida(p.clave, proyecto);
-  const base = usaProyecto ? proyecto : p.urlNueva;
-  if (!base) return { url: '', usaProyecto: false, prefill: false };
-  if (p.prefill(base) && prompt) {
-    const u = new URL(base);
-    u.searchParams.set('q', prompt);
-    if (u.href.length <= MAX_LARGO_URL)
-      return { url: u.href, usaProyecto, prefill: true };
-  }
-  return { url: base, usaProyecto, prefill: false };
-};
+/** Texto visible de una respuesta guardada (bloques de la API). */
+export const textoDeContenido = (contenido) =>
+  (Array.isArray(contenido) ? contenido : [])
+    .filter((b) => b?.type === 'text' && b.text)
+    .map((b) => b.text)
+    .join('\n\n');
 
 // ---------------------------------------------------------------------------
 // Respuesta de la IA -> lista "codigo<TAB>cantidad" para PegarListaModal.
