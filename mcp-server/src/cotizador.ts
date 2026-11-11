@@ -491,6 +491,57 @@ export const resolverItems = async (
   return { lineas, noResueltos, total, lectura };
 };
 
+// ----------------------------------------------------------------- precios
+
+export interface NivelPrecio {
+  nivel: string;
+  rebate: number;
+  costo_unitario: number;
+  precio_unitario: number;
+  margen_unitario: number;
+  precio_total: number;
+  margen_total: number;
+}
+
+export interface LineaPrecio {
+  producto_id: number;
+  sku: string;
+  mpn: string;
+  descripcion: string;
+  origen: 'AXIS' | 'QNAP';
+  cantidad: number;
+  gp: number;
+  costo_base: number;
+  costo_base_fuente: string;
+  /** Solo Axis: un elemento por nivel de partner pedido. */
+  niveles?: NivelPrecio[];
+  /** Solo QNAP. */
+  costo_unitario?: number;
+  precio_unitario?: number;
+  margen_unitario?: number;
+  precio_total?: number;
+  margen_total?: number;
+}
+
+export interface RespuestaPrecios {
+  partner_category: string;
+  gp_por_defecto: { AXIS: number; QNAP: number };
+  costo_chile_disponible: boolean;
+  lineas: LineaPrecio[];
+  no_encontrados: Array<number | null>;
+}
+
+/**
+ * Calcula costo, precio y margen por nivel de partner y GP. Requiere que la
+ * cuenta del conector este en PRECIOS_USUARIOS del backend (expone costos).
+ */
+export const calcularPrecios = (body: {
+  items: Array<{ producto_id: number; cantidad: number; gp?: number }>;
+  partner_category?: string;
+  gp_axis?: number;
+  gp_qnap?: number;
+}) => peticion<RespuestaPrecios>('/api/precios/calcular', { method: 'POST', body });
+
 // ------------------------------------------------------------ cotizaciones
 
 export interface DatosCliente {

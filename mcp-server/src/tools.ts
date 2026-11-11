@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import {
+  calcularPrecios,
   crearCotizacion,
   diagnosticoStock,
   DIAS_CREACION_SKU,
@@ -324,6 +325,94 @@ export const registrarTools = (server: McpServer): void => {
         total,
         stock: diagnosticoStock(lectura)
       });
+    }
+  );
+
+  server.registerTool(
+    'calcular_precios',
+    {
+      description:
+        'Calcula costo, precio y margen con el nivel de partner Axis (Autorizado, Silver, Gold, Multiregional) y el GP que se pida, ' +
+        'igual que el cotizador web. Sin partner_category compara los 4 niveles. El GP acepta 0.12 o 12 (porcentaje), global por marca ' +
+        'o por linea. Usala cuando pidan otro nivel de partner, otro margen o el costo. Solo lectura: no guarda nada.',
+      inputSchema: z.object({
+        items: z
+          .array(
+            itemSchema.extend({
+              gp: z.number().min(0).max(99.99).optional().describe('GP solo para esta linea (0.12 o 12)')
+            })
+          )
+          .min(1),
+        partner_category: z
+          .enum(['Autorizado', 'Silver', 'Gold', 'Multiregional'])
+          .optional()
+          .describe('Nivel de partner Axis. Vacio: compara los 4 niveles.'),
+        gp_axis: z.number().min(0).max(99.99).optional().describe('GP global Axis (0.15 o 15). Vacio: el de la cuenta.'),
+        gp_qnap: z.number().min(0).max(99.99).optional().describe('GP global QNAP. Vacio: el de la cuenta.')
+      })
+    },
+    async ({ items, partner_category, gp_axis, gp_qnap }) => {
+      const catalogo = await getCatalogo();
+      const noResueltos: SkuNoResuelto[] = [];
+      const pedidos: Array<{ producto_id: number; cantidad: number; gp?: number }> = [];
+      for (const item of items) {
+        const { producto, candidatos } = buscarProductoTolerante(catalogo, item.sku);
+        if (!producto) {
+          noResueltos.push({
+            sku: item.sku,
+            motivo:
+              candidatos.length > 0
+                ? `Ambiguo, ${candidatos.length} coincidencias: ${candidatos.map((c) => `${c.sku} (${c.mpn})`).join(', ')}`
+                : 'No existe en el catalogo activo'
+          });
+          continue;
+        }
+        pedidos.push({ producto_id: Number(producto.id), cantidad: item.cantidad, gp: item.gp });
+      }
+      if (pedidos.length === 0) {
+        return respuesta('Ningun SKU se pudo resolver.' + bloqueNoResueltos(noResueltos), { no_resueltos: noResueltos });
+      }
+
+      const r = await calcularPrecios({ items: pedidos, partner_category, gp_axis, gp_qnap });
+      const pct = (gp: number) => `${(gp * 100).toFixed(1)}%`;
+      const filas: string[] = [];
+      let totalPrecio = 0;
+      let totalMargen = 0;
+      for (const l of r.lineas) {
+        const desc = celda(l.descripcion.slice(0, 40));
+        if (l.niveles) {
+          for (const n of l.niveles) {
+            filas.push(
+              `| ${l.sku} | ${desc} | ${n.nivel.replace('Partner ', '')} | ${l.cantidad} | ${USD(n.rebate)} | ${USD(n.costo_unitario)} ` +
+                `| ${pct(l.gp)} | ${USD(n.precio_unitario)} | ${USD(n.precio_total)} | ${USD(n.margen_total)} |`
+            );
+          }
+          if (l.niveles.length === 1) {
+            totalPrecio += l.niveles[0].precio_total;
+            totalMargen += l.niveles[0].margen_total;
+          }
+        } else {
+          filas.push(
+            `| ${l.sku} | ${desc} | — | ${l.cantidad} | — | ${USD(l.costo_unitario ?? 0)} | ${pct(l.gp)} ` +
+              `| ${USD(l.precio_unitario ?? 0)} | ${USD(l.precio_total ?? 0)} | ${USD(l.margen_total ?? 0)} |`
+          );
+          totalPrecio += l.precio_total ?? 0;
+          totalMargen += l.margen_total ?? 0;
+        }
+      }
+      const comparando = r.partner_category === 'todos' && r.lineas.some((l) => (l.niveles?.length ?? 0) > 1);
+      const texto =
+        `### Precios (${comparando ? 'comparando niveles de partner' : r.partner_category}) — NO guardado\n\n` +
+        [
+          '| SKU | Descripcion | Partner | Cant | Rebate | Costo unit. | GP | Precio unit. | Total | Margen |',
+          '|---|---|---|---|---|---|---|---|---|---|',
+          ...filas
+        ].join('\n') +
+        (comparando ? '' : `\n\n**Total: ${USD(totalPrecio)}** · Margen: ${USD(totalMargen)}`) +
+        (r.costo_chile_disponible ? '' : '\n\n⚠️ Costo Chile real no disponible: se uso el costo calculado desde el disty.') +
+        bloqueNoResueltos(noResueltos);
+
+      return respuesta(texto, { ...r, no_resueltos: noResueltos });
     }
   );
 
