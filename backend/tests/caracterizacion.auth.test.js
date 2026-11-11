@@ -120,7 +120,7 @@ describe('POST /api/login', () => {
     expect(logs[0][6]).toBe('sess-a');
   });
 
-  test('forma del JWT de admin: claims fijos y vigencia de 30 dias', async () => {
+  test('forma del JWT de admin: claims fijos y vigencia de 7 dias', async () => {
     mockCompare.mockResolvedValue(true);
     mockQuery.mockImplementation(dbRouter(rutasLogin()));
 
@@ -137,7 +137,7 @@ describe('POST /api/login', () => {
       iat: expect.any(Number),
       exp: expect.any(Number)
     });
-    expect(claims.exp - claims.iat).toBe(30 * 24 * 3600);
+    expect(claims.exp - claims.iat).toBe(7 * 24 * 3600);
     expect(claims.password).toBeUndefined();
   });
 
@@ -366,7 +366,7 @@ describe('autenticacion y sesion en rutas protegidas (probado con POST /api/logo
     expect(res.body.error).toBe('Sesion expirada');
   });
 
-  test('la misma inactividad de 1h NO expira la sesion de un admin (TTL 30 dias)', async () => {
+  test('la misma inactividad de 1h NO expira la sesion de un admin (TTL 7 dias)', async () => {
     mockQuery.mockImplementation(dbRouter([
       ...rutasSesion(sesionRow({ last_seen: hace(HORA) })),
       [incluye('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id = $2'), { rows: [] }]
