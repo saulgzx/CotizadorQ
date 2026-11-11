@@ -1,5 +1,5 @@
 /**
- * Tests de POST /api/cotizaciones/pdf: el rol sale del usuario autenticado,
+ * Tests de POST /api/cotizaciones/pdf: solo un admin puede indicar el rol del creador;
  * nunca del body, y los errores no filtran detalle interno.
  */
 const request = require('supertest');
@@ -69,8 +69,14 @@ describe('POST /api/cotizaciones/pdf', () => {
     expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(true);
   });
 
-  test('admin que manda usuario_role "client": se usa su rol real (admin) y no lleva la nota de cliente', async () => {
+  test('admin que manda usuario_role "client": el PDF lleva la nota de cliente (rol de quien creo la cotizacion)', async () => {
     const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), ADMIN).send({ ...BODY, usuario_role: 'client' });
+    expect(res.status).toBe(200);
+    expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(true);
+  });
+
+  test('admin sin usuario_role: se usa su rol (admin) y no lleva la nota de cliente', async () => {
+    const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), ADMIN).send(BODY);
     expect(res.status).toBe(200);
     expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(false);
   });

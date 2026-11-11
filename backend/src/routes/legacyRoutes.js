@@ -4177,9 +4177,11 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
       proyecto: cliente?.proyecto || cliente?.telefono || 'N/A',
       fecha: payload?.created_at || payload?.fecha || new Date().toISOString()
     };
-    // El rol sale siempre del usuario autenticado: el usuario_role del body no se usa
-    // (solo cambia las notas al pie, pero no debe poder fijarlo el cliente).
-    const pdfRole = String(req.user?.role || '').toLowerCase();
+    // usuario_role del body es el rol de quien creo la cotizacion y solo decide las notas
+    // al pie. Un admin puede indicarlo (baja PDFs de cotizaciones de otros); el resto usa
+    // siempre su propio rol y no puede fijarlo.
+    const rolPropio = String(req.user?.role || '').toLowerCase();
+    const pdfRole = rolPropio === 'admin' ? String(payload?.usuario_role || rolPropio).toLowerCase() : rolPropio;
     const isClient = pdfRole === 'client';
     const isAxisProfile = pdfRole === COTIZADOR_STOCK_ADMIN_ROLE;
     const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa, numero);

@@ -20,8 +20,8 @@ describe('codificacion de legacyRoutes.js', () => {
   });
 
   test('no hay "?" pegado a letras donde iba una tilde o eñe', () => {
-    // Palabras con ? entre letras (excluye ?. y ?? del propio lenguaje).
-    const sospechosas = texto.split('\n').filter((l) => /[A-Za-z]\?{1,2}[A-Za-z]/.test(l) && !/\?\.|\?\?=?\s|\?\)/.test(l));
+    // Palabras con ? entre letras (excluye ?. y ?? del lenguaje y parametros de URL como ?forzar=1).
+    const sospechosas = texto.split('\n').filter((l) => /[A-Za-z]\?{1,2}[A-Za-z]/.test(l) && !/\?\.|\?\?=?\s|\?\)|\?[A-Za-z_]+=/.test(l));
     expect(sospechosas).toEqual([]);
   });
 });
