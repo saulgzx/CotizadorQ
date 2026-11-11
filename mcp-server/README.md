@@ -11,6 +11,7 @@ backend, dentro del mismo repo.
 | `consultar_producto` | No | Precio, stock, plazo, estado del SKU y garantia de un SKU o MPN |
 | `buscar_productos` | No | Busqueda por texto, ordenada por coincidencia y stock |
 | `simular_cotizacion` | No | Calcula el total sin guardar nada. **Es el camino por defecto** |
+| `calcular_precios` | No | Costo, precio y margen por nivel de partner Axis y GP a pedido. Requiere la cuenta del bot en `PRECIOS_USUARIOS` del backend |
 | `generar_cotizacion` | **Si** | Graba la cotizacion y devuelve su id |
 | `emitir_pdf` | No | PDF en base64 de una cotizacion existente |
 | `cotizar_y_emitir` | **Si** | Encadena las dos anteriores |

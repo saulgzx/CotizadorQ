@@ -108,6 +108,7 @@ const {
 } = require('../services/cotizacionItems');
 const { calcularAsignaciones } = require('../services/stockDisponible');
 const { agregarStock, mapaCostosChile, costoChilePara } = require('../services/stockAgregado');
+const preciosPartner = require('../services/preciosPartner');
 const { construirMapaEta, textoEta, SEMANAS_ADICIONALES_DEFAULT } = require('../services/etaAxis');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
 const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
@@ -3353,6 +3354,74 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
     res.json(payload);
   } catch (error) {
     logError(req, error, 'productos_list_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// PRECIOS - Calculo por nivel de partner y GP (solo lectura).
+// Para el asistente IA: devuelve costo, rebate, precio y margen como el cotizador
+// web. Solo admin o los usuarios de servicio listados en PRECIOS_USUARIOS
+// (ej. la cuenta del conector MCP), porque expone costos.
+const PRECIOS_USUARIOS = String(process.env.PRECIOS_USUARIOS || '')
+  .split(',')
+  .map((u) => u.trim().toLowerCase())
+  .filter(Boolean);
+
+app.post('/api/precios/calcular', authenticateToken, async (req, res) => {
+  try {
+    const usuario = String(req.user?.usuario || '').toLowerCase();
+    if (!canManageCotizadorStock(req.user?.role) && !PRECIOS_USUARIOS.includes(usuario)) {
+      return res.status(403).json({ error: 'Sin permiso para ver costos y márgenes' });
+    }
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+    if (items.length === 0) return res.status(400).json({ error: 'items es obligatorio' });
+
+    const nivel = preciosPartner.leerNivel(req.body?.partner_category);
+    if (nivel === undefined) {
+      return res.status(400).json({ error: 'partner_category invalido: usa Autorizado, Silver, Gold, Multiregional o vacio para los 4' });
+    }
+
+    const userRow = (await pool.query('SELECT gp, gp_qnap, gp_axis FROM usuarios WHERE id = $1', [req.user.id])).rows[0] || {};
+    const gpPorDefecto = {
+      AXIS: preciosPartner.leerGp(req.body?.gp_axis) ?? parseGpValue(userRow.gp_axis ?? userRow.gp ?? 0.15, 0.15),
+      QNAP: preciosPartner.leerGp(req.body?.gp_qnap) ?? parseGpValue(userRow.gp_qnap ?? userRow.gp ?? 0.15, 0.15)
+    };
+
+    const ids = [...new Set(items.map((i) => Number(i?.producto_id)).filter((id) => Number.isInteger(id) && id > 0))];
+    const filas = ids.length ? (await pool.query('SELECT * FROM productos WHERE id = ANY($1::int[])', [ids])).rows : [];
+    const porId = new Map(filas.map((p) => [Number(p.id), p]));
+    const costosChile = await leerCostosChile();
+
+    const lineas = [];
+    const noEncontrados = [];
+    for (const item of items) {
+      const producto = porId.get(Number(item?.producto_id));
+      if (!producto) {
+        noEncontrados.push(item?.producto_id ?? null);
+        continue;
+      }
+      const origen = String(producto.origen || DEFAULT_ORIGIN).toUpperCase() === 'AXIS' ? 'AXIS' : 'QNAP';
+      const gp = preciosPartner.leerGp(item?.gp) ?? gpPorDefecto[origen];
+      const cantidad = Math.max(1, Math.trunc(Number(item?.cantidad) || 1));
+      lineas.push(
+        preciosPartner.calcularPrecioProducto({
+          producto,
+          costoReal: costoChilePara(costosChile, producto),
+          gp,
+          nivel,
+          cantidad
+        })
+      );
+    }
+    res.json({
+      partner_category: nivel || 'todos',
+      gp_por_defecto: gpPorDefecto,
+      costo_chile_disponible: costosChile !== null,
+      lineas,
+      no_encontrados: noEncontrados
+    });
+  } catch (error) {
+    logError(req, error, 'precios_calcular_failed');
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
