@@ -118,7 +118,6 @@ const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
 const APP_VERSION = process.env.APP_VERSION || '2026-02-05-stock';
 const LOGIN_RATE_LIMIT_MAX = parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '5', 10);
 const LOGIN_RATE_LIMIT_WINDOW_MIN = parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MIN || '15', 10);
-const LOGIN_RATE_LIMIT_BYPASS_USERS = new Set(['agonz']);
 const STOCK_CACHE_TTL_SEC = parseInt(process.env.STOCK_CACHE_TTL_SEC || '120', 10);
 const STOCK_CATALOG_CACHE_TTL_SEC = parseInt(process.env.STOCK_CATALOG_CACHE_TTL_SEC || '180', 10);
 const OSO_ORDERS_CACHE_TTL_SEC = parseInt(process.env.OSO_ORDERS_CACHE_TTL_SEC || '120', 10);
@@ -224,12 +223,9 @@ const getExternalErrorMessage = (error, fallback = 'Error consultando servicio e
 };
 
 // Rate limit de login: activo por defecto. Para desactivarlo (decisión de negocio)
-// setear LOGIN_RATE_LIMIT_ENABLED=false en el entorno.
+// setear LOGIN_RATE_LIMIT_ENABLED=false en el entorno. Es un interruptor global:
+// ningun usuario tiene excepcion propia.
 const LOGIN_RATE_LIMIT_ENABLED = String(process.env.LOGIN_RATE_LIMIT_ENABLED || 'true').toLowerCase() !== 'false';
-const shouldBypassLoginRateLimit = (usuario) => {
-  if (!LOGIN_RATE_LIMIT_ENABLED) return true;
-  return LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
-};
 
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -237,7 +233,7 @@ const loginRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  skip: (req) => shouldBypassLoginRateLimit(req?.body?.usuario),
+  skip: () => !LOGIN_RATE_LIMIT_ENABLED,
   message: { error: 'Demasiados intentos de inicio de sesion. Intenta mas tarde.' }
 });
 
@@ -1822,7 +1818,7 @@ const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrInt
 });
 
 const isDbLoginRateLimited = async ({ usuario, req }) => {
-  if (shouldBypassLoginRateLimit(usuario)) return false;
+  if (!LOGIN_RATE_LIMIT_ENABLED) return false;
   const ip = getRequestIp(req);
   const windowMin = Number.isFinite(LOGIN_RATE_LIMIT_WINDOW_MIN) && LOGIN_RATE_LIMIT_WINDOW_MIN > 0
     ? LOGIN_RATE_LIMIT_WINDOW_MIN
