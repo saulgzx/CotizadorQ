@@ -9,5 +9,8 @@
 5. Rota la clave inicial y elimina cualquier credencial temporal usada durante bootstrap.
 
 ## Notas
+- El backend no siembra usuarios al arrancar ni guarda hashes de contrasenas en el codigo.
+  Las cuentas que ya existen en la BD se conservan; las nuevas se crean como se indica arriba
+  o desde `/api/usuarios`.
 - El backend no inicia si `JWT_SECRET` falta o tiene menos de 32 caracteres.
 - `ALLOWED_ORIGINS` controla CORS para navegadores; requests sin `Origin` (curl/postman) siguen permitidos.

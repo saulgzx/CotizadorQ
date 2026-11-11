@@ -126,10 +126,6 @@ const GOOGLE_API_TIMEOUT_MS = parseInt(process.env.GOOGLE_API_TIMEOUT_MS || '300
 const GOOGLE_API_RETRIES = parseInt(process.env.GOOGLE_API_RETRIES || '3', 10);
 const GOOGLE_API_RETRY_DELAY_MS = parseInt(process.env.GOOGLE_API_RETRY_DELAY_MS || '300', 10);
 const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
-const COTIZADOR_STOCK_ADMIN_PASSWORD_HASH = '$2a$10$c3obvEDFA/wNqtH3y8rlGe0WSU6hS3MiRRepw0AzJtozhqpNvSrAa';
-const OSUESCUN_PASSWORD_HASH = '$2a$10$v2iFGiJ25E2aHusiLocOQOY83L306bIWigoGgvfh7cgB6ADgeCJkS';
-const ESTIV_PASSWORD_HASH = '$2a$10$nZ2HBE.Lire3a.6/u9s27uQ7Tnd.PHQvbbeoZmcvYknSSHZ37uI4G';
-const JLEON_PASSWORD_HASH = '$2a$10$I0slu/Cwht2gyvVXKsO3QOuaBa26u1sfeG/PTgpzFPAFvJmce0fhy';
 
 const canManageCotizadorStock = (role) => {
   const normalized = String(role || '').toLowerCase();
@@ -1488,33 +1484,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['nsteck', COTIZADOR_STOCK_ADMIN_PASSWORD_HASH, 'Nsteck', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Osuescun', OSUESCUN_PASSWORD_HASH, 'Osuescun', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Estiv', ESTIV_PASSWORD_HASH, 'Estiv', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Jleon', JLEON_PASSWORD_HASH, 'Jleon', '', '', 'admin', 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
+    // Sin usuarios sembrados desde el codigo: las cuentas se crean por SQL o desde
+    // /api/usuarios (ver SECURITY.md). Las cuentas ya existentes en la BD no se tocan.
 
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sesiones_user_session_idx ON sesiones(user_id, session_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS sesiones_active_idx ON sesiones(user_id, revoked, last_seen);`);
