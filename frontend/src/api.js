@@ -8,7 +8,7 @@ const clearSessionAndRedirectToLogin = () => {
 };
 
 // Función helper para hacer peticiones autenticadas
-const fetchWithAuth = async (endpoint, options = {}) => {
+export const fetchWithAuth = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
   
   const sessionId = localStorage.getItem('sessionId');
