@@ -116,9 +116,8 @@ describe('POST /api/cotizaciones', () => {
     // costo = 1000 * 1.011 / 0.95 * 1.12 = 1191.9158 ; precio = costo / 0.85 = 1402.25
     const cab = insertCotizacion(llamadas).params;
     expect(cab[0]).toBe('Ana');
-    // SOSPECHOSO (centavo): la cabecera suma unitarios SIN redondear (2804.5078 -> 2804.51)
-    // mientras la linea guarda 1402.25 * 2 = 2804.5. Cabecera y suma de lineas difieren 1 centavo.
-    expect(cab[4]).toBe(2804.51); // total recalculado, no el "1" enviado
+    // La cabecera es la suma de los totales de linea ya redondeados: 1402.25 * 2 = 2804.5.
+    expect(cab[4]).toBe(2804.5); // total recalculado, no el "1" enviado
     expect(cab[9]).toBe(2); // usuario_id del token
     expect(cab[10]).toBe('cliente');
     expect(cab[11]).toBe('revision'); // estado inicial
@@ -133,6 +132,31 @@ describe('POST /api/cotizaciones', () => {
     expect(it[COL.gp]).toBeCloseTo(0.15, 3);
     expect(llamadas.map((l) => l.sql)).toEqual(expect.arrayContaining(['BEGIN', 'COMMIT']));
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  test('cliente: el total de la cabecera es exactamente la suma de los totales de linea guardados (sin deriva de centavos)', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear({
+      usuarioRow: { gp: 0.15, gp_qnap: null, gp_axis: 0.2, partner_category: 'Partner Gold' },
+      productos: [PRODUCTO_QNAP, PRODUCTO_AXIS, { ...PRODUCTO_QNAP, id: 4, precio_disty: 333.33 }]
+    }));
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
+      cliente: CLIENTE_BODY,
+      items: [
+        { producto_id: 3, cantidad: 3 },
+        { producto_id: 8, cantidad: 7 },
+        { producto_id: 4, cantidad: 11 }
+      ]
+    });
+
+    expect(res.status).toBe(201);
+    const params = insertItems(llamadas).params;
+    const porFila = params.length / 3;
+    expect(Number.isInteger(porFila)).toBe(true);
+    const totales = [0, 1, 2].map((i) => params[i * porFila + COL.precio_total]);
+    const centavos = totales.reduce((s, t) => s + Math.round(t * 100), 0);
+    expect(insertCotizacion(llamadas).params[4]).toBe(centavos / 100);
   });
 
   test('cliente con gp_qnap propio usa ese gp; con gp > 1 lo interpreta como porcentaje', async () => {
@@ -236,7 +260,7 @@ describe('POST /api/cotizaciones', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(insertCotizacion(llamadas).params[4]).toBe(-2804.51);
+    expect(insertCotizacion(llamadas).params[4]).toBe(1402.25);
     const it = insertItems(llamadas).params;
     expect(it[COL.cantidad]).toBe(1);
     expect(it[COL.precio_total]).toBe(1402.25);

@@ -3667,7 +3667,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
       const gpQnap = parseGpValue(userRow.gp_qnap ?? userRow.gp ?? 0.15, 0.15);
       const gpAxis = parseGpValue(userRow.gp_axis ?? userRow.gp ?? 0.15, 0.15);
       const partnerCategory = userRow.partner_category || 'Partner Autorizado';
-      let totalSum = 0;
       const computedItems = [];
       const requestedItems = Array.isArray(items) ? items : [];
       const requestedProductIds = [...new Set(
@@ -3704,7 +3703,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
           ? calcularPrecioClienteAxis(precioDisty, gpUsed, partnerRebate, 0, costoReal)
           : calcularPrecioClienteQnap(precioDisty, gpUsed, costoReal);
         const precioTotal = precioUnitario * cantidad;
-        totalSum += precioTotal;
         computedItems.push({
           producto_id: productoId,
           marca: producto.marca || '',
@@ -3725,9 +3723,18 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
         });
       }
       itemsFinal = computedItems;
-      totalFinal = Number(totalSum.toFixed(2));
     }
-    
+
+    // Lineas normalizadas (unitario redondeado, total = unitario * cantidad redondeado).
+    const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
+      normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
+    );
+    if (!isAdmin) {
+      // La cabecera es exactamente la suma de los totales de linea ya redondeados (en centavos).
+      const centavos = rowsToInsert.reduce((suma, row) => suma + Math.round(row.precio_total * 100), 0);
+      totalFinal = centavos / 100;
+    }
+
     // Crear cotizacion
     const cotResult = await client.query(
       `INSERT INTO cotizaciones (
@@ -3764,9 +3771,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     const cotizacionId = cotResult.rows[0].id;
     
     // Insertar items en batch, con costo y rebate para el margen del admin.
-    const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
-      normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
-    );
     await insertarItems(client, cotizacionId, rowsToInsert);
 
     await client.query('COMMIT');
