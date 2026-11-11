@@ -3271,7 +3271,9 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
     if (origen) {
       params.push(origen);
       whereParts.push(`origen = $${params.length}`);
-    } else {
+    }
+    // Solo el admin puede ver productos dados de baja (y solo al filtrar por origen).
+    if (!origen || !isAdmin) {
       whereParts.push('activo = true');
     }
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';

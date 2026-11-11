@@ -149,14 +149,22 @@ describe('GET /api/productos', () => {
     expect(calls.params).toEqual([]);
   });
 
-  test('SOSPECHOSO: con ?origen= se pierde el filtro activo = true (un cliente recibe tambien productos dados de baja)', async () => {
+  test('cliente con ?origen= conserva el filtro activo = true', async () => {
     const calls = {};
     mockQuery.mockImplementation(catalogoDb(calls));
     const res = await conAuth(request(app).get('/api/productos?origen=QNAP'), CLIENTE);
     expect(res.status).toBe(200);
+    expect(calls.sql).toContain('WHERE origen = $1 AND activo = true');
+    expect(calls.params).toEqual(['QNAP']);
+  });
+
+  test('admin con ?origen= sigue viendo tambien los productos dados de baja', async () => {
+    const calls = {};
+    mockQuery.mockImplementation(catalogoDb(calls));
+    const res = await conAuth(request(app).get('/api/productos?origen=QNAP'), ADMIN);
+    expect(res.status).toBe(200);
     expect(calls.sql).toContain('WHERE origen = $1');
     expect(calls.sql).not.toContain('activo = true');
-    expect(calls.params).toEqual(['QNAP']);
   });
 
   test('admin con ?page: respuesta paginada { data, meta } (pageSize maximo 200)', async () => {
