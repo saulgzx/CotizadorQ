@@ -41,7 +41,10 @@ const dbRouter = (tabla) => (sql, params) => {
 };
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 const sesionActiva = () => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd' }] }],
+  // Sesion + rol actual del usuario en la BD (id 1 = admin; el resto, client).
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({
+    rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd', role: p[0] === 1 ? 'admin' : 'client' }]
+  })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 const conAuth = (req, user) => req.set('Authorization', `Bearer ${makeToken(user)}`).set('x-session-id', 'sess-1');

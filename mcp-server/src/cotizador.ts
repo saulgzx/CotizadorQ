@@ -24,8 +24,8 @@ const USER = process.env.COTIZADOR_USER || '';
 const PASS = process.env.COTIZADOR_PASS || '';
 
 // El backend no valida solo el JWT: requireAuth exige ademas X-Session-Id, y si
-// falta responde 401 "Sesion requerida". Un id desconocido si se acepta (el
-// middleware registra la sesion sobre la marcha), pero la ausencia del header no.
+// falta responde 401 "Sesion requerida". Un id desconocido tambien da 401: la
+// sesion solo se crea en el login, que manda este mismo id.
 //
 // El id se genera una vez por proceso y se reusa en TODAS las peticiones,
 // incluido el login. Es a proposito: para rol "client" el backend permite una

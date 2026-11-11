@@ -16,7 +16,7 @@ const auth = (id) => ({ Authorization: `Bearer ${token(id)}`, 'x-session-id': 's
 const rolPorId = { 1: 'admin', 2: 'client' };
 
 const dbOk = (sql, params) => {
-  if (/FROM sesiones/.test(sql)) return Promise.resolve({ rows: [{ id: 1, revoked: false, last_seen: new Date(), device_id: null }] });
+  if (/FROM sesiones/.test(sql)) return Promise.resolve({ rows: [{ id: 1, revoked: false, last_seen: new Date(), device_id: null, role: rolPorId[params[0]] }] });
   if (/SELECT role FROM usuarios/.test(sql)) return Promise.resolve({ rows: [{ role: rolPorId[params[0]] }] });
   return Promise.resolve({ rows: [] });
 };
