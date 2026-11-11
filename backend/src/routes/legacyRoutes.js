@@ -23,6 +23,7 @@ const {
   validateCotizacionEditInput
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
+const crm = require('../crm');
 
 const JWT_SECRET = (process.env.JWT_SECRET || '').trim();
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -1879,6 +1880,9 @@ const resolveCotizacionOwnerId = async (req) => {
 };
 
 const authenticateToken = requireAuth;
+
+// CRM (empresas, contactos, oportunidades, embudo): solo admin. Ver src/crm y docs/CRM.md.
+app.use('/api/crm', authenticateToken, requireAdmin, crm.crearRutasCrm({ pool }));
 
 // Hash de relleno para el login de un usuario que no existe: se compara igual contra
 // el, asi la respuesta tarda lo mismo y no revela por tiempo que usuarios existen.
@@ -3869,10 +3873,30 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     await insertarItems(client, cotizacionId, rowsToInsert);
 
     await client.query('COMMIT');
-    
+
+    // CRM: empresa, contacto y oportunidad. Despues del COMMIT y en su propia
+    // transaccion: si falla, la cotizacion ya quedo guardada (solo se registra el error).
+    let vinculoCrm = null;
+    try {
+      vinculoCrm = await crm.enlazarCotizacionNueva(client, {
+        cotizacionId,
+        marca: crm.marcaDesdeOrigenes(rowsToInsert.map((row) => row.origen)),
+        oportunidadId: req.body.oportunidad_id
+      });
+    } catch (crmError) {
+      logError(req, crmError, 'crm_enlace_failed');
+    }
+
     res.status(201).json({ 
       message: 'Cotizacion guardada',
-      cotizacion: cotResult.rows[0]
+      cotizacion: vinculoCrm
+        ? {
+          ...cotResult.rows[0],
+          empresa_id: vinculoCrm.empresa_id,
+          contacto_id: vinculoCrm.contacto_id,
+          oportunidad_id: vinculoCrm.oportunidad_id
+        }
+        : cotResult.rows[0]
     });
   } catch (error) {
     try {
@@ -3907,6 +3931,8 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Cotización no encontrada' });
     }
+    // CRM (best-effort, nunca rompe la ruta): aprobada => ganada, rechazada => perdida.
+    await crm.sincronizarEstadoCotizacion(pool, { oportunidadId: result.rows[0].oportunidad_id, estado: normalized });
     res.json(result.rows[0]);
   } catch (error) {
     logError(req, error, 'cotizacion_estado_failed');
@@ -4010,6 +4036,8 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotiza
       [id]
     );
     await client.query('COMMIT');
+    // CRM (best-effort): el editor tambien puede aprobar o rechazar.
+    if (estado) await crm.sincronizarEstadoCotizacion(pool, { oportunidadId: updated.rows[0]?.oportunidad_id, estado });
 
     res.json({
       ...updated.rows[0],
@@ -4666,6 +4694,8 @@ const startServer = async (port = PORT, options = {}) => {
     monitorIntegraciones.iniciar({ intervaloMs: integraciones.leerConfigChequeo().intervaloMs });
     await ensureCotizacionNumero();
     await ensureCotizacionEdicion(pool);
+    // CRM: esquema (rapido) y migracion de cotizaciones en segundo plano (no se espera).
+    await crm.iniciarCrm(pool);
     try {
       const initialQnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'boot' });
       const initialAxis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'boot' });
