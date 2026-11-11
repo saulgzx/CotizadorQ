@@ -97,6 +97,7 @@ const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
 const CotizacionEditor = lazy(() => import('./editor/CotizacionEditor'));
 const AsistenteIAView = lazy(() => import('../ia/AsistenteIAView'));
+const CrmView = lazy(() => import('../crm/CrmView'));
 
 const NAV_ICON_PATHS = {
   home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
@@ -2028,7 +2029,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
     }
-    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes']);
+    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes', 'crm']);
     if (blockedForClient.has(currentView) || (currentView === 'ia' && !canViewIA)) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
@@ -2115,7 +2116,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
         '3': canViewHistorial ? 'historial' : null,
         '4': canViewStock ? 'stock' : null,
-        '5': isFullAdmin ? 'ordenes' : null
+        '5': isFullAdmin ? 'ordenes' : null,
+        '6': isFullAdmin ? 'crm' : null
       };
       const target = keyMap[event.key];
       if (!target) return;
@@ -2880,7 +2882,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setAtajosAbiertos(v => !v);
       return;
     }
-    if (e.key === '/' && canViewCotizador) {
+    if (e.key === '/' && canViewCotizador && currentView !== 'crm') {
       e.preventDefault();
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       setTimeout(() => catalogInputRef.current?.focus(), 50);
@@ -5248,6 +5250,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     },
     canViewStock && { key: 'stock', grupo: 'ventas', label: 'Stock disponible', short: 'Stock', icon: 'box' },
     canViewDashboard && { key: 'dashboard', grupo: 'ventas', label: 'Dashboard', short: 'Inicio', icon: 'home' },
+    isFullAdmin && { key: 'crm', grupo: 'ventas', label: 'CRM', short: 'CRM', icon: 'users' },
     isFullAdmin && { key: 'ordenes', grupo: 'operaciones', label: 'Órdenes activas', short: 'Órdenes', icon: 'truck' },
     (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', grupo: 'operaciones', label: 'Vista compras', short: 'Compras', icon: 'cart' },
     isFullAdmin && { key: 'admin', grupo: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
@@ -5567,6 +5570,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 setPegarListaTexto(texto);
               }}
             />
+          </Suspense>
+        )}
+        {currentView === 'crm' && isFullAdmin && (
+          <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
+            <CrmView onAbrirCotizacion={abrirCotizacionEnHistorial} />
           </Suspense>
         )}
         {currentView === 'stock' && (
