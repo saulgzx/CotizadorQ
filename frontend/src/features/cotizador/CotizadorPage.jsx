@@ -3926,6 +3926,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
+  const toggleUsuarioActivo = async (target) => {
+    const activar = target.activo === false;
+    if (!activar && !confirm('Desactivar esta cuenta? Se cerrarán sus sesiones y no podrá iniciar sesión.')) return;
+    try {
+      setUsuariosLoading(true);
+      const updated = await usuariosAPI.setActivo(target.id, activar);
+      setUsuarios(prev => prev.map(u => (u.id === target.id ? { ...u, activo: updated.activo } : u)));
+      notify(activar ? 'Cuenta activada' : 'Cuenta desactivada');
+    } catch (error) {
+      notify(error.message || 'Error cambiando el estado del usuario');
+    } finally {
+      setUsuariosLoading(false);
+    }
+  };
+
   const deleteUsuario = async (userId) => {
     if (!confirm('Eliminar este usuario?')) return;
     try {
@@ -5927,6 +5942,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       {initials || 'U'}
                                     </span>
                                     <span className="text-xs text-slate-700">{u.nombre || u.usuario}</span>
+                                    {u.activo === false && <span className="text-xs text-rose-600">(inactiva)</span>}
                                     {isIntcomexEmpresa && normalizeIntcomexProfile(u.intcomex_profile) && (
                                       <span className="text-xs uppercase text-slate-500">({normalizeIntcomexProfile(u.intcomex_profile)})</span>
                                     )}
@@ -5972,7 +5988,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <div className="mb-3 border rounded-xl p-3 bg-white/80">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="text-sm font-semibold text-slate-800">{selectedUser.usuario}</div>
+                          <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                            {selectedUser.usuario}
+                            {selectedUser.activo === false && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Inactiva</span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-500">{selectedUser.nombre || 'Sin nombre'}</div>
                           <div className="text-xs text-slate-400">
                             {selectedUser.empresa ? `Empresa: ${selectedUser.empresa}` : 'Sin empresa'}
@@ -6026,6 +6047,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             className="mq-btn mq-btn-xs mq-btn-secundario"
                           >
                             Reset
+                          </button>
+                          <button
+                            onClick={() => toggleUsuarioActivo(selectedUser)}
+                            disabled={usuariosLoading || (selectedUser.activo !== false && selectedUser.id === user?.id)}
+                            title={selectedUser.id === user?.id ? 'No puedes desactivar tu propia cuenta' : undefined}
+                            className="mq-btn mq-btn-xs mq-btn-secundario"
+                          >
+                            {selectedUser.activo === false ? 'Activar' : 'Desactivar'}
                           </button>
                           <button
                             onClick={() => deleteUsuario(selectedUser.id)}
@@ -6115,7 +6144,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         >
                           <div className="w-full text-left flex items-start justify-between gap-2">
                             <div>
-                              <div className="text-sm font-semibold text-slate-800">{u.usuario}</div>
+                              <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                                {u.usuario}
+                                {u.activo === false && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Inactiva</span>
+                                )}
+                              </div>
                               <div className="text-xs text-slate-500">{u.nombre || 'Sin nombre'}</div>
                               <div className="text-xs text-slate-400">
                                 {u.empresa ? `Empresa: ${u.empresa}` : 'Sin empresa'}

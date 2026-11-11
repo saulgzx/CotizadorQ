@@ -451,6 +451,17 @@ export const usuariosAPI = {
     return response.json();
   },
 
+  setActivo: async (id, activo) => {
+    const response = await fetchWithAuth(`/api/usuarios/${encodeURIComponent(id)}/activo`, {
+      method: 'PATCH',
+      body: JSON.stringify({ activo }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Error cambiando el estado del usuario');
+    }
+    return response.json();
+  },
   delete: async (id) => {
     const response = await fetchWithAuth(`/api/usuarios/${encodeURIComponent(id)}`, {
       method: 'DELETE',

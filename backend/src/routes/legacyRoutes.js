@@ -1484,6 +1484,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
+    // Cuentas desactivables por el admin. Las existentes quedan activas (DEFAULT true).
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true;`);
     // Sin usuarios sembrados desde el codigo: las cuentas se crean por SQL o desde
     // /api/usuarios (ver SECURITY.md). Las cuentas ya existentes en la BD no se tocan.
 
@@ -1788,13 +1790,19 @@ const upsertSession = async (user, req) => {
   return { sessionId, revokedSessions };
 };
 
+// usuarios.activo puede llegar como boolean (SELECT *) o como texto (to_jsonb ->>).
+// Solo un false explicito desactiva: sin columna o NULL la cuenta sigue activa.
+const isCuentaInactiva = (activo) => activo === false || activo === 'false';
+
 // Valida la sesion y, en la misma consulta, trae el rol ACTUAL del usuario desde la
 // BD: requireAuth lo deja en req.user.role, asi un cambio de rol rige de inmediato
 // y no cuando vence el JWT. Usuario borrado => sin filas => sesion invalida.
 const validateSession = async (userId, sessionId, req) => {
   if (!sessionId) return { ok: false, reason: 'Sesion requerida' };
   const result = await pool.query(
-    `SELECT s.id, s.revoked, s.last_seen, s.device_id, u.role
+    // activo se lee via to_jsonb para no fallar si la columna aun no existe (initDB corre
+    // despues de abrir HTTP): ausente o NULL cuenta como cuenta activa.
+    `SELECT s.id, s.revoked, s.last_seen, s.device_id, u.role, to_jsonb(u)->>'activo' AS activo
      FROM sesiones s JOIN usuarios u ON u.id = s.user_id
      WHERE s.user_id = $1 AND s.session_id = $2`,
     [userId, sessionId]
@@ -1804,6 +1812,7 @@ const validateSession = async (userId, sessionId, req) => {
     return { ok: false, reason: 'Sesion invalida' };
   }
   const session = result.rows[0];
+  if (isCuentaInactiva(session.activo)) return { ok: false, reason: 'Cuenta desactivada' };
   const role = String(session.role || '').toLowerCase();
   const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const lastSeen = session.last_seen ? new Date(session.last_seen) : null;
@@ -1911,6 +1920,12 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
     if (!validPassword) {
       await recordLoginAttempt({ userId: user.id, usuario: user.usuario, success: false, req, sessionId, deviceId });
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+
+    if (isCuentaInactiva(user.activo)) {
+      // Solo se informa a quien sabe la contrasena: para el resto es el 401 de siempre.
+      await recordLoginAttempt({ userId: user.id, usuario: user.usuario, success: false, req, sessionId, deviceId });
+      return res.status(403).json({ error: 'Cuenta desactivada. Contacta al administrador.' });
     }
 
     const sessionInfo = await upsertSession(user, req);
@@ -2315,7 +2330,7 @@ app.post('/api/session/location', authenticateToken, async (req, res) => {
 // USUARIOS - Listar
 app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at FROM usuarios ORDER BY id DESC');
+    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at, activo FROM usuarios ORDER BY id DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Error obteniendo usuarios:', error);
@@ -2517,6 +2532,41 @@ app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validat
   } catch (error) {
     console.error('Error actualizando contraseña:', error);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// USUARIOS - Activar / desactivar (admin). Al desactivar se revocan sus sesiones.
+// Un admin no puede desactivarse a si mismo ni dejar el sistema sin admins activos.
+app.patch('/api/usuarios/:id/activo', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { activo } = req.body || {};
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Usuario invalido' });
+    if (typeof activo !== 'boolean') return res.status(400).json({ error: 'activo debe ser true o false' });
+    if (!activo && id === Number(req.user.id)) {
+      return res.status(400).json({ error: 'No puedes desactivar tu propia cuenta' });
+    }
+    // Una sola sentencia: la condicion del "ultimo admin activo" se evalua junto con el UPDATE.
+    const result = await pool.query(
+      `UPDATE usuarios SET activo = $2
+       WHERE id = $1
+         AND ($2 OR LOWER(COALESCE(role, '')) <> 'admin' OR EXISTS (
+           SELECT 1 FROM usuarios otro
+           WHERE otro.id <> $1 AND LOWER(COALESCE(otro.role, '')) = 'admin' AND otro.activo = true
+         ))
+       RETURNING id, usuario, role, activo`,
+      [id, activo]
+    );
+    if (result.rows.length === 0) {
+      const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [id]);
+      if (existe.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+      return res.status(400).json({ error: 'Debe quedar al menos un administrador activo' });
+    }
+    if (!activo) await revokeUserSessions(id);
+    return res.json(result.rows[0]);
+  } catch (error) {
+    logError(req, error, 'usuario_activo_failed');
+    return res.status(500).json({ error: 'Error del servidor' });
   }
 });
 

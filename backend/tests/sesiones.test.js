@@ -82,7 +82,7 @@ const crearBd = () => {
     if (s.includes('FROM sesiones') && s.includes('session_id = $2') && s.includes('revoked, ')) {
       const rows = db.sesiones
         .filter((x) => x.user_id === p[0] && x.session_id === p[1] && usuario(x.user_id))
-        .map((x) => ({ ...x, role: usuario(x.user_id).role, activo: usuario(x.user_id).activo }));
+        .map((x) => ({ ...x, role: usuario(x.user_id).role, activo: String(usuario(x.user_id).activo) }));
       return { rows };
     }
     if (s.includes('SET last_seen = CURRENT_TIMESTAMP')) {
@@ -116,6 +116,17 @@ const crearBd = () => {
     if (s.includes('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND revoked = false')) {
       db.sesiones.filter((x) => x.user_id === Number(p[0])).forEach((x) => { x.revoked = true; });
       return { rows: [] };
+    }
+    if (s.includes('UPDATE usuarios SET activo = $2')) {
+      const u = usuario(p[0]);
+      const otroAdminActivo = db.usuarios.some((o) => o.id !== p[0] && String(o.role).toLowerCase() === 'admin' && o.activo);
+      if (!u || !(p[1] || String(u.role).toLowerCase() !== 'admin' || otroAdminActivo)) return { rows: [] };
+      u.activo = p[1];
+      return { rows: [{ id: u.id, usuario: u.usuario, role: u.role, activo: u.activo }] };
+    }
+    if (s.includes('SELECT id FROM usuarios WHERE id = $1')) {
+      const u = usuario(p[0]);
+      return { rows: u ? [{ id: u.id }] : [] };
     }
     if (s.includes('SELECT role FROM usuarios WHERE id = $1')) {
       const u = usuario(p[0]);
@@ -284,6 +295,83 @@ describe('cambio de contrasena', () => {
     expect((await listarUsuarios(bot.body.token, 'mcp-1')).status).toBe(401);
     // El admin sigue dentro.
     expect((await listarUsuarios(admin.body.token, 'sid-admin')).status).toBe(200);
+  });
+});
+
+describe('activar / desactivar cuentas', () => {
+  const cambiarActivo = (token, sid, id, body) =>
+    conSesion(request(app).patch(`/api/usuarios/${id}/activo`), token, sid).send(body);
+
+  test('desactivar mcp_bot: su token deja de servir, no puede iniciar sesion y al reactivarla vuelve a entrar', async () => {
+    const admin = await login('admin', 'sid-admin');
+    const bot = await login('mcp_bot', 'mcp-1');
+    expect((await listarUsuarios(bot.body.token, 'mcp-1')).status).toBe(403); // pasa la autenticacion
+
+    const off = await cambiarActivo(admin.body.token, 'sid-admin', 7, { activo: false });
+    expect(off.status).toBe(200);
+    expect(off.body.activo).toBe(false);
+    expect(bd.db.sesiones.filter((x) => x.user_id === 7).every((x) => x.revoked)).toBe(true);
+
+    expect((await listarUsuarios(bot.body.token, 'mcp-1')).status).toBe(401);
+    const relogin = await login('mcp_bot', 'mcp-1');
+    expect(relogin.status).toBe(403);
+    expect(relogin.body.token).toBeUndefined();
+    expect(relogin.body.error).toMatch(/desactivada/);
+
+    expect((await cambiarActivo(admin.body.token, 'sid-admin', 7, { activo: true })).status).toBe(200);
+    const vuelve = await login('mcp_bot', 'mcp-1');
+    expect(vuelve.status).toBe(200);
+    expect((await listarUsuarios(vuelve.body.token, 'mcp-1')).status).toBe(403);
+  });
+
+  test('una cuenta desactivada por fuera (sesion aun no revocada) igual recibe 401 "Cuenta desactivada"', async () => {
+    const bot = await login('mcp_bot', 'mcp-1');
+    bd.db.usuarios.find((u) => u.id === 7).activo = false;
+    const res = await listarUsuarios(bot.body.token, 'mcp-1');
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Cuenta desactivada');
+  });
+
+  test('un admin no puede desactivarse a si mismo', async () => {
+    const admin = await login('admin', 'sid-admin');
+    const res = await cambiarActivo(admin.body.token, 'sid-admin', 1, { activo: false });
+    expect(res.status).toBe(400);
+    expect(bd.db.usuarios[0].activo).toBe(true);
+    expect((await listarUsuarios(admin.body.token, 'sid-admin')).status).toBe(200);
+  });
+
+  test('desactivar a otro admin se permite mientras quede un admin activo', async () => {
+    bd.db.usuarios.push({ id: 2, usuario: 'admin2', password: HASH, role: 'admin', activo: true });
+    const admin = await login('admin', 'sid-admin');
+    expect((await cambiarActivo(admin.body.token, 'sid-admin', 2, { activo: false })).status).toBe(200);
+  });
+
+  test('si el UPDATE condicional no aplica (seria el ultimo admin activo) responde 400 y no revoca nada', async () => {
+    const admin = await login('admin', 'sid-admin');
+    // El UPDATE lleva la condicion "queda otro admin activo"; aqui se simula que no se cumple.
+    mockQuery.mockImplementation((sql, p) =>
+      sql.includes('UPDATE usuarios SET activo = $2') ? Promise.resolve({ rows: [] }) : bd.query(sql, p));
+    const res = await cambiarActivo(admin.body.token, 'sid-admin', 7, { activo: false });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/al menos un administrador activo/);
+    expect(mockQuery.mock.calls.some(([sql]) => sql.includes('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND revoked = false'))).toBe(false);
+  });
+
+  test('validaciones: activo no booleano 400, usuario inexistente 404, no-admin 403', async () => {
+    const admin = await login('admin', 'sid-admin');
+    expect((await cambiarActivo(admin.body.token, 'sid-admin', 7, { activo: 'no' })).status).toBe(400);
+    expect((await cambiarActivo(admin.body.token, 'sid-admin', 7, {})).status).toBe(400);
+    expect((await cambiarActivo(admin.body.token, 'sid-admin', 999, { activo: false })).status).toBe(404);
+    const bot = await login('mcp_bot', 'mcp-1');
+    expect((await cambiarActivo(bot.body.token, 'mcp-1', 1, { activo: false })).status).toBe(403);
+  });
+
+  test('GET /api/usuarios devuelve el campo activo', async () => {
+    const admin = await login('admin', 'sid-admin');
+    const res = await listarUsuarios(admin.body.token, 'sid-admin');
+    expect(res.status).toBe(200);
+    expect(res.body.map((u) => u.activo)).toEqual([true, true]);
+    expect(mockQuery.mock.calls.some(([sql]) => sql.includes('created_at, activo FROM usuarios'))).toBe(true);
   });
 });
 
