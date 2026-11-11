@@ -157,14 +157,22 @@ describe('POST /api/login', () => {
     expect(res.body.user.empresa).toBe('');
   });
 
-  test('sin cabecera x-session-id el login igual responde 200 con session_id null', async () => {
+  test('sin cabecera x-session-id el login genera el id de sesion, lo guarda y lo devuelve', async () => {
+    // Antes respondia session_id null y la sesion se creaba despues "al vuelo" con
+    // cualquier X-Session-Id. Ahora solo valen sesiones creadas en el login.
     mockCompare.mockResolvedValue(true);
-    mockQuery.mockImplementation(dbRouter(rutasLogin()));
+    const inserts = [];
+    const tabla = rutasLogin();
+    tabla.unshift([incluye('INSERT INTO sesiones'), (sql, p) => { inserts.push(p); return { rows: [] }; }]);
+    mockQuery.mockImplementation(dbRouter(tabla));
 
     const res = await request(app).post('/api/login').send({ usuario: 'admin', password: 'password123' });
 
     expect(res.status).toBe(200);
-    expect(res.body.session).toEqual({ session_id: null, revoked_sessions: [] });
+    expect(res.body.session.session_id).toMatch(/^srv-[0-9a-f-]{36}$/);
+    expect(res.body.session.revoked_sessions).toEqual([]);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].slice(0, 2)).toEqual([1, res.body.session.session_id]);
   });
 
   test('un cliente con otra sesion activa la revoca al iniciar una nueva (limite 1; admin 2)', async () => {
@@ -388,21 +396,14 @@ describe('autenticacion y sesion en rutas protegidas (probado con POST /api/logo
     expect(mockQuery.mock.calls.some(([sql]) => sql.includes('SET last_seen = CURRENT_TIMESTAMP'))).toBe(true);
   });
 
-  test('SOSPECHOSO: token valido sin fila de sesion NO se rechaza; se crea la sesion al vuelo y sigue', async () => {
-    // validateSession devuelve reason "missing" -> onMissingSession -> upsertSession -> next().
-    const inserts = [];
-    mockQuery.mockImplementation(dbRouter([
-      ...rutasSesion(null),
-      [incluye('DELETE FROM sesiones WHERE user_id = $1'), { rows: [] }],
-      [incluye('SELECT id FROM sesiones WHERE user_id = $1 AND session_id = $2'), { rows: [] }],
-      [incluye('FROM sesiones', 'revoked = false'), { rows: [] }],
-      [incluye('INSERT INTO sesiones'), (sql, p) => { inserts.push(p); return { rows: [] }; }],
-      [incluye('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id = $2'), { rows: [] }]
-    ]));
+  test('token valido con un X-Session-Id que no salio de un login: 401 "Sesion invalida" y no se crea nada', async () => {
+    // Antes (SOSPECHOSO) validateSession devolvia "missing" y requireAuth creaba la
+    // sesion al vuelo: con un JWT robado bastaba inventar otro X-Session-Id.
+    mockQuery.mockImplementation(dbRouter(rutasSesion(null)));
     const res = await logout(tokenCliente(), 'sess-fantasma');
-    expect(res.status).toBe(200);
-    expect(inserts).toHaveLength(1);
-    expect(inserts[0].slice(0, 2)).toEqual([2, 'sess-fantasma']);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'Sesion invalida' });
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO sesiones|UPDATE sesiones/.test(sql))).toBe(false);
   });
 });
 

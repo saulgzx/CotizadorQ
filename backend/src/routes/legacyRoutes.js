@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
@@ -1720,8 +1721,11 @@ const recordLoginAttempt = async ({ userId, usuario, success, req, sessionId, de
 };
 
 const upsertSession = async (user, req) => {
-  const { sessionId, deviceId } = getSessionHeaders(req);
-  if (!sessionId) return { sessionId: null, revokedSessions: [] };
+  const headers = getSessionHeaders(req);
+  const { deviceId } = headers;
+  // Si el cliente no manda X-Session-Id, el login genera uno y lo devuelve en
+  // session.session_id: las rutas protegidas solo aceptan sesiones creadas aqui.
+  const sessionId = headers.sessionId || `srv-${crypto.randomUUID()}`;
   const ip = getRequestIp(req);
   const userAgent = req.headers['user-agent'] || '';
   const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(user?.role));
@@ -1791,7 +1795,8 @@ const validateSession = async (userId, sessionId, req, role) => {
     [userId, sessionId]
   );
   if (result.rows.length === 0) {
-    return { ok: false, reason: 'missing' };
+    // Sesion que nunca se creo en un login (o ya purgada): no se crea al vuelo.
+    return { ok: false, reason: 'Sesion invalida' };
   }
   const session = result.rows[0];
   const lastSeen = session.last_seen ? new Date(session.last_seen) : null;
@@ -1818,10 +1823,7 @@ const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrInt
   pool,
   jwtSecret: JWT_SECRET,
   getSessionHeaders,
-  validateSession,
-  onMissingSession: async (user, req) => {
-    await upsertSession({ id: user.id, role: user.role }, req);
-  }
+  validateSession
 });
 
 // Los fallos de un usuario se cuentan por usuario + IP: asi un tercero no puede dejar
