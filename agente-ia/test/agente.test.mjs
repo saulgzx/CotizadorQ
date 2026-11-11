@@ -38,6 +38,7 @@ test('solo permite herramientas de lectura y bloquea comandos', () => {
   const args = argsOriginal(config);
   const permitidas = args[args.indexOf('--allowedTools') + 1].split(',');
   assert.ok(permitidas.includes('mcp__myquote__consultar_producto'));
+  assert.ok(permitidas.includes('mcp__myquote__cotizar_rapido'));
   assert.ok(!permitidas.includes('mcp__myquote__generar_cotizacion'));
   assert.ok(!permitidas.includes('Bash'));
   assert.match(args[args.indexOf('--disallowedTools') + 1], /Bash/);
@@ -46,6 +47,10 @@ test('solo permite herramientas de lectura y bloquea comandos', () => {
 test('describe los pasos y omite las lecturas de la skill', () => {
   assert.equal(describirHerramienta({ name: 'mcp__myquote__consultar_producto', input: { sku: 'TS-464' } }), 'Consultando precio y stock: TS-464');
   assert.equal(describirHerramienta({ name: 'Read', input: {} }), null);
+  assert.equal(
+    describirHerramienta({ name: 'mcp__myquote__cotizar_rapido', input: { items: [{ sku: 'P1475-LE' }, { sku: 'Q6355' }] } }),
+    'Cotizando (precio, stock y entrega): P1475-LE, Q6355'
+  );
   const estado = { texto: '' };
   procesarEvento(estado, JSON.stringify({ type: 'result', is_error: false, result: 'ok' }));
   assert.equal(estado.final, 'ok');

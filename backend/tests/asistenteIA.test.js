@@ -97,6 +97,8 @@ describe('asistente IA', () => {
 
   test('las instrucciones cargan la skill y sus referencias', () => {
     const axis = construirSistema('AXIS');
+    expect(axis).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
+    expect(axis).toContain('Si cotizar_rapido no está disponible');
     expect(axis).toContain('<skill nombre="preventa-axis">');
     expect(axis).toContain('references/formato-respuesta.md');
     expect(axis).toContain('LISTA COTIZADORQ');
@@ -115,6 +117,7 @@ describe('asistente IA', () => {
     const toolset = p.tools.find((t) => t.type === 'mcp_toolset');
     expect(toolset.default_config).toEqual({ enabled: false });
     expect(Object.keys(toolset.configs)).toEqual([
+      'cotizar_rapido',
       'buscar_productos',
       'consultar_producto',
       'simular_cotizacion',
@@ -246,6 +249,9 @@ describe('asistente IA', () => {
       expect(web).toContain('preventa-axis');
       expect(web).toContain('LISTA COTIZADORQ');
       expect(web).toContain('calcular_precios');
+      expect(web).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
+      expect(web).toContain('Si cotizar_rapido no está disponible');
+      expect(web).toContain('en paralelo');
       expect(web).toContain('Gold');
       expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
       const wa = construirPromptAgente({

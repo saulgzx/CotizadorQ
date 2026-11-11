@@ -26,6 +26,7 @@ const MARCAS = {
 const MCP_SERVER_NAME = 'myquote';
 // Solo lectura. generar_cotizacion, emitir_pdf y cotizar_y_emitir quedan apagadas.
 const HERRAMIENTAS_MYQUOTE = [
+  'cotizar_rapido',
   'buscar_productos',
   'consultar_producto',
   'simular_cotizacion',
@@ -106,12 +107,20 @@ const leerSkill = (skill) => {
   return texto;
 };
 
+// Como usar el conector: comun al modo API y al agente.
+const INSTRUCCIONES_CONECTOR = [
+  'Cuando el pedido nombra modelos o SKUs concretos, usa cotizar_rapido con TODOS los ítems en una sola llamada (cantidad por ítem y, si piden nivel de partner Axis —Autorizado, Silver, Gold, Multiregional—, otro margen o GP, por ejemplo «gold al 8», partner_category y gp_axis/gp_qnap o gp por línea; 8 = 8%): devuelve precio de lista, stock, la frase real de entrega y el precio calculado, más los SKUs no resueltos o ambiguos. No consultes producto por producto.',
+  'Usa buscar_productos solo si hay que encontrar un producto (modelo sin SKU, homologación, accesorios).',
+  'Si cotizar_rapido no está disponible en el conector, usa consultar_producto por ítem (precio, stock y entrega) y calcular_precios para nivel de partner, margen o costo.',
+  'Cuando necesites varias herramientas independientes entre sí, pídelas en paralelo en el mismo turno en vez de una por una.'
+].join(' ');
+
 const construirSistema = (marca) => {
   const m = MARCAS[marca];
   const entorno = [
     `Estás dentro de MyQuote, la app web de cotización de Intcomex Chile, en el tab Asistente IA.`,
     `Aplica la skill ${m.skill} que sigue, incluidas sus referencias, que ya están cargadas abajo: no necesitas abrirlas.`,
-    `El conector MyQuote está disponible con buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8») o el costo, usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios; stock y entrega siguen saliendo de consultar_producto. Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
+    `El conector MyQuote está disponible con cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. ${INSTRUCCIONES_CONECTOR} Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
     `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}.`,
     `La respuesta se muestra como Markdown. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla debe ir como tabla Markdown.`,
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
@@ -148,8 +157,9 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
     '<instrucciones_myquote>',
     `Respondes un requerimiento de preventa recibido por ${canal === 'whatsapp' ? 'WhatsApp' : 'el tab Asistente IA de MyQuote'} (Intcomex Chile).`,
     skill,
-    'Precios, stock y plazos solo con el conector MyQuote (buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
-    'Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8»), o el costo: usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios. Stock y entrega siguen saliendo de consultar_producto. Sin nivel ni GP, el precio es el de consultar_producto.',
+    'Precios, stock y plazos solo con el conector MyQuote (cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
+    INSTRUCCIONES_CONECTOR,
+    'Sin nivel de partner ni GP, el precio es el de lista que entrega cotizar_rapido (o consultar_producto). El costo solo sale de calcular_precios o del cálculo de cotizar_rapido.',
     'No ejecutes comandos ni modifiques archivos.',
     canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
     '</instrucciones_myquote>'
@@ -263,8 +273,21 @@ const construirParametros = ({ config, marca, mensajes }) => {
 // Texto corto para mostrar mientras la IA usa una herramienta.
 const describirHerramienta = (bloque) => {
   const input = bloque?.input || {};
-  const detalle = input.sku || input.texto || input.query || input.url || '';
+  const detalle =
+    (Array.isArray(input.items) && input.items.length
+      ? `${input.items
+          .slice(0, 4)
+          .map((i) => i?.sku)
+          .filter(Boolean)
+          .join(', ')}${input.items.length > 4 ? ` y ${input.items.length - 4} más` : ''}`
+      : '') ||
+    input.sku ||
+    input.texto ||
+    input.query ||
+    input.url ||
+    '';
   const nombres = {
+    cotizar_rapido: 'Cotizando (precio, stock y entrega)',
     buscar_productos: 'Buscando en MyQuote',
     consultar_producto: 'Consultando precio y stock',
     simular_cotizacion: 'Simulando la cotización',

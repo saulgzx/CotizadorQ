@@ -42,6 +42,7 @@ export const leerConfig = (env) => ({
 
 // Solo lectura: catalogo MyQuote, fichas web y las skills. Nada de comandos ni escritura.
 export const herramientasPermitidas = (mcp) => [
+  `mcp__${mcp}__cotizar_rapido`,
   `mcp__${mcp}__buscar_productos`,
   `mcp__${mcp}__consultar_producto`,
   `mcp__${mcp}__simular_cotizacion`,
@@ -73,6 +74,7 @@ export const argumentosClaude = (config) => {
 // --- Lectura de la salida de Claude Code --------------------------------------
 
 const NOMBRES = {
+  cotizar_rapido: 'Cotizando (precio, stock y entrega)',
   buscar_productos: 'Buscando en MyQuote',
   consultar_producto: 'Consultando precio y stock',
   simular_cotizacion: 'Simulando la cotización',
@@ -82,11 +84,17 @@ const NOMBRES = {
   Skill: 'Cargando skill'
 };
 
+// cotizar_rapido / calcular_precios / simular_cotizacion: muestra los primeros SKUs de la lista.
+const detalleItems = (items) =>
+  Array.isArray(items) && items.length
+    ? `${items.slice(0, 4).map((i) => i?.sku).filter(Boolean).join(', ')}${items.length > 4 ? ` y ${items.length - 4} más` : ''}`
+    : '';
+
 export const describirHerramienta = (bloque) => {
   const nombre = nombreCorto(bloque?.name);
   if (nombre === 'Read') return null; // lectura de referencias de la skill: no aporta al usuario
   const input = bloque?.input || {};
-  const detalle = input.sku || input.texto || input.query || input.url || input.skill || input.command || '';
+  const detalle = detalleItems(input.items) || input.sku || input.texto || input.query || input.url || input.skill || input.command || '';
   const base = NOMBRES[nombre] || `Usando ${nombre}`;
   return detalle ? `${base}: ${String(detalle).slice(0, 80)}` : base;
 };
