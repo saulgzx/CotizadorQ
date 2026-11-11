@@ -126,7 +126,7 @@ const construirSistema = (marca) => {
     `Aplica la skill ${m.skill} que sigue, incluidas sus referencias, que ya están cargadas abajo: no necesitas abrirlas.`,
     `El conector MyQuote está disponible con cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. ${INSTRUCCIONES_CONECTOR} Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
     `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}. ${instruccionesWeb('web_search y web_fetch')}`,
-    `La respuesta se muestra como Markdown. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla debe ir como tabla Markdown.`,
+    `La respuesta se muestra como Markdown en MyQuote, que pinta la tabla encuadrada y, al copiar, la convierte en el HTML que se pega en Outlook: por eso la cotización va SIEMPRE como tabla Markdown y nunca como HTML crudo, texto corrido ni bloque de código. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. El preview no lleva párrafo técnico con specs ni garantía, fichas o links que el cliente no haya pedido.`,
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
   ].join('\n');
   return `${entorno}\n\n${leerSkill(m.skill)}`;
@@ -141,14 +141,14 @@ const textoDeContenido = (contenido) =>
     .join('\n\n');
 
 const FORMATO_WEB = [
-  'La respuesta se muestra como Markdown en MyQuote. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla va como tabla Markdown.',
+  'La respuesta se muestra como Markdown en MyQuote, que pinta la tabla encuadrada y, al copiar, la convierte en el HTML que se pega en Outlook: por eso la cotización va SIEMPRE como tabla Markdown y nunca como HTML crudo, texto corrido ni bloque de código. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. El preview no lleva párrafo técnico con specs ni garantía, fichas o links que el cliente no haya pedido.',
   `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
 ].join('\n');
 
 const FORMATO_WHATSAPP = [
   'La respuesta se lee en WhatsApp, que no muestra tablas ni títulos Markdown. Usa *negrita* con un asterisco y listas con guion.',
   'Entrega el preview como una línea por producto: «Cant. x SKU · MPN · Descripción · P. Unit. · P. Total · Entrega». Después, el control interno resumido en pocas líneas.',
-  'Sé breve: es para leer en el teléfono.'
+  'Sé breve: es para leer en el teléfono. Este es el único canal sin tabla: la regla de «tabla siempre encuadrada» de la skill no aplica acá.'
 ].join('\n');
 
 /** Texto completo que el agente le pasa a Claude Code. */
