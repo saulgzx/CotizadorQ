@@ -150,8 +150,9 @@ const FORMATO_WHATSAPP = [
 /** Texto completo que el agente le pasa a Claude Code. */
 const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
   const m = MARCAS[marca];
+  // Marca conocida: la skill y sus referencias viajan en el prompt y Claude Code no gasta turnos en Skill + Read.
   const skill = m
-    ? `Usa la skill ${m.skill}.`
+    ? `Aplica la skill ${m.skill}, que sigue abajo con sus referencias: ya está cargada, no uses Skill ni Read para abrirla.`
     : 'Usa la skill de preventa que corresponda: preventa-axis para Axis o videovigilancia, preventa-qnap para QNAP o almacenamiento. Si no se puede saber, pregunta.';
   const instrucciones = [
     '<instrucciones_myquote>',
@@ -164,9 +165,10 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
     canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
     '</instrucciones_myquote>'
   ].join('\n');
+  const cabecera = m ? `${instrucciones}\n\n${leerSkill(m.skill)}` : instrucciones;
   const previos = mensajes.slice(0, -1);
   const ultimo = mensajes[mensajes.length - 1].content;
-  if (!previos.length) return `${instrucciones}\n\n${ultimo}`;
+  if (!previos.length) return `${cabecera}\n\n${ultimo}`;
   const historial = previos
     .map((msg) =>
       msg.role === 'user'
@@ -174,7 +176,7 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
         : `<asistente>\n${textoDeContenido(msg.content)}\n</asistente>`
     )
     .join('\n\n');
-  return `${instrucciones}\n\n<conversacion_previa>\n${historial}\n</conversacion_previa>\n\nNuevo mensaje del usuario:\n${ultimo}`;
+  return `${cabecera}\n\n<conversacion_previa>\n${historial}\n</conversacion_previa>\n\nNuevo mensaje del usuario:\n${ultimo}`;
 };
 
 // --- Validacion de la conversacion --------------------------------------------

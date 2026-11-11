@@ -254,6 +254,14 @@ describe('asistente IA', () => {
       expect(web).toContain('en paralelo');
       expect(web).toContain('Gold');
       expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
+      // Marca conocida: la skill y sus referencias ya van en el prompt.
+      expect(web).toContain('ya está cargada, no uses Skill ni Read');
+      expect(web).toContain('<skill nombre="preventa-axis">');
+      expect(web).toContain('<referencia archivo="references/formato-respuesta.md">');
+      expect(web).not.toContain('<skill nombre="preventa-qnap">');
+      const qnap = construirPromptAgente({ ...entrada, marca: 'QNAP' });
+      expect(qnap).toContain('<skill nombre="preventa-qnap">');
+      expect(qnap).not.toContain('<skill nombre="preventa-axis">');
       const wa = construirPromptAgente({
         marca: null,
         canal: 'whatsapp',
@@ -267,6 +275,8 @@ describe('asistente IA', () => {
         ]
       });
       expect(wa).toContain('preventa-axis para Axis');
+      // Sin marca: no se precarga ninguna skill.
+      expect(wa).not.toContain('<skill nombre=');
       expect(wa).toContain('WhatsApp');
       expect(wa).toContain('<asistente>\nPropuesta TS-464');
       expect(wa.endsWith('y sin discos?')).toBe(true);
