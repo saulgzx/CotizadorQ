@@ -1871,6 +1871,9 @@ app.get('/', async (req, res) => {
     commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
     deploy: process.env.RAILWAY_DEPLOYMENT_ID || null
   };
+  // Solo un booleano global (sin detalle); omitido hasta que haya un primer chequeo.
+  const ultimoChequeo = monitorIntegraciones.ultimo();
+  if (ultimoChequeo) payload.integraciones_ok = ultimoChequeo.ok;
   // Diagnóstico de migración del folio (solo con ?diag=1, para no consultar la DB en cada health-check).
   if (req.query.diag === '1') {
     try {
@@ -3108,9 +3111,11 @@ const leerStockAgregado = async () => {
  */
 const COSTOS_CHILE_TIMEOUT_MS = 4000;
 const CACHE_KEY_COSTOS_CHILE_FALLO = 'cache:stock:costos-fallo';
-const leerCostosChile = async () => {
+// Devuelve { costos, motivo }: `costos` es null si no hay costo real y `motivo` dice por
+// que (timeout | fallo_reciente | sheets_no_configurado | error_lectura), sin detalles.
+const leerCostosChileConMotivo = async () => {
   // Tras un fallo reciente no se reintenta en cada request: el catálogo no espera a Sheets.
-  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) return null;
+  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) return { costos: null, motivo: 'fallo_reciente' };
   const lectura = leerStockAgregado();
   let timer;
   const limite = new Promise((resolve) => {
@@ -3122,17 +3127,18 @@ const leerCostosChile = async () => {
       // La lectura sigue en segundo plano y llena la cache para el próximo request.
       lectura.catch(() => {});
       logger.warn({ event: 'costo_chile_timeout' }, 'Stock lento; se cotiza con el costo calculado');
-      return null;
+      return { costos: null, motivo: 'timeout' };
     }
-    return mapaCostosChile(resultado);
+    return { costos: mapaCostosChile(resultado), motivo: null };
   } catch (error) {
     cacheSet(CACHE_KEY_COSTOS_CHILE_FALLO, true, 60 * 1000);
     logger.warn({ event: 'costo_chile_read_failed', err: compactErrorForLog(error) }, 'Sin costo real de stock; se usa el costo calculado');
-    return null;
+    return { costos: null, motivo: error?.status === 400 ? 'sheets_no_configurado' : 'error_lectura' };
   } finally {
     clearTimeout(timer);
   }
 };
+const leerCostosChile = async () => (await leerCostosChileConMotivo()).costos;
 
 // STOCK - disponible por MPN para entrega inmediata (neto de OSO, filas sumadas)
 app.get('/api/stock', authenticateToken, async (req, res) => {
@@ -3367,7 +3373,7 @@ app.post('/api/precios/calcular', authenticateToken, async (req, res) => {
     const ids = [...new Set(items.map((i) => Number(i?.producto_id)).filter((id) => Number.isInteger(id) && id > 0))];
     const filas = ids.length ? (await pool.query('SELECT * FROM productos WHERE id = ANY($1::int[])', [ids])).rows : [];
     const porId = new Map(filas.map((p) => [Number(p.id), p]));
-    const costosChile = await leerCostosChile();
+    const { costos: costosChile, motivo: costoChileMotivo } = await leerCostosChileConMotivo();
 
     const lineas = [];
     const noEncontrados = [];
@@ -3394,6 +3400,7 @@ app.post('/api/precios/calcular', authenticateToken, async (req, res) => {
       partner_category: nivel || 'todos',
       gp_por_defecto: gpPorDefecto,
       costo_chile_disponible: costosChile !== null,
+      ...(costosChile === null ? { costo_chile_motivo: costoChileMotivo } : {}),
       lineas,
       no_encontrados: noEncontrados
     });
@@ -4278,6 +4285,68 @@ const requireUsuarioIA = (req, res, next) =>
         .status(403)
         .json({ error: 'El asistente IA no está habilitado para tu usuario' });
 
+// --- Estado de integraciones (solo admin) ----------------------------------
+// Chequeo periodico de PostgreSQL, Google Sheets y costo Chile real. La lectura de
+// Sheets va SIN cache y con un cliente nuevo: si las credenciales se rompen, esto lo
+// ve aunque stock/precios sigan sirviendo datos cacheados.
+const integraciones = require('../services/integraciones');
+
+const chequearSheets = async () => {
+  const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+  if (!spreadsheetId) return { noConfigurado: true, detalle: 'GOOGLE_SHEETS_ID no configurado' };
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+    throw new Error('Faltan credenciales de Google Sheets');
+  }
+  const sheets = getSheetsClient(true);
+  const { data } = await withGoogleRetry('sheets.check', () =>
+    sheets.spreadsheets.values.get({ spreadsheetId, range: `${SHEETS_TAB_STOCK}!1:1` })
+  );
+  const encabezados = (data?.values?.[0] || []).length;
+  if (!encabezados) throw new Error(`La pestaña ${SHEETS_TAB_STOCK} no tiene encabezados`);
+  return `pestaña ${SHEETS_TAB_STOCK} legible (${encabezados} columnas)`;
+};
+
+const chequearCostoChile = async () => {
+  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) {
+    throw new Error('fallo reciente leyendo el costo Chile; los precios usan el costo estimado');
+  }
+  const mapa = mapaCostosChile(await leerStockAgregado());
+  const total = mapa.porMpn.size + mapa.porSku.size;
+  if (!total) throw new Error('el stock no trae filas con costo real');
+  return `${mapa.porMpn.size} productos con costo real`;
+};
+
+const monitorIntegraciones = integraciones.crearMonitor({
+  chequeo: integraciones.crearChequeo({
+    comprobaciones: [
+      { nombre: integraciones.NOMBRES.POSTGRES, ejecutar: async () => { await pool.query('SELECT 1'); return 'responde'; } },
+      { nombre: integraciones.NOMBRES.SHEETS, ejecutar: chequearSheets },
+      { nombre: integraciones.NOMBRES.COSTO_CHILE, depende: integraciones.NOMBRES.SHEETS, ejecutar: chequearCostoChile }
+    ]
+  }),
+  aviso: iaWhatsApp.habilitado()
+    ? integraciones.crearAvisoIntegraciones({ enviar: (texto) => iaWhatsApp.avisar(texto), logger })
+    : null,
+  logger
+});
+
+// GET /api/estado/integraciones            ultimo resultado en memoria
+// GET /api/estado/integraciones?forzar=1   corre un chequeo nuevo y lo devuelve
+app.get('/api/estado/integraciones', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const forzar = ['1', 'true'].includes(String(req.query.forzar || '').toLowerCase());
+    const resultado = forzar ? await monitorIntegraciones.revisar() : monitorIntegraciones.ultimo();
+    res.json(
+      resultado
+        ? { chequeado: true, ...resultado }
+        : { chequeado: false, ok: null, revisado_en: null, integraciones: [] }
+    );
+  } catch (error) {
+    logError(req, error, 'estado_integraciones_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
   const pendientes = asistenteIA.faltantes(iaConfig);
   const permitido = asistenteIA.usuarioPermitido(iaConfig, req.user?.usuario);
@@ -4485,6 +4554,8 @@ const startServer = async (port = PORT, options = {}) => {
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
+    // Chequeo de integraciones en segundo plano: nunca bloquea ni tumba el arranque.
+    monitorIntegraciones.iniciar({ intervaloMs: integraciones.leerConfigChequeo().intervaloMs });
     await ensureCotizacionNumero();
     await ensureCotizacionEdicion(pool);
     try {
