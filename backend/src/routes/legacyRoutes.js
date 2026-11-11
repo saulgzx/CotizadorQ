@@ -69,6 +69,9 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
+// /api/login solo recibe usuario y contrasena: limite chico para no parsear cuerpos
+// grandes en una ruta publica. El parser global de abajo no vuelve a parsear (req._body).
+app.use('/api/login', express.json({ limit: '2kb' }));
 app.use(
   express.json({
     limit: '10mb',
@@ -1876,6 +1879,14 @@ const resolveCotizacionOwnerId = async (req) => {
 };
 
 const authenticateToken = requireAuth;
+
+// Hash de relleno para el login de un usuario que no existe: se compara igual contra
+// el, asi la respuesta tarda lo mismo y no revela por tiempo que usuarios existen.
+// Se genera al arrancar con una contrasena aleatoria (nunca coincide) y el mismo
+// costo que los hashes reales.
+const loginDummyHashPromise = Promise.resolve()
+  .then(() => bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10))
+  .catch(() => null);
 // ==================== RUTAS ====================
 
 // Health check
@@ -1910,6 +1921,14 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
     const result = await pool.query('SELECT * FROM usuarios WHERE usuario = $1', [usuario]);
 
     if (result.rows.length === 0) {
+      const dummyHash = await loginDummyHashPromise;
+      if (dummyHash) {
+        try {
+          await bcrypt.compare(password, dummyHash);
+        } catch {
+          // solo importa el tiempo invertido
+        }
+      }
       await recordLoginAttempt({ userId: null, usuario, success: false, req, sessionId, deviceId });
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }

@@ -56,6 +56,13 @@ const firmaValida = (appSecret, cuerpo, cabecera) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+// Compara dos textos en tiempo constante (sobre sus SHA-256, asi tampoco se filtra el largo).
+const igualesTiempoConstante = (a, b) => {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+};
+
 const AYUDA = [
   '*Asistente de preventa MyQuote*',
   '- Escribe el requerimiento tal cual (puedes pegar el correo).',
@@ -219,7 +226,8 @@ const crearWhatsApp = ({
       if (
         query?.['hub.mode'] === 'subscribe' &&
         config.verifyToken &&
-        query['hub.verify_token'] === config.verifyToken
+        typeof query['hub.verify_token'] === 'string' &&
+        igualesTiempoConstante(query['hub.verify_token'], config.verifyToken)
       ) {
         return String(query['hub.challenge'] || '');
       }

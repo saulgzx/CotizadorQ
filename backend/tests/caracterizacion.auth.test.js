@@ -21,7 +21,8 @@ jest.mock('pg', () => ({
 
 jest.mock('bcryptjs', () => ({
   compare: mockCompare,
-  hash: jest.fn()
+  // El backend genera al arrancar un hash de relleno para usuarios inexistentes.
+  hash: jest.fn(async () => '$2a$10$hash-de-relleno')
 }));
 
 process.env.JWT_SECRET = 'stage6-tests-secret-with-minimum-32-chars';
@@ -228,7 +229,7 @@ describe('POST /api/login', () => {
     expect(logs[0][2]).toBe(false);
   });
 
-  test('usuario inexistente: 401 con el MISMO mensaje, sin consultar bcrypt, fallo registrado sin user_id', async () => {
+  test('usuario inexistente: 401 con el MISMO mensaje; igual compara bcrypt contra un hash de relleno (mismo tiempo); fallo registrado sin user_id', async () => {
     const logs = [];
     mockQuery.mockImplementation(dbRouter(rutasLogin({ usuarios: [], onInsertLog: (p) => logs.push(p) })));
 
@@ -239,7 +240,8 @@ describe('POST /api/login', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/^Usuario o contrase.+a incorrectos$/);
-    expect(mockCompare).not.toHaveBeenCalled();
+    expect(mockCompare).toHaveBeenCalledTimes(1);
+    expect(mockCompare).toHaveBeenCalledWith('password123', '$2a$10$hash-de-relleno');
     expect(logs[0][0]).toBeNull();
     expect(logs[0][1]).toBe('fantasma');
     expect(logs[0][2]).toBe(false);
@@ -299,6 +301,19 @@ describe('POST /api/login', () => {
       estados.push(res.status);
     }
     expect(estados).toEqual([401, 401, 401, 401, 401, 429]);
+  });
+
+  test('cuerpo de login grande (> 2kb): 413 sin tocar la BD; otras rutas mantienen su limite', async () => {
+    const res = await request(app)
+      .post('/api/login')
+      .set('x-forwarded-for', nuevaIp())
+      .send({ usuario: 'admin', password: 'x'.repeat(4000) });
+    expect(res.status).toBe(413);
+    expect(mockQuery).not.toHaveBeenCalled();
+
+    // El mismo cuerpo en otra ruta lo acepta el parser global (llega a requireAuth: 401).
+    const otra = await request(app).post('/api/logout').send({ relleno: 'x'.repeat(4000) });
+    expect(otra.status).toBe(401);
   });
 
   test('error de BD durante el login: 500 generico', async () => {
