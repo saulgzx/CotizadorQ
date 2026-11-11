@@ -114,4 +114,15 @@ describe('WhatsApp', () => {
     await wa.procesar(mensaje('nueva'));
     expect(enviados[1]).toMatch(/conversación nueva/);
   });
+
+  test('avisar manda el texto a los numeros autorizados', async () => {
+    const { wa, enviados, fetchImpl } = preparar();
+    expect(
+      await wa.avisar('El agente del miniPC lleva 15 min sin conectarse.')
+    ).toBe(true);
+    expect(enviados).toEqual([
+      'El agente del miniPC lleva 15 min sin conectarse.'
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(config.numeros.length);
+  });
 });

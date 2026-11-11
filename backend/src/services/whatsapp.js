@@ -208,6 +208,12 @@ const crearWhatsApp = ({
   return {
     habilitado: () => whatsappHabilitado(config),
 
+    /** Aviso del sistema a todos los numeros autorizados. true si llego a alguno. */
+    async avisar(texto) {
+      const r = await Promise.all(config.numeros.map((n) => enviar(n, texto)));
+      return r.some(Boolean);
+    },
+
     /** GET de verificacion de Meta: devuelve el challenge o null. */
     verificar(query) {
       if (

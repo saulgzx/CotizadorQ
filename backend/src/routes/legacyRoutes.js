@@ -4277,6 +4277,11 @@ const iaConsultas = asistenteIA.crearGestorConsultas({
     new (Anthropic.default || Anthropic)({ apiKey: config.apiKey })
 });
 const iaWhatsApp = crearWhatsApp({ gestor: iaConsultas, logger });
+require('../services/avisoAgente').vigilarAgente({
+  gestor: iaConsultas,
+  whatsapp: iaWhatsApp,
+  logger
+});
 const iaRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 30,
