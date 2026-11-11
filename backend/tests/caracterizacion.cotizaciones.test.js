@@ -250,20 +250,47 @@ describe('POST /api/cotizaciones', () => {
     expect(res.status).toBe(401);
   });
 
-  test('SOSPECHOSO: cliente con cantidad negativa => total NEGATIVO en la cabecera, mientras la linea se guarda con cantidad 1 y total positivo', async () => {
-    mockQuery.mockImplementation(dbRouter(sesionActiva()));
-    const { llamadas } = transaccion(handlerCrear());
+  test.each([
+    ['negativa', -2],
+    ['cero', 0],
+    ['decimal', 1.5],
+    ['texto no numerico', 'abc'],
+    ['texto decimal', '2.5'],
+    ['texto vacio', '']
+  ])('cantidad %s => 400 y no se abre transaccion (cliente, admin y cot_stock_admin)', async (_nombre, cantidad) => {
+    for (const user of [CLIENTE, ADMIN, STOCK_ADMIN]) {
+      mockQuery.mockImplementation(dbRouter(sesionActiva()));
+      mockConnect.mockReset();
+      const res = await conAuth(request(app).post('/api/cotizaciones'), user).send({
+        cliente: CLIENTE_BODY,
+        items: [{ producto_id: 3, cantidad }]
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Payload invalido');
+      expect(mockConnect).not.toHaveBeenCalled();
+    }
+  });
 
+  test('cantidad invalida en el alias "cant" tambien se rechaza', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
     const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
       cliente: CLIENTE_BODY,
-      items: [{ producto_id: 3, cantidad: -2 }]
+      items: [{ producto_id: 3, cant: -1 }]
     });
+    expect(res.status).toBe(400);
+  });
 
+  test('flujo MCP: solo producto_id y cantidad enteros (numero o texto) siguen funcionando; sin cantidad vale 1', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+    const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
+      cliente: CLIENTE_BODY,
+      items: [{ producto_id: 3, cantidad: 2 }, { producto_id: 3, cantidad: '4' }, { producto_id: 3 }]
+    });
     expect(res.status).toBe(201);
-    expect(insertCotizacion(llamadas).params[4]).toBe(1402.25);
-    const it = insertItems(llamadas).params;
-    expect(it[COL.cantidad]).toBe(1);
-    expect(it[COL.precio_total]).toBe(1402.25);
+    const params = insertItems(llamadas).params;
+    const porFila = params.length / 3;
+    expect([0, 1, 2].map((k) => params[k * porFila + COL.cantidad])).toEqual([2, 4, 1]);
   });
 
   test('cliente con items vacios: se guarda cotizacion con total 0 y sin lineas (201)', async () => {
@@ -600,5 +627,20 @@ describe('DELETE /api/cotizaciones/:id', () => {
   test('sin token: 401', async () => {
     const res = await request(app).delete('/api/cotizaciones/77');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('PUT /api/cotizaciones/:id (cantidades)', () => {
+  test.each([[0], [-3], [2.5], ['x']])('cantidad %p en una linea => 400 sin tocar la base', async (cantidad) => {
+    mockQuery.mockImplementation(dbRouter([
+      ...sesionActiva(),
+      [incluye('SELECT role FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin' }] }]
+    ]));
+    const res = await conAuth(request(app).put('/api/cotizaciones/5'), ADMIN).send({
+      items: [{ cantidad, precio_unitario: 100 }]
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Payload invalido');
+    expect(mockConnect).not.toHaveBeenCalled();
   });
 });

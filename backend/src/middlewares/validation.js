@@ -29,6 +29,17 @@ const createUserSchema = z.object({
   password: z.string().min(8).max(128)
 }).passthrough();
 
+// Cantidad de una linea: entero >= 1 (numero o texto numerico entero). Cualquier otra
+// cosa (negativa, cero, decimal, vacia) se rechaza en vez de normalizarse en silencio.
+const esCantidadValida = (valor) => {
+  if (typeof valor === 'number') return Number.isInteger(valor) && valor >= 1;
+  if (typeof valor === 'string') return /^\s*\d+\s*$/.test(valor) && Number(valor) >= 1;
+  return false;
+};
+const cantidadSchema = z.union([z.number(), z.string()]).refine(esCantidadValida, {
+  message: 'La cantidad debe ser un entero mayor o igual a 1'
+});
+
 const cotizacionSchema = z.object({
   cliente: z.object({
     nombre: z.string().optional(),
@@ -38,8 +49,8 @@ const cotizacionSchema = z.object({
   }).passthrough(),
   items: z.array(z.object({
     producto_id: z.union([z.number(), z.string()]).optional(),
-    cantidad: z.union([z.number(), z.string()]).optional(),
-    cant: z.union([z.number(), z.string()]).optional()
+    cantidad: cantidadSchema.optional(),
+    cant: cantidadSchema.optional()
   }).passthrough()).optional(),
   total: z.union([z.number(), z.string()]).optional()
 }).passthrough();
@@ -52,7 +63,7 @@ const cotizacionEditSchema = z.object({
   expected_version: z.coerce.number().int().positive().optional(),
   nota: z.string().max(500).optional(),
   items: z.array(z.object({
-    cantidad: z.union([z.number(), z.string()]),
+    cantidad: cantidadSchema,
     precio_unitario: z.union([z.number(), z.string()])
   }).passthrough()).min(1, 'La cotizacion debe tener al menos una linea')
 }).passthrough();
