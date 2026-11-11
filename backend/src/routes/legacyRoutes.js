@@ -77,7 +77,7 @@ app.use(
   })
 );
 
-// ConexiÃ³n a PostgreSQL
+// Conexión a PostgreSQL
 // DATABASE_SSL_REJECT_UNAUTHORIZED=true exige certificado válido del servidor de BD
 // (recomendado; requiere que el proveedor use un certificado verificable o configurar su CA).
 const pool = new Pool({
@@ -245,7 +245,7 @@ const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
   sku: ['sku', 'codigo', 'code', 'partnumber', 'part number', 'part no', 'item code', 'item', 'pn'],
   mpn: ['mpn', 'model', 'modelo', 'part number manufacturer', 'manufacturer part number'],
-  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
+  desc: ['descripción', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
   precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
   gp: ['gp', 'margen', 'margin', 'gp (%)', 'gp %'],
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
@@ -890,7 +890,7 @@ const getStockColumnIndexes = (headers) => {
 const getStockCatalogColumnIndexes = (headers) => {
   const idxImage = findHeaderIndex(headers, ['Product Image', 'Imagen', 'Image']);
   const idxBrand = findHeaderIndex(headers, ['Manuf. Brand', 'Brand', 'Marca', 'Manufacturer']);
-  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'DescripciÃ³n', 'Descripcion', 'Description']);
+  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'Descripción', 'Descripcion', 'Description']);
   const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
   const idxMpn = findHeaderIndex(headers, ['MPN', 'Model', 'Modelo']);
   const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
@@ -1893,7 +1893,7 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
 
     if (result.rows.length === 0) {
       await recordLoginAttempt({ userId: null, usuario, success: false, req, sessionId, deviceId });
-      return res.status(401).json({ error: 'Usuario o contrase??a incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
     const user = result.rows[0];
@@ -1901,7 +1901,7 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
 
     if (!validPassword) {
       await recordLoginAttempt({ userId: user.id, usuario: user.usuario, success: false, req, sessionId, deviceId });
-      return res.status(401).json({ error: 'Usuario o contrase??a incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
     const sessionInfo = await upsertSession(user, req);
@@ -1951,7 +1951,7 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
     await pool.query('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id = $2', [req.user.id, sessionId]);
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error cerrando sesi?n:', error);
+    console.error('Error cerrando sesión:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2029,7 +2029,7 @@ app.get('/api/usuarios/:id/login-logs', authenticateToken, requireAdmin, async (
   }
 });
 
-// SESIONES - Revocar sesi??n (admin)
+// SESIONES - Revocar sesión (admin)
 app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -2039,7 +2039,7 @@ app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, asy
     }
     res.json({ ok: true, session_id: result.rows[0].session_id });
   } catch (error) {
-    console.error('Error revocando sesi?n:', error);
+    console.error('Error revocando sesión:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2456,7 +2456,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     const userId = req.user?.id;
     if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'ContraseÃ±a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, userId]);
     if (result.rows.length === 0) {
@@ -2464,7 +2464,7 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
     }
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error actualizando contraseÃ±a propia:', error);
+    console.error('Error actualizando contraseña propia:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2473,15 +2473,15 @@ app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validat
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contraseï¿½a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
-    res.json({ message: 'Contraseï¿½a actualizada' });
+    res.json({ message: 'Contraseña actualizada' });
   } catch (error) {
-    console.error('Error actualizando contraseï¿½a:', error);
+    console.error('Error actualizando contraseña:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2501,7 +2501,7 @@ app.delete('/api/usuarios/:id', authenticateToken, requireAdmin, async (req, res
   }
 });
 
-// SHEETS - Listar pesta?as (admin)
+// SHEETS - Listar pestañas (admin)
 app.get('/api/sheets/tabs', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
@@ -2517,7 +2517,7 @@ app.get('/api/sheets/tabs', authenticateToken, requireAdmin, async (req, res) =>
     })).filter(t => t.title);
     res.json({ spreadsheetId, tabs });
   } catch (error) {
-    console.error('Error listando pesta?as:', error);
+    console.error('Error listando pestañas:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -3802,7 +3802,7 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
       [normalized, id]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     res.json(result.rows[0]);
   } catch (error) {
@@ -4114,11 +4114,11 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃƒÂ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
 
     await client.query('COMMIT');
-    res.json({ message: 'CotizaciÃƒÂ³n eliminada', cotizacion: result.rows[0] });
+    res.json({ message: 'Cotización eliminada', cotizacion: result.rows[0] });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -4211,7 +4211,7 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
       ? await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1', [id])
       : await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1 AND c.usuario_id = $2', [id, req.user.id]);
     if (cotizacion.rows.length === 0) {
-      return res.status(404).json({ error: 'Cotizaci?n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     
     const items = await pool.query(
@@ -4226,7 +4226,7 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
       resumen: resumenCotizacion(items.rows, req.user?.role)
     });
   } catch (error) {
-    console.error('Error obteniendo cotizaci?n:', error);
+    console.error('Error obteniendo cotización:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
