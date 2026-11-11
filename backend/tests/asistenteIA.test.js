@@ -244,6 +244,8 @@ describe('asistente IA', () => {
       const web = construirPromptAgente(entrada);
       expect(web).toContain('preventa-axis');
       expect(web).toContain('LISTA COTIZADORQ');
+      expect(web).toContain('calcular_precios');
+      expect(web).toContain('Gold');
       expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
       const wa = construirPromptAgente({
         marca: null,
