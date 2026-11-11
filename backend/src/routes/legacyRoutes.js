@@ -1530,7 +1530,8 @@ const getSessionHeaders = (req) => ({
 });
 
 // ==================== GEOLOCALIZACIÓN POR IP ====================
-// Resuelve IP -> país/ciudad/coordenadas vía servicio externo gratuito (ipwho.is).
+// Resuelve IP -> país/ciudad/coordenadas vía servicios externos gratuitos, solo por HTTPS
+// (ipwho.is y, de respaldo, ipapi.co): la IP del usuario nunca viaja en texto plano.
 // Cacheado por IP, con timeout y omisión de IPs privadas/locales. Configurable por env:
 //   GEO_ENABLED=false desactiva la función; GEO_API_TIMEOUT_MS ajusta el timeout.
 const GEO_ENABLED = String(process.env.GEO_ENABLED || 'true').toLowerCase() !== 'false';
@@ -1574,8 +1575,12 @@ let lastGeoError = null;
 let lastGeoErrorAt = null;
 let lastGeoOkAt = null;
 
-// GET JSON con timeout. Usa global fetch si existe; si no (Node sin fetch), cae a https/http nativo.
+// GET JSON con timeout. Usa global fetch si existe; si no (Node sin fetch), cae a https nativo.
+// Rechaza cualquier URL que no sea https para no enviar IPs de usuarios sin cifrar.
 const geoHttpGetJson = (url, timeoutMs) => {
+  if (!String(url).startsWith('https://')) {
+    return Promise.reject(new Error('solo se permiten proveedores https'));
+  }
   if (typeof fetch === 'function') {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1587,8 +1592,7 @@ const geoHttpGetJson = (url, timeoutMs) => {
       .finally(() => clearTimeout(timer));
   }
   return new Promise((resolve, reject) => {
-    const lib = require(url.startsWith('https') ? 'https' : 'http');
-    const req = lib.get(url, { headers: { 'User-Agent': 'CotizadorQ/geo' } }, (res) => {
+    const req = require('https').get(url, { headers: { 'User-Agent': 'CotizadorQ/geo' } }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         reject(new Error(`http ${res.statusCode}`));
@@ -1605,7 +1609,7 @@ const geoHttpGetJson = (url, timeoutMs) => {
   });
 };
 
-// Proveedores en orden: distinto host y protocolo, para sobrevivir a bloqueos puntuales.
+// Proveedores en orden, todos https y en hosts distintos, para sobrevivir a bloqueos puntuales.
 const GEO_PROVIDERS = [
   {
     name: 'ipwho.is',
@@ -1616,11 +1620,12 @@ const GEO_PROVIDERS = [
     } : null
   },
   {
-    name: 'ip-api.com',
-    url: (ip) => `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,city,lat,lon,isp`,
-    parse: (d) => (d && d.status === 'success') ? {
-      country: d.country || null, countryCode: d.countryCode || null, city: d.city || null,
-      lat: Number(d.lat), lon: Number(d.lon), isp: d.isp || null
+    // ipapi.co: country_name = nombre, country_code = ISO-2, org = ISP/AS. Errores: { error: true, reason }.
+    name: 'ipapi.co',
+    url: (ip) => `https://ipapi.co/${encodeURIComponent(ip)}/json/`,
+    parse: (d) => (d && !d.error) ? {
+      country: d.country_name || null, countryCode: d.country_code || null, city: d.city || null,
+      lat: Number(d.latitude), lon: Number(d.longitude), isp: d.org || null
     } : null
   }
 ];
@@ -1643,7 +1648,7 @@ const resolveGeo = (rawIp) => {
         try {
           const data = await geoHttpGetJson(provider.url(ip), GEO_API_TIMEOUT_MS);
           const parsed = provider.parse(data);
-          if (!parsed) throw new Error(data?.message || 'respuesta sin datos');
+          if (!parsed) throw new Error(data?.message || data?.reason || 'respuesta sin datos');
           const value = {
             country: parsed.country,
             countryCode: parsed.countryCode,
@@ -4497,7 +4502,10 @@ const startServer = async (port = PORT, options = {}) => {
 
 module.exports = {
   app,
-  startServer
+  startServer,
+  // Expuestos para pruebas.
+  GEO_PROVIDERS,
+  resolveGeo
 };
 
 
