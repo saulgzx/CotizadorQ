@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CODIGO_ACTUALIZADO, comprobarActualizacion, crearGit, instalarDependencias, versionActual } from './actualizador.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +35,9 @@ export const leerConfig = (env) => ({
   modelo: env.CLAUDE_MODEL || '',
   mcp: env.MCP_NOMBRE || 'myquote',
   timeoutMs: (Number(env.TIMEOUT_MIN) > 0 ? Number(env.TIMEOUT_MIN) : 10) * 60 * 1000,
-  carpetaTrabajo: env.CARPETA_TRABAJO || path.join(AQUI, 'trabajo')
+  carpetaTrabajo: env.CARPETA_TRABAJO || path.join(AQUI, 'trabajo'),
+  autoActualizar: !/^(0|false|no|off)$/i.test(String(env.AUTO_ACTUALIZAR ?? '1').trim()),
+  autoActualizarMs: (Number(env.AUTO_ACTUALIZAR_MIN) > 0 ? Number(env.AUTO_ACTUALIZAR_MIN) : 10) * 60 * 1000
 });
 
 // Solo lectura: catalogo MyQuote, fichas web y las skills. Nada de comandos ni escritura.
@@ -115,7 +118,7 @@ export const procesarEvento = (estado, linea) => {
 
 // --- Comunicacion con MyQuote -------------------------------------------------
 
-const crearApi = (config, fetchImpl = fetch) => {
+const crearApi = (config, fetchImpl = fetch, version = null) => {
   const pedir = async (ruta, opciones = {}, timeoutMs = 20000) => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -131,7 +134,8 @@ const crearApi = (config, fetchImpl = fetch) => {
   };
   return {
     async tomar() {
-      const res = await pedir('/api/ia/agente/trabajo?espera=25', {}, 40000);
+      const cabeceras = version ? { 'X-Agente-Version': version } : {};
+      const res = await pedir('/api/ia/agente/trabajo?espera=25', { headers: cabeceras }, 40000);
       if (res.status === 204) return null;
       if (res.status === 401) throw Object.assign(new Error('IA_AGENTE_TOKEN rechazado por MyQuote'), { fatal: true });
       if (!res.ok) throw new Error(`MyQuote respondió ${res.status}`);
@@ -237,13 +241,34 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const principal = async ({ config, api = crearApi(config), log = console.log, unaVez = false, spawnImpl = spawn }) => {
+export const principal = async ({
+  config,
+  version = null,
+  api = crearApi(config, fetch, version),
+  log = console.log,
+  unaVez = false,
+  spawnImpl = spawn,
+  actualizador = null, // async () => { estado }; solo se invoca con el agente ocioso
+  ahora = () => Date.now()
+}) => {
   if (!config.apiUrl || !config.token) {
     throw new Error('Falta MYQUOTE_API_URL o IA_AGENTE_TOKEN en agente-ia/.env');
   }
   log(`Agente IA conectado a ${config.apiUrl}. Esperando consultas…`);
+  if (version) log(`Versión ${version}`);
   let pausa = 2000;
+  let ultimaRevision = ahora(); // la primera revision ocurre a los N minutos (acabamos de arrancar)
   for (;;) {
+    // Ocioso: entre consulta y consulta, nunca mientras Claude Code trabaja.
+    if (actualizador && ahora() - ultimaRevision >= config.autoActualizarMs) {
+      ultimaRevision = ahora();
+      try {
+        const r = await actualizador();
+        if (r?.estado === 'actualizado') return { actualizado: true };
+      } catch (error) {
+        log(`Auto-actualización: error inesperado (${error.message})`);
+      }
+    }
     try {
       const trabajo = await api.tomar();
       pausa = 2000;
@@ -265,8 +290,22 @@ export const principal = async ({ config, api = crearApi(config), log = console.
 const esPrincipal = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (esPrincipal) {
   const config = leerConfig({ ...leerEnvArchivo(path.join(AQUI, '.env')), ...process.env });
-  principal({ config }).catch((error) => {
-    console.error(error.message);
-    process.exit(1);
-  });
+  const git = crearGit(AQUI);
+  let npmPendiente = false;
+  const actualizador = config.autoActualizar
+    ? async () => {
+        const r = await comprobarActualizacion({ git, instalar: () => instalarDependencias(AQUI), npmPendiente });
+        npmPendiente = r.estado === 'npm-fallo';
+        return r;
+      }
+    : null;
+  versionActual(git)
+    .then((version) => principal({ config, version, actualizador }))
+    .then((r) => {
+      if (r?.actualizado) process.exit(CODIGO_ACTUALIZADO);
+    })
+    .catch((error) => {
+      console.error(error.message);
+      process.exit(1);
+    });
 }

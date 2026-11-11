@@ -9,7 +9,8 @@ Wants=network-online.target
 Type=simple
 User=TU_USUARIO
 WorkingDirectory=/home/TU_USUARIO/CotizadorQ/agente-ia
-ExecStart=/usr/bin/env node agente.mjs
+# iniciar.mjs es el supervisor: relanza el agente al actualizarse (codigo 75) o caerse.
+ExecStart=/usr/bin/env node iniciar.mjs
 Restart=always
 RestartSec=10
 Environment=PATH=/home/TU_USUARIO/.local/bin:/usr/local/bin:/usr/bin:/bin

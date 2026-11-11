@@ -101,13 +101,18 @@ Debe responder con precio y stock reales.
 3. Prueba a mano:
 
    ```bash
-   node agente.mjs
+   npm start
    ```
 
    Debe decir `Esperando consultas…`. Haz una consulta desde el tab de MyQuote
    y mira cómo la resuelve. Corta con Ctrl+C.
 
 ## 6. Dejarlo corriendo siempre
+
+El agente se arranca con el **lanzador** `iniciar.mjs` (`npm start`), no con
+`agente.mjs` directo. El lanzador lo relanza al instante cuando se actualiza
+solo (código de salida **75**) y, si se cae, con espera creciente (2 s, 4 s ...
+hasta 5 min) para no entrar en bucle.
 
 **Linux (systemd).** Edita `myquote-agente.service` y cambia `TU_USUARIO`
 (y la ruta si clonaste en otro lado). Luego:
@@ -119,18 +124,55 @@ sudo systemctl enable --now myquote-agente
 journalctl -u myquote-agente -f
 ```
 
-**Windows (Programador de tareas).**
+Si ya lo tenías instalado, vuelve a copiar el `.service`, haz `daemon-reload`
+y `sudo systemctl restart myquote-agente`.
+
+**Windows (Programador de tareas, al iniciar sesión).**
 
 1. Abre **Programador de tareas** → **Crear tarea…**
-2. **General**: nombre `MyQuote agente IA`, marca **Ejecutar tanto si el usuario
-   inició sesión como si no**.
-3. **Desencadenadores** → Nuevo → **Al iniciar el sistema**.
+2. **General**: nombre `MyQuote agente IA`. Déjala para tu usuario (Claude Code
+   usa tu sesión iniciada).
+3. **Desencadenadores** → Nuevo → **Al iniciar sesión** (tu usuario). Activa el
+   inicio de sesión automático de Windows en el miniPC si debe volver solo.
 4. **Acciones** → Nuevo → Programa: `C:\Program Files\nodejs\node.exe`,
-   Argumentos: `agente.mjs`, Iniciar en: la carpeta `agente-ia` completa.
+   Argumentos: `iniciar.mjs`, Iniciar en: la carpeta `agente-ia` completa.
    En `.env`, pon la ruta completa de Claude Code:
    `CLAUDE_BIN=C:\Users\TU_USUARIO\.local\bin\claude.exe` (la tarea programada
    no siempre ve el mismo PATH que tu sesión).
-5. **Configuración**: marca **Si la tarea no se ejecuta, reiniciarla cada 1 minuto**.
+5. **Configuración**: marca **Si la tarea no se ejecuta, reiniciarla cada 1 minuto**
+   y desmarca **Detener la tarea si se ejecuta durante más de 3 días**.
+6. Para cambiar de `agente.mjs` a `iniciar.mjs` en una tarea existente: edita la
+   acción, cambia el argumento a `iniciar.mjs`, y detén/ejecuta la tarea.
+
+## 7. Auto-actualización
+
+Con el agente **ocioso** (nunca en medio de una consulta), cada
+`AUTO_ACTUALIZAR_MIN` minutos (10 por defecto) hace `git fetch origin main`. Si
+está atrasado, el árbol de trabajo está limpio y la rama actual es `main`:
+`git pull --ff-only origin main`, `npm ci`/`npm install` en `agente-ia/` solo si
+cambió su `package.json` o lockfile, y sale con el código **75** para que el
+lanzador lo relance con el código nuevo.
+
+En cualquier otro caso (cambios locales sin confirmar, otra rama, commits
+propios, sin git, sin red) no hace nada: registra un aviso y sigue funcionando.
+Nunca usa `reset --hard`, `stash` ni fuerza. `AUTO_ACTUALIZAR=0` en `.env` la
+apaga. Requiere que el agente corra bajo el lanzador (`iniciar.mjs`/`npm start`
+o systemd con el `.service` incluido); si corre con `agente.mjs` directo, al
+actualizarse simplemente se detiene.
+
+Códigos de salida de `agente.mjs`: `75` = actualizado, relanzar; `1` = error
+(por ejemplo token rechazado).
+
+El agente informa su versión (SHA corto de git) a MyQuote en cada petición de
+trabajo; aparece en `GET /api/ia/estado` (`agente.version`).
+
+## 8. Aviso de desconexión por WhatsApp
+
+Si WhatsApp está configurado y el agente lleva más de `AGENTE_AVISO_MIN` minutos
+(15 por defecto; `0` lo apaga; variable del **backend** en Railway) sin pedir
+trabajo, MyQuote manda **un** aviso a los números de `WHATSAPP_NUMEROS` y otro
+cuando vuelve. Nota de Meta: los mensajes de texto libre solo se entregan si
+el número escribió al bot en las últimas 24 h.
 
 Ponle al miniPC el arranque automático tras un corte de luz (opción de la BIOS
 "Restore on AC power loss") para que vuelva solo.
@@ -140,6 +182,7 @@ Ponle al miniPC el arranque automático tras un corte de luz (opción de la BIOS
 | Síntoma | Causa |
 |---|---|
 | El tab dice "servidor IA de casa desconectado" | El agente no está corriendo o no tiene internet |
+| El agente no se actualiza solo | Árbol con cambios locales, rama distinta de `main` o sin red: mira el log ("Auto-actualización: …") |
 | `IA_AGENTE_TOKEN rechazado por MyQuote` | El token del `.env` no coincide con el de Railway |
 | `No se encontró "claude"` | Claude Code no está en el PATH del servicio: pon la ruta completa en `CLAUDE_BIN` |
 | La respuesta no trae precios | El conector no se llama `myquote`: ajusta `MCP_NOMBRE` |

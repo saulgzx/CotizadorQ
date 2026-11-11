@@ -111,14 +111,14 @@ const { agregarStock, mapaCostosChile, costoChilePara } = require('../services/s
 const preciosPartner = require('../services/preciosPartner');
 const { construirMapaEta, textoEta, SEMANAS_ADICIONALES_DEFAULT } = require('../services/etaAxis');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
-const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
+// Sesion admin: 7 dias por defecto (10080 min), configurable por entorno.
+const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '10080', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
 const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MIN * 60 * 1000;
-const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
+const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '7d';
 const APP_VERSION = process.env.APP_VERSION || '2026-02-05-stock';
 const LOGIN_RATE_LIMIT_MAX = parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '5', 10);
 const LOGIN_RATE_LIMIT_WINDOW_MIN = parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MIN || '15', 10);
-const LOGIN_RATE_LIMIT_BYPASS_USERS = new Set(['agonz']);
 const STOCK_CACHE_TTL_SEC = parseInt(process.env.STOCK_CACHE_TTL_SEC || '120', 10);
 const STOCK_CATALOG_CACHE_TTL_SEC = parseInt(process.env.STOCK_CATALOG_CACHE_TTL_SEC || '180', 10);
 const OSO_ORDERS_CACHE_TTL_SEC = parseInt(process.env.OSO_ORDERS_CACHE_TTL_SEC || '120', 10);
@@ -126,10 +126,6 @@ const GOOGLE_API_TIMEOUT_MS = parseInt(process.env.GOOGLE_API_TIMEOUT_MS || '300
 const GOOGLE_API_RETRIES = parseInt(process.env.GOOGLE_API_RETRIES || '3', 10);
 const GOOGLE_API_RETRY_DELAY_MS = parseInt(process.env.GOOGLE_API_RETRY_DELAY_MS || '300', 10);
 const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
-const COTIZADOR_STOCK_ADMIN_PASSWORD_HASH = '$2a$10$c3obvEDFA/wNqtH3y8rlGe0WSU6hS3MiRRepw0AzJtozhqpNvSrAa';
-const OSUESCUN_PASSWORD_HASH = '$2a$10$v2iFGiJ25E2aHusiLocOQOY83L306bIWigoGgvfh7cgB6ADgeCJkS';
-const ESTIV_PASSWORD_HASH = '$2a$10$nZ2HBE.Lire3a.6/u9s27uQ7Tnd.PHQvbbeoZmcvYknSSHZ37uI4G';
-const JLEON_PASSWORD_HASH = '$2a$10$I0slu/Cwht2gyvVXKsO3QOuaBa26u1sfeG/PTgpzFPAFvJmce0fhy';
 
 const canManageCotizadorStock = (role) => {
   const normalized = String(role || '').toLowerCase();
@@ -228,12 +224,9 @@ const getExternalErrorMessage = (error, fallback = 'Error consultando servicio e
 };
 
 // Rate limit de login: activo por defecto. Para desactivarlo (decisión de negocio)
-// setear LOGIN_RATE_LIMIT_ENABLED=false en el entorno.
+// setear LOGIN_RATE_LIMIT_ENABLED=false en el entorno. Es un interruptor global:
+// ningun usuario tiene excepcion propia.
 const LOGIN_RATE_LIMIT_ENABLED = String(process.env.LOGIN_RATE_LIMIT_ENABLED || 'true').toLowerCase() !== 'false';
-const shouldBypassLoginRateLimit = (usuario) => {
-  if (!LOGIN_RATE_LIMIT_ENABLED) return true;
-  return LOGIN_RATE_LIMIT_BYPASS_USERS.has(String(usuario || '').trim().toLowerCase());
-};
 
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -241,7 +234,7 @@ const loginRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  skip: (req) => shouldBypassLoginRateLimit(req?.body?.usuario),
+  skip: () => !LOGIN_RATE_LIMIT_ENABLED,
   message: { error: 'Demasiados intentos de inicio de sesion. Intenta mas tarde.' }
 });
 
@@ -1488,33 +1481,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['nsteck', COTIZADOR_STOCK_ADMIN_PASSWORD_HASH, 'Nsteck', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Osuescun', OSUESCUN_PASSWORD_HASH, 'Osuescun', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Estiv', ESTIV_PASSWORD_HASH, 'Estiv', '', '', COTIZADOR_STOCK_ADMIN_ROLE, 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
-
-    await pool.query(
-      `INSERT INTO usuarios (usuario, password, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (usuario) DO NOTHING`,
-      ['Jleon', JLEON_PASSWORD_HASH, 'Jleon', '', '', 'admin', 0.15, 0.15, 0.15, 'Partner Autorizado', null]
-    );
+    // Sin usuarios sembrados desde el codigo: las cuentas se crean por SQL o desde
+    // /api/usuarios (ver SECURITY.md). Las cuentas ya existentes en la BD no se tocan.
 
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sesiones_user_session_idx ON sesiones(user_id, session_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS sesiones_active_idx ON sesiones(user_id, revoked, last_seen);`);
@@ -1563,7 +1531,8 @@ const getSessionHeaders = (req) => ({
 });
 
 // ==================== GEOLOCALIZACIÓN POR IP ====================
-// Resuelve IP -> país/ciudad/coordenadas vía servicio externo gratuito (ipwho.is).
+// Resuelve IP -> país/ciudad/coordenadas vía servicios externos gratuitos, solo por HTTPS
+// (ipwho.is y, de respaldo, ipapi.co): la IP del usuario nunca viaja en texto plano.
 // Cacheado por IP, con timeout y omisión de IPs privadas/locales. Configurable por env:
 //   GEO_ENABLED=false desactiva la función; GEO_API_TIMEOUT_MS ajusta el timeout.
 const GEO_ENABLED = String(process.env.GEO_ENABLED || 'true').toLowerCase() !== 'false';
@@ -1607,8 +1576,12 @@ let lastGeoError = null;
 let lastGeoErrorAt = null;
 let lastGeoOkAt = null;
 
-// GET JSON con timeout. Usa global fetch si existe; si no (Node sin fetch), cae a https/http nativo.
+// GET JSON con timeout. Usa global fetch si existe; si no (Node sin fetch), cae a https nativo.
+// Rechaza cualquier URL que no sea https para no enviar IPs de usuarios sin cifrar.
 const geoHttpGetJson = (url, timeoutMs) => {
+  if (!String(url).startsWith('https://')) {
+    return Promise.reject(new Error('solo se permiten proveedores https'));
+  }
   if (typeof fetch === 'function') {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1620,8 +1593,7 @@ const geoHttpGetJson = (url, timeoutMs) => {
       .finally(() => clearTimeout(timer));
   }
   return new Promise((resolve, reject) => {
-    const lib = require(url.startsWith('https') ? 'https' : 'http');
-    const req = lib.get(url, { headers: { 'User-Agent': 'CotizadorQ/geo' } }, (res) => {
+    const req = require('https').get(url, { headers: { 'User-Agent': 'CotizadorQ/geo' } }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         reject(new Error(`http ${res.statusCode}`));
@@ -1638,7 +1610,7 @@ const geoHttpGetJson = (url, timeoutMs) => {
   });
 };
 
-// Proveedores en orden: distinto host y protocolo, para sobrevivir a bloqueos puntuales.
+// Proveedores en orden, todos https y en hosts distintos, para sobrevivir a bloqueos puntuales.
 const GEO_PROVIDERS = [
   {
     name: 'ipwho.is',
@@ -1649,11 +1621,12 @@ const GEO_PROVIDERS = [
     } : null
   },
   {
-    name: 'ip-api.com',
-    url: (ip) => `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,city,lat,lon,isp`,
-    parse: (d) => (d && d.status === 'success') ? {
-      country: d.country || null, countryCode: d.countryCode || null, city: d.city || null,
-      lat: Number(d.lat), lon: Number(d.lon), isp: d.isp || null
+    // ipapi.co: country_name = nombre, country_code = ISO-2, org = ISP/AS. Errores: { error: true, reason }.
+    name: 'ipapi.co',
+    url: (ip) => `https://ipapi.co/${encodeURIComponent(ip)}/json/`,
+    parse: (d) => (d && !d.error) ? {
+      country: d.country_name || null, countryCode: d.country_code || null, city: d.city || null,
+      lat: Number(d.latitude), lon: Number(d.longitude), isp: d.org || null
     } : null
   }
 ];
@@ -1676,7 +1649,7 @@ const resolveGeo = (rawIp) => {
         try {
           const data = await geoHttpGetJson(provider.url(ip), GEO_API_TIMEOUT_MS);
           const parsed = provider.parse(data);
-          if (!parsed) throw new Error(data?.message || 'respuesta sin datos');
+          if (!parsed) throw new Error(data?.message || data?.reason || 'respuesta sin datos');
           const value = {
             country: parsed.country,
             countryCode: parsed.countryCode,
@@ -1850,8 +1823,11 @@ const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrInt
   }
 });
 
+// Los fallos de un usuario se cuentan por usuario + IP: asi un tercero no puede dejar
+// fuera a otra persona (o a la cuenta del conector) fallando su contrasena desde otra IP.
+// El total por IP sigue frenando a quien prueba muchos usuarios desde un mismo origen.
 const isDbLoginRateLimited = async ({ usuario, req }) => {
-  if (shouldBypassLoginRateLimit(usuario)) return false;
+  if (!LOGIN_RATE_LIMIT_ENABLED) return false;
   const ip = getRequestIp(req);
   const windowMin = Number.isFinite(LOGIN_RATE_LIMIT_WINDOW_MIN) && LOGIN_RATE_LIMIT_WINDOW_MIN > 0
     ? LOGIN_RATE_LIMIT_WINDOW_MIN
@@ -1861,7 +1837,7 @@ const isDbLoginRateLimited = async ({ usuario, req }) => {
     : 5;
   const result = await pool.query(
     `SELECT
-       COUNT(*) FILTER (WHERE usuario = $1) AS user_failures,
+       COUNT(*) FILTER (WHERE usuario = $1 AND ip_address = $2) AS user_failures,
        COUNT(*) FILTER (WHERE ip_address = $2) AS ip_failures
      FROM login_logs
      WHERE success = false
@@ -4277,6 +4253,11 @@ const iaConsultas = asistenteIA.crearGestorConsultas({
     new (Anthropic.default || Anthropic)({ apiKey: config.apiKey })
 });
 const iaWhatsApp = crearWhatsApp({ gestor: iaConsultas, logger });
+require('../services/avisoAgente').vigilarAgente({
+  gestor: iaConsultas,
+  whatsapp: iaWhatsApp,
+  logger
+});
 const iaRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 30,
@@ -4401,7 +4382,10 @@ app.get(
     req.on('close', () => {
       cerrado = true;
     });
-    const trabajo = await iaConsultas.tomarTrabajo({ esperaMs });
+    const version = /^[\w.-]{1,40}$/.test(req.headers['x-agente-version'] || '')
+      ? req.headers['x-agente-version']
+      : null;
+    const trabajo = await iaConsultas.tomarTrabajo({ esperaMs, version });
     if (cerrado) {
       // El agente corto la conexion antes de recibirla: vuelve a la cola.
       if (trabajo) iaConsultas.liberarTrabajo(trabajo.id);
@@ -4465,7 +4449,38 @@ app.post('/api/whatsapp/webhook', (req, res) => {
   return undefined;
 });
 
-const startServer = async (port = PORT) => {
+// Arranque: antes de abrir HTTP se exige que PostgreSQL responda. Si tras unos reintentos
+// no hay conexion, el proceso termina con codigo 1 para que Railway lo reinicie (antes el
+// servidor quedaba arriba respondiendo 500). Ojo: esto distingue "no hay conexion" de
+// "fallo un paso de initDB": con conexion, initDB, ensureCotizacionNumero y
+// ensureCotizacionEdicion siguen aislados y un ALTER que falle no impide el arranque.
+const DB_CONNECT_RETRIES = Math.max(1, parseInt(process.env.DB_CONNECT_RETRIES || '5', 10) || 5);
+const DB_CONNECT_RETRY_DELAY_MS = Math.max(0, parseInt(process.env.DB_CONNECT_RETRY_DELAY_MS || '3000', 10) || 0);
+
+const waitForDatabase = async ({ retries = DB_CONNECT_RETRIES, delayMs = DB_CONNECT_RETRY_DELAY_MS } = {}) => {
+  for (let intento = 1; intento <= retries; intento += 1) {
+    try {
+      await pool.query('SELECT 1');
+      return true;
+    } catch (error) {
+      logger.warn(
+        { event: 'db_connect_retry', intento, retries, code: error?.code, message: error?.message },
+        'Sin conexion a PostgreSQL'
+      );
+      if (intento < retries) await sleep(delayMs * intento);
+    }
+  }
+  return false;
+};
+
+const startServer = async (port = PORT, options = {}) => {
+  const exit = options.exit || ((code) => process.exit(code));
+  const dbOk = await waitForDatabase(options);
+  if (!dbOk) {
+    logger.error({ event: 'db_unavailable' }, 'PostgreSQL no disponible tras los reintentos. Backend detenido.');
+    exit(1);
+    return null;
+  }
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
@@ -4491,7 +4506,10 @@ const startServer = async (port = PORT) => {
 
 module.exports = {
   app,
-  startServer
+  startServer,
+  // Expuestos para pruebas.
+  GEO_PROVIDERS,
+  resolveGeo
 };
 
 

@@ -9,6 +9,39 @@ const logger = pino({
   }
 });
 
+// Parametros de query cuyo valor nunca debe quedar en logs (ej. hub.verify_token del
+// webhook de WhatsApp), sin distinguir mayusculas.
+const SENSITIVE_QUERY_KEY = /(token|secret|passw|api_?key|signature)/i;
+const SENSITIVE_QUERY_EXACT = new Set(['key', 'auth']);
+const isSensitiveQueryKey = (key) =>
+  SENSITIVE_QUERY_KEY.test(key) || SENSITIVE_QUERY_EXACT.has(key.toLowerCase());
+
+/** URL apta para logs: enmascara /mcp/<secreto> y valores de parametros sensibles. */
+const sanitizeUrlForLog = (rawUrl) => {
+  const url = String(rawUrl || '');
+  const qIndex = url.indexOf('?');
+  let pathPart = qIndex === -1 ? url : url.slice(0, qIndex);
+  pathPart = pathPart.replace(/^(\/mcp\/).+$/i, '$1[censurado]');
+  if (qIndex === -1) return pathPart;
+  const query = url
+    .slice(qIndex + 1)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq === -1) return pair;
+      const key = pair.slice(0, eq);
+      let decodedKey = key;
+      try {
+        decodedKey = decodeURIComponent(key);
+      } catch {
+        // clave mal codificada: se evalua tal cual
+      }
+      return isSensitiveQueryKey(decodedKey) ? `${key}=[censurado]` : pair;
+    })
+    .join('&');
+  return `${pathPart}?${query}`;
+};
+
 const requestLogger = (req, res, next) => {
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   req.requestId = requestId;
@@ -20,7 +53,7 @@ const requestLogger = (req, res, next) => {
       {
         requestId,
         method: req.method,
-        path: req.originalUrl,
+        path: sanitizeUrlForLog(req.originalUrl),
         statusCode: res.statusCode,
         durationMs: Date.now() - start
       },
@@ -36,7 +69,7 @@ const logError = (req, error, message, extra = {}) => {
     {
       requestId: req?.requestId,
       method: req?.method,
-      path: req?.originalUrl,
+      path: sanitizeUrlForLog(req?.originalUrl),
       err: error
         ? {
             message: error.message,
@@ -53,5 +86,6 @@ const logError = (req, error, message, extra = {}) => {
 module.exports = {
   logger,
   requestLogger,
-  logError
+  logError,
+  sanitizeUrlForLog
 };

@@ -309,6 +309,20 @@ describe('asistente IA', () => {
       expect(gestor.avanceAgente(id, { texto: 'x' })).toBe(false);
     });
 
+    test('guarda la version que informa el agente; uno viejo no la manda', async () => {
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() }
+      });
+      expect(gestor.estadoAgente().version).toBeNull();
+      await gestor.tomarTrabajo({ esperaMs: 5 });
+      expect(gestor.estadoAgente().version).toBeNull();
+      await gestor.tomarTrabajo({ esperaMs: 5, version: 'abc1234' });
+      expect(gestor.estadoAgente().version).toBe('abc1234');
+      await gestor.tomarTrabajo({ esperaMs: 5 });
+      expect(gestor.estadoAgente().version).toBe('abc1234');
+    });
+
     test('un agente esperando recibe la consulta apenas llega', async () => {
       const gestor = crearGestorConsultas({
         config: configAgente,
