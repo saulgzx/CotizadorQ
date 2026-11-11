@@ -42,6 +42,7 @@ export const herramientasPermitidas = (mcp) => [
   `mcp__${mcp}__buscar_productos`,
   `mcp__${mcp}__consultar_producto`,
   `mcp__${mcp}__simular_cotizacion`,
+  `mcp__${mcp}__calcular_precios`,
   'Skill',
   'Read',
   'WebSearch',
