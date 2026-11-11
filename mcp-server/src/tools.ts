@@ -13,12 +13,12 @@ import {
   resolverItems,
   type LecturaStock,
   type LineaResuelta,
+  type RespuestaPrecios,
   type SkuNoResuelto
 } from './cotizador.js';
 import {
   buscarProductoTolerante,
   esEol,
-  garantiaDe,
   infoEntrega,
   rankearBusqueda,
   rotulos,
@@ -27,6 +27,7 @@ import {
   textoStock,
   unidadesDe
 } from './dominio.js';
+import { cotizarRapido, fichaProducto } from './rapido.js';
 
 const USD = (valor: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(valor);
@@ -131,6 +132,42 @@ const bloqueNoResueltos = (noResueltos: SkuNoResuelto[]): string =>
     : `\n\n**SKUs no encontrados (${noResueltos.length}):**\n` +
       noResueltos.map((n) => `- \`${n.sku}\` — ${n.motivo}`).join('\n');
 
+const TABLA_PRECIOS_CABECERA =
+  '| SKU | Descripcion | Partner | Cant | Rebate | Costo unit. | GP | Precio unit. | Total | Margen |\n' +
+  '|---|---|---|---|---|---|---|---|---|---|';
+
+/** Filas de la tabla de precios por partner/GP (compartida por calcular_precios y cotizar_rapido). */
+const filasPrecios = (r: RespuestaPrecios) => {
+  const pct = (gp: number) => `${(gp * 100).toFixed(1)}%`;
+  const filas: string[] = [];
+  let totalPrecio = 0;
+  let totalMargen = 0;
+  for (const l of r.lineas) {
+    const desc = celda(l.descripcion.slice(0, 40));
+    if (l.niveles) {
+      for (const n of l.niveles) {
+        filas.push(
+          `| ${l.sku} | ${desc} | ${n.nivel.replace('Partner ', '')} | ${l.cantidad} | ${USD(n.rebate)} | ${USD(n.costo_unitario)} ` +
+            `| ${pct(l.gp)} | ${USD(n.precio_unitario)} | ${USD(n.precio_total)} | ${USD(n.margen_total)} |`
+        );
+      }
+      if (l.niveles.length === 1) {
+        totalPrecio += l.niveles[0].precio_total;
+        totalMargen += l.niveles[0].margen_total;
+      }
+    } else {
+      filas.push(
+        `| ${l.sku} | ${desc} | — | ${l.cantidad} | — | ${USD(l.costo_unitario ?? 0)} | ${pct(l.gp)} ` +
+          `| ${USD(l.precio_unitario ?? 0)} | ${USD(l.precio_total ?? 0)} | ${USD(l.margen_total ?? 0)} |`
+      );
+      totalPrecio += l.precio_total ?? 0;
+      totalMargen += l.margen_total ?? 0;
+    }
+  }
+  const comparando = r.partner_category === 'todos' && r.lineas.some((l) => (l.niveles?.length ?? 0) > 1);
+  return { filas, totalPrecio, totalMargen, comparando };
+};
+
 export const registrarTools = (server: McpServer): void => {
   server.registerTool(
     'consultar_producto',
@@ -170,25 +207,8 @@ export const registrarTools = (server: McpServer): void => {
 
       const unidades = unidadesDe(lectura, producto);
       const entrega = infoEntrega(producto, lectura, DIAS_CREACION_SKU);
-      const garantia = garantiaDe(producto);
-      const eol = esEol(producto, EOL_EXTRA);
-      const datos = {
-        encontrado: true,
-        coincidencia: tipo,
-        id: producto.id,
-        sku: producto.sku,
-        mpn: producto.mpn,
-        marca: producto.marca,
-        origen: producto.origen,
-        descripcion: producto.descripcion,
-        precio_cliente: producto.precio_cliente,
-        stock: unidades,
-        stock_leido_en: lectura.leido_en,
-        eol,
-        ...entrega,
-        ...garantia,
-        diagnostico_stock: diagnosticoStock(lectura)
-      };
+      const datos = { encontrado: true, ...fichaProducto(producto, lectura, tipo ?? 'exacta') };
+      const { eol, ...garantia } = datos;
 
       const aviso =
         tipo === 'exacta'
@@ -374,45 +394,82 @@ export const registrarTools = (server: McpServer): void => {
       }
 
       const r = await calcularPrecios({ items: pedidos, partner_category, gp_axis, gp_qnap });
-      const pct = (gp: number) => `${(gp * 100).toFixed(1)}%`;
-      const filas: string[] = [];
-      let totalPrecio = 0;
-      let totalMargen = 0;
-      for (const l of r.lineas) {
-        const desc = celda(l.descripcion.slice(0, 40));
-        if (l.niveles) {
-          for (const n of l.niveles) {
-            filas.push(
-              `| ${l.sku} | ${desc} | ${n.nivel.replace('Partner ', '')} | ${l.cantidad} | ${USD(n.rebate)} | ${USD(n.costo_unitario)} ` +
-                `| ${pct(l.gp)} | ${USD(n.precio_unitario)} | ${USD(n.precio_total)} | ${USD(n.margen_total)} |`
-            );
-          }
-          if (l.niveles.length === 1) {
-            totalPrecio += l.niveles[0].precio_total;
-            totalMargen += l.niveles[0].margen_total;
-          }
-        } else {
-          filas.push(
-            `| ${l.sku} | ${desc} | — | ${l.cantidad} | — | ${USD(l.costo_unitario ?? 0)} | ${pct(l.gp)} ` +
-              `| ${USD(l.precio_unitario ?? 0)} | ${USD(l.precio_total ?? 0)} | ${USD(l.margen_total ?? 0)} |`
-          );
-          totalPrecio += l.precio_total ?? 0;
-          totalMargen += l.margen_total ?? 0;
-        }
-      }
-      const comparando = r.partner_category === 'todos' && r.lineas.some((l) => (l.niveles?.length ?? 0) > 1);
+      const { filas, totalPrecio, totalMargen, comparando } = filasPrecios(r);
       const texto =
         `### Precios (${comparando ? 'comparando niveles de partner' : r.partner_category}) — NO guardado\n\n` +
-        [
-          '| SKU | Descripcion | Partner | Cant | Rebate | Costo unit. | GP | Precio unit. | Total | Margen |',
-          '|---|---|---|---|---|---|---|---|---|---|',
-          ...filas
-        ].join('\n') +
+        [TABLA_PRECIOS_CABECERA, ...filas].join('\n') +
         (comparando ? '' : `\n\n**Total: ${USD(totalPrecio)}** · Margen: ${USD(totalMargen)}`) +
         (r.costo_chile_disponible ? '' : '\n\n⚠️ Costo Chile real no disponible: se uso el costo calculado desde el disty.') +
         bloqueNoResueltos(noResueltos);
 
       return respuesta(texto, { ...r, no_resueltos: noResueltos });
+    }
+  );
+
+  server.registerTool(
+    'cotizar_rapido',
+    {
+      description:
+        'TODO EN UNA LLAMADA para armar un preview cuando ya se conocen los modelos o SKUs: por cada item devuelve el producto resuelto ' +
+        '(sku, mpn, descripcion, marca), precio cliente de lista, stock y la frase real de entrega (con las mismas reglas de «stock no verificado» ' +
+        'de consultar_producto) y, si se pide partner_category, gp_axis, gp_qnap o gp por linea, el precio calculado (igual que calcular_precios). ' +
+        'Devuelve ademas totales y la lista de SKUs no resueltos o ambiguos. Usala en vez de consultar_producto + calcular_precios item por item; ' +
+        'usa buscar_productos solo para encontrar un producto. Si el calculo por partner no esta autorizado (403) entrega lista y stock con un aviso. Solo lectura.',
+      inputSchema: z.object({
+        items: z
+          .array(
+            itemSchema.extend({
+              gp: z.number().min(0).max(99.99).optional().describe('GP solo para esta linea (0.12 o 12)')
+            })
+          )
+          .min(1)
+          .max(60),
+        partner_category: z
+          .enum(['Autorizado', 'Silver', 'Gold', 'Multiregional'])
+          .optional()
+          .describe('Nivel de partner Axis. Vacio y con GP pedido: compara los 4 niveles. Sin nada de calculo: solo precio de lista.'),
+        gp_axis: z.number().min(0).max(99.99).optional().describe('GP global Axis (0.15 o 15)'),
+        gp_qnap: z.number().min(0).max(99.99).optional().describe('GP global QNAP (0.15 o 15)')
+      })
+    },
+    async ({ items, partner_category, gp_axis, gp_qnap }) => {
+      const r = await cotizarRapido(items, { partner_category, gp_axis, gp_qnap });
+      const partes: string[] = [
+        `### Cotizacion rapida (NO guardada)\n\n${tablaLineas(r.lineas_resueltas, r.lectura)}\n\n**Total lista: ${USD(r.totales.total_lista)}**`
+      ];
+      if (r.precios) {
+        const { filas, comparando } = filasPrecios(r.precios);
+        partes.push(
+          `#### Precio calculado (${comparando ? 'comparando niveles de partner' : r.precios.partner_category})\n\n` +
+            [TABLA_PRECIOS_CABECERA, ...filas].join('\n') +
+            (r.totales.total_calculado !== null
+              ? `\n\n**Total calculado: ${USD(r.totales.total_calculado)}** · Margen: ${USD(r.totales.margen_total ?? 0)}`
+              : '') +
+            (r.precios.costo_chile_disponible ? '' : '\n\n⚠️ Costo Chile real no disponible: se uso el costo calculado desde el disty.')
+        );
+      }
+      if (r.calculo_aviso) partes.push(`⚠️ **Precio por partner/GP no disponible**: ${r.calculo_aviso}`);
+      const texto = partes.join('\n\n') + bloqueNoResueltos(r.no_resueltos);
+
+      return respuesta(texto, {
+        guardado: false,
+        lineas: r.lineas.map((l) => ({
+          ...l.ficha,
+          cantidad: l.cantidad,
+          precio_total_lista: l.precio_total_lista,
+          precio_calculado: l.calculo
+        })),
+        no_resueltos: r.no_resueltos,
+        calculo: {
+          pedido: r.calculo_pedido,
+          disponible: r.calculo_disponible,
+          aviso: r.calculo_aviso,
+          partner_category: r.precios?.partner_category ?? null,
+          costo_chile_disponible: r.precios?.costo_chile_disponible ?? null
+        },
+        totales: r.totales,
+        stock: r.stock
+      });
     }
   );
 

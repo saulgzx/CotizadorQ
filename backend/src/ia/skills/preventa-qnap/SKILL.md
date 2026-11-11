@@ -29,6 +29,13 @@ con el fabricante. No lo rellenes con una suposición.
 - `buscar_productos({texto, origen:"QNAP", limite})` — búsqueda parcial por SKU, MPN,
   marca o descripción. Devuelve `precio_cliente` y `tiempo_entrega` de catálogo,
   **sin stock**.
+- `cotizar_rapido({items, partner_category, gp_axis, gp_qnap})` — **camino por defecto
+  cuando el pedido ya nombra modelos o SKUs**: con todos los ítems en una sola llamada
+  (`sku` o MPN, `cantidad`, y `gp` por línea si hace falta) devuelve por línea el
+  producto resuelto, `precio_cliente` de lista, `stock`, la frase real de `entrega` y,
+  si pides nivel de partner o GP, el precio calculado; además totales y los SKUs no
+  resueltos o ambiguos. Si no está disponible en el conector, usa `consultar_producto`
+  y `calcular_precios` ítem por ítem.
 - `consultar_producto({sku})` — acepta SKU **o MPN**. Devuelve `precio_cliente`,
   `stock` (unidades) y `entrega` (la frase real de disponibilidad).
 
@@ -36,11 +43,11 @@ con el fabricante. No lo rellenes con una suposición.
   margen (GP) o, en Axis, con el rebate de un nivel de partner (Autorizado, Silver,
   Gold, Multiregional). El GP acepta `8` u `0.08`. Úsala siempre que pidan un nivel de
   partner, un margen distinto («gold al 8», «a 10% de margen») o el costo, y usa sus
-  precios en el preview. Stock y entrega siguen viniendo de `consultar_producto`.
+  precios en el preview. Stock y entrega siguen viniendo de `consultar_producto` (o de `cotizar_rapido`, que ya trae todo).
 
-**Regla dura:** ninguna línea llega al preview sin haber pasado por
-`consultar_producto`. `buscar_productos` sirve para encontrar; `consultar_producto`
-es lo que se cotiza.
+**Regla dura:** ninguna línea llega al preview sin haber pasado por `cotizar_rapido`
+o `consultar_producto`. `buscar_productos` sirve para encontrar; `cotizar_rapido`
+(o `consultar_producto`) es lo que se cotiza.
 
 Quirk del catálogo: muchos ítems traen `sku: "To Create"`, que significa que aún no
 está codificado en Intcomex. Se escribe tal cual en la columna SKU (así lo hace él
@@ -158,7 +165,7 @@ todavía.
 
 ## Errores que no se perdonan
 
-- Cotizar un precio sin haberlo confirmado con `consultar_producto` en esta sesión
+- Cotizar un precio sin haberlo confirmado con `cotizar_rapido` o `consultar_producto` en esta sesión
   (o con `calcular_precios` cuando pidieron otro nivel de partner o margen).
 - Omitir el estado de disponibilidad de una línea.
 - Itemizar un requerimiento vago sin relevamiento ni supuestos declarados.

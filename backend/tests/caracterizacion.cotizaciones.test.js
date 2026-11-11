@@ -32,6 +32,10 @@ const CLIENTE = { id: 2, usuario: 'cliente', role: 'client' };
 const OTRO_CLIENTE = { id: 4, usuario: 'otro', role: 'client' };
 const STOCK_ADMIN = { id: 3, usuario: 'nsteck', role: 'cot_stock_admin' };
 
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 const dbRouter = (tabla) => (sql, params) => {
   for (const [coincide, salida] of tabla) {
     if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
@@ -41,7 +45,10 @@ const dbRouter = (tabla) => (sql, params) => {
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 
 const sesionActiva = () => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd' }] }],
+  // Sesion + rol actual del usuario en la BD (por id; coincide con el claim de los tokens de prueba).
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({
+    rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd', role: rolDeId(p[0]) }]
+  })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 
@@ -116,9 +123,8 @@ describe('POST /api/cotizaciones', () => {
     // costo = 1000 * 1.011 / 0.95 * 1.12 = 1191.9158 ; precio = costo / 0.85 = 1402.25
     const cab = insertCotizacion(llamadas).params;
     expect(cab[0]).toBe('Ana');
-    // SOSPECHOSO (centavo): la cabecera suma unitarios SIN redondear (2804.5078 -> 2804.51)
-    // mientras la linea guarda 1402.25 * 2 = 2804.5. Cabecera y suma de lineas difieren 1 centavo.
-    expect(cab[4]).toBe(2804.51); // total recalculado, no el "1" enviado
+    // La cabecera es la suma de los totales de linea ya redondeados: 1402.25 * 2 = 2804.5.
+    expect(cab[4]).toBe(2804.5); // total recalculado, no el "1" enviado
     expect(cab[9]).toBe(2); // usuario_id del token
     expect(cab[10]).toBe('cliente');
     expect(cab[11]).toBe('revision'); // estado inicial
@@ -133,6 +139,46 @@ describe('POST /api/cotizaciones', () => {
     expect(it[COL.gp]).toBeCloseTo(0.15, 3);
     expect(llamadas.map((l) => l.sql)).toEqual(expect.arrayContaining(['BEGIN', 'COMMIT']));
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  test('cliente: el total de la cabecera es exactamente la suma de los totales de linea guardados (sin deriva de centavos)', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear({
+      usuarioRow: { gp: 0.15, gp_qnap: null, gp_axis: 0.2, partner_category: 'Partner Gold' },
+      productos: [PRODUCTO_QNAP, PRODUCTO_AXIS, { ...PRODUCTO_QNAP, id: 4, precio_disty: 333.33 }]
+    }));
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
+      cliente: CLIENTE_BODY,
+      items: [
+        { producto_id: 3, cantidad: 3 },
+        { producto_id: 8, cantidad: 7 },
+        { producto_id: 4, cantidad: 11 }
+      ]
+    });
+
+    expect(res.status).toBe(201);
+    const params = insertItems(llamadas).params;
+    const porFila = params.length / 3;
+    expect(Number.isInteger(porFila)).toBe(true);
+    const totales = [0, 1, 2].map((i) => params[i * porFila + COL.precio_total]);
+    const centavos = totales.reduce((s, t) => s + Math.round(t * 100), 0);
+    expect(insertCotizacion(llamadas).params[4]).toBe(centavos / 100);
+  });
+
+  test('precios libres solo con el rol actual de la BD: un cliente (id 2) con claim "admin" igual recibe precios recalculados', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), { id: 2, usuario: 'cliente', role: 'admin' }).send({
+      cliente: CLIENTE_BODY,
+      total: 1,
+      items: [{ producto_id: 3, cantidad: 2, precio_unitario: 1 }]
+    });
+
+    expect(res.status).toBe(201);
+    expect(insertCotizacion(llamadas).params[4]).toBe(2804.5);
+    expect(insertItems(llamadas).params[COL.precio_unitario]).toBe(1402.25);
   });
 
   test('cliente con gp_qnap propio usa ese gp; con gp > 1 lo interpreta como porcentaje', async () => {
@@ -226,20 +272,47 @@ describe('POST /api/cotizaciones', () => {
     expect(res.status).toBe(401);
   });
 
-  test('SOSPECHOSO: cliente con cantidad negativa => total NEGATIVO en la cabecera, mientras la linea se guarda con cantidad 1 y total positivo', async () => {
-    mockQuery.mockImplementation(dbRouter(sesionActiva()));
-    const { llamadas } = transaccion(handlerCrear());
+  test.each([
+    ['negativa', -2],
+    ['cero', 0],
+    ['decimal', 1.5],
+    ['texto no numerico', 'abc'],
+    ['texto decimal', '2.5'],
+    ['texto vacio', '']
+  ])('cantidad %s => 400 y no se abre transaccion (cliente, admin y cot_stock_admin)', async (_nombre, cantidad) => {
+    for (const user of [CLIENTE, ADMIN, STOCK_ADMIN]) {
+      mockQuery.mockImplementation(dbRouter(sesionActiva()));
+      mockConnect.mockReset();
+      const res = await conAuth(request(app).post('/api/cotizaciones'), user).send({
+        cliente: CLIENTE_BODY,
+        items: [{ producto_id: 3, cantidad }]
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Payload invalido');
+      expect(mockConnect).not.toHaveBeenCalled();
+    }
+  });
 
+  test('cantidad invalida en el alias "cant" tambien se rechaza', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
     const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
       cliente: CLIENTE_BODY,
-      items: [{ producto_id: 3, cantidad: -2 }]
+      items: [{ producto_id: 3, cant: -1 }]
     });
+    expect(res.status).toBe(400);
+  });
 
+  test('flujo MCP: solo producto_id y cantidad enteros (numero o texto) siguen funcionando; sin cantidad vale 1', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+    const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
+      cliente: CLIENTE_BODY,
+      items: [{ producto_id: 3, cantidad: 2 }, { producto_id: 3, cantidad: '4' }, { producto_id: 3 }]
+    });
     expect(res.status).toBe(201);
-    expect(insertCotizacion(llamadas).params[4]).toBe(-2804.51);
-    const it = insertItems(llamadas).params;
-    expect(it[COL.cantidad]).toBe(1);
-    expect(it[COL.precio_total]).toBe(1402.25);
+    const params = insertItems(llamadas).params;
+    const porFila = params.length / 3;
+    expect([0, 1, 2].map((k) => params[k * porFila + COL.cantidad])).toEqual([2, 4, 1]);
   });
 
   test('cliente con items vacios: se guarda cotizacion con total 0 y sin lineas (201)', async () => {
@@ -576,5 +649,20 @@ describe('DELETE /api/cotizaciones/:id', () => {
   test('sin token: 401', async () => {
     const res = await request(app).delete('/api/cotizaciones/77');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('PUT /api/cotizaciones/:id (cantidades)', () => {
+  test.each([[0], [-3], [2.5], ['x']])('cantidad %p en una linea => 400 sin tocar la base', async (cantidad) => {
+    mockQuery.mockImplementation(dbRouter([
+      ...sesionActiva(),
+      [incluye('SELECT role FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin' }] }]
+    ]));
+    const res = await conAuth(request(app).put('/api/cotizaciones/5'), ADMIN).send({
+      items: [{ cantidad, precio_unitario: 100 }]
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Payload invalido');
+    expect(mockConnect).not.toHaveBeenCalled();
   });
 });

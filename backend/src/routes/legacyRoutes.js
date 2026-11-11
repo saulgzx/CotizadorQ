@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const PDFDocument = require('pdfkit');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
@@ -16,6 +17,7 @@ const {
   validateProductoInput,
   validateBulkProductosInput,
   validatePasswordInput,
+  validateOwnPasswordInput,
   validateCreateUserInput,
   validateCotizacionInput,
   validateCotizacionEditInput
@@ -67,6 +69,9 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
+// /api/login solo recibe usuario y contrasena: limite chico para no parsear cuerpos
+// grandes en una ruta publica. El parser global de abajo no vuelve a parsear (req._body).
+app.use('/api/login', express.json({ limit: '2kb' }));
 app.use(
   express.json({
     limit: '10mb',
@@ -77,7 +82,7 @@ app.use(
   })
 );
 
-// ConexiÃ³n a PostgreSQL
+// Conexión a PostgreSQL
 // DATABASE_SSL_REJECT_UNAUTHORIZED=true exige certificado válido del servidor de BD
 // (recomendado; requiere que el proveedor use un certificado verificable o configurar su CA).
 const pool = new Pool({
@@ -245,7 +250,7 @@ const COLUMN_MAP = {
   marca: ['marca', 'brand', 'fabricante'],
   sku: ['sku', 'codigo', 'code', 'partnumber', 'part number', 'part no', 'item code', 'item', 'pn'],
   mpn: ['mpn', 'model', 'modelo', 'part number manufacturer', 'manufacturer part number'],
-  desc: ['descripciÃ³n', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
+  desc: ['descripción', 'descripcion', 'description', 'producto', 'nombre', 'product name', 'item description'],
   precio: ['pricedisty', 'precio disty', 'preciodisty', 'precio', 'cost', 'price'],
   gp: ['gp', 'margen', 'margin', 'gp (%)', 'gp %'],
   tiempo: ['tiempo', 'entrega', 'leadtime', 'tiempo entrega']
@@ -890,7 +895,7 @@ const getStockColumnIndexes = (headers) => {
 const getStockCatalogColumnIndexes = (headers) => {
   const idxImage = findHeaderIndex(headers, ['Product Image', 'Imagen', 'Image']);
   const idxBrand = findHeaderIndex(headers, ['Manuf. Brand', 'Brand', 'Marca', 'Manufacturer']);
-  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'DescripciÃ³n', 'Descripcion', 'Description']);
+  const idxName = findHeaderIndex(headers, ['Product Name Trax', 'Product Name', 'Descripción', 'Descripcion', 'Description']);
   const idxSku = findHeaderIndex(headers, ['Central SKU', 'SKU', 'Sku']);
   const idxMpn = findHeaderIndex(headers, ['MPN', 'Model', 'Modelo']);
   const idxQty = findHeaderIndex(headers, ['OH Quantity', 'OH Qty', 'OHQ', 'Quantity', 'Qty', 'Stock', 'On Hand']);
@@ -1482,6 +1487,8 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS gp_axis DECIMAL(5,4) DEFAULT 0.15;`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS partner_category VARCHAR(50) DEFAULT 'Partner Autorizado';`);
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
+    // Cuentas desactivables por el admin. Las existentes quedan activas (DEFAULT true).
+    await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true;`);
     // Sin usuarios sembrados desde el codigo: las cuentas se crean por SQL o desde
     // /api/usuarios (ver SECURITY.md). Las cuentas ya existentes en la BD no se tocan.
 
@@ -1720,8 +1727,11 @@ const recordLoginAttempt = async ({ userId, usuario, success, req, sessionId, de
 };
 
 const upsertSession = async (user, req) => {
-  const { sessionId, deviceId } = getSessionHeaders(req);
-  if (!sessionId) return { sessionId: null, revokedSessions: [] };
+  const headers = getSessionHeaders(req);
+  const { deviceId } = headers;
+  // Si el cliente no manda X-Session-Id, el login genera uno y lo devuelve en
+  // session.session_id: las rutas protegidas solo aceptan sesiones creadas aqui.
+  const sessionId = headers.sessionId || `srv-${crypto.randomUUID()}`;
   const ip = getRequestIp(req);
   const userAgent = req.headers['user-agent'] || '';
   const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(user?.role));
@@ -1783,17 +1793,31 @@ const upsertSession = async (user, req) => {
   return { sessionId, revokedSessions };
 };
 
-const validateSession = async (userId, sessionId, req, role) => {
+// usuarios.activo puede llegar como boolean (SELECT *) o como texto (to_jsonb ->>).
+// Solo un false explicito desactiva: sin columna o NULL la cuenta sigue activa.
+const isCuentaInactiva = (activo) => activo === false || activo === 'false';
+
+// Valida la sesion y, en la misma consulta, trae el rol ACTUAL del usuario desde la
+// BD: requireAuth lo deja en req.user.role, asi un cambio de rol rige de inmediato
+// y no cuando vence el JWT. Usuario borrado => sin filas => sesion invalida.
+const validateSession = async (userId, sessionId, req) => {
   if (!sessionId) return { ok: false, reason: 'Sesion requerida' };
-  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const result = await pool.query(
-    'SELECT id, revoked, last_seen, device_id FROM sesiones WHERE user_id = $1 AND session_id = $2',
+    // activo se lee via to_jsonb para no fallar si la columna aun no existe (initDB corre
+    // despues de abrir HTTP): ausente o NULL cuenta como cuenta activa.
+    `SELECT s.id, s.revoked, s.last_seen, s.device_id, u.role, to_jsonb(u)->>'activo' AS activo
+     FROM sesiones s JOIN usuarios u ON u.id = s.user_id
+     WHERE s.user_id = $1 AND s.session_id = $2`,
     [userId, sessionId]
   );
   if (result.rows.length === 0) {
-    return { ok: false, reason: 'missing' };
+    // Sesion que nunca se creo en un login (o ya purgada): no se crea al vuelo.
+    return { ok: false, reason: 'Sesion invalida' };
   }
   const session = result.rows[0];
+  if (isCuentaInactiva(session.activo)) return { ok: false, reason: 'Cuenta desactivada' };
+  const role = String(session.role || '').toLowerCase();
+  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const lastSeen = session.last_seen ? new Date(session.last_seen) : null;
   if (session.revoked) return { ok: false, reason: 'Sesion revocada' };
   if (!lastSeen || lastSeen.getTime() < ttlDate.getTime()) {
@@ -1811,17 +1835,14 @@ const validateSession = async (userId, sessionId, req, role) => {
      WHERE id = $1`,
     [session.id, ip || null, userAgent || null, deviceId || session.device_id || null]
   );
-  return { ok: true };
+  return { ok: true, role };
 };
 
 const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({
   pool,
   jwtSecret: JWT_SECRET,
   getSessionHeaders,
-  validateSession,
-  onMissingSession: async (user, req) => {
-    await upsertSession({ id: user.id, role: user.role }, req);
-  }
+  validateSession
 });
 
 // Los fallos de un usuario se cuentan por usuario + IP: asi un tercero no puede dejar
@@ -1858,6 +1879,14 @@ const resolveCotizacionOwnerId = async (req) => {
 };
 
 const authenticateToken = requireAuth;
+
+// Hash de relleno para el login de un usuario que no existe: se compara igual contra
+// el, asi la respuesta tarda lo mismo y no revela por tiempo que usuarios existen.
+// Se genera al arrancar con una contrasena aleatoria (nunca coincide) y el mismo
+// costo que los hashes reales.
+const loginDummyHashPromise = Promise.resolve()
+  .then(() => bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10))
+  .catch(() => null);
 // ==================== RUTAS ====================
 
 // Health check
@@ -1871,23 +1900,11 @@ app.get('/', async (req, res) => {
     commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null,
     deploy: process.env.RAILWAY_DEPLOYMENT_ID || null
   };
-  // Diagnóstico de migración del folio (solo con ?diag=1, para no consultar la DB en cada health-check).
-  if (req.query.diag === '1') {
-    try {
-      const col = await pool.query(
-        `SELECT 1 FROM information_schema.columns WHERE table_name = 'cotizaciones' AND column_name = 'numero' LIMIT 1`
-      );
-      payload.numero_column = col.rows.length > 0;
-      try {
-        const seq = await pool.query(`SELECT last_value FROM cotizacion_numero_seq`);
-        payload.numero_seq_last = seq.rows[0]?.last_value != null ? String(seq.rows[0].last_value) : null;
-      } catch {
-        payload.numero_seq_last = 'no-seq';
-      }
-    } catch (error) {
-      payload.diag_error = error.message;
-    }
-  }
+  // Solo un booleano global (sin detalle); omitido hasta que haya un primer chequeo.
+  const ultimoChequeo = monitorIntegraciones.ultimo();
+  if (ultimoChequeo) payload.integraciones_ok = ultimoChequeo.ok;
+  // El diagnóstico del folio (?diag=1: columna y secuencia, o el error de la DB) ya no se
+  // expone en esta ruta pública; consultar la base directamente si hace falta.
   res.json(payload);
 });
 
@@ -1904,8 +1921,16 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
     const result = await pool.query('SELECT * FROM usuarios WHERE usuario = $1', [usuario]);
 
     if (result.rows.length === 0) {
+      const dummyHash = await loginDummyHashPromise;
+      if (dummyHash) {
+        try {
+          await bcrypt.compare(password, dummyHash);
+        } catch {
+          // solo importa el tiempo invertido
+        }
+      }
       await recordLoginAttempt({ userId: null, usuario, success: false, req, sessionId, deviceId });
-      return res.status(401).json({ error: 'Usuario o contrase??a incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
     const user = result.rows[0];
@@ -1913,7 +1938,13 @@ app.post('/api/login', loginRateLimiter, validateLoginInput, async (req, res) =>
 
     if (!validPassword) {
       await recordLoginAttempt({ userId: user.id, usuario: user.usuario, success: false, req, sessionId, deviceId });
-      return res.status(401).json({ error: 'Usuario o contrase??a incorrectos' });
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+
+    if (isCuentaInactiva(user.activo)) {
+      // Solo se informa a quien sabe la contrasena: para el resto es el 401 de siempre.
+      await recordLoginAttempt({ userId: user.id, usuario: user.usuario, success: false, req, sessionId, deviceId });
+      return res.status(403).json({ error: 'Cuenta desactivada. Contacta al administrador.' });
     }
 
     const sessionInfo = await upsertSession(user, req);
@@ -1963,7 +1994,7 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
     await pool.query('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id = $2', [req.user.id, sessionId]);
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error cerrando sesi?n:', error);
+    console.error('Error cerrando sesión:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2041,7 +2072,7 @@ app.get('/api/usuarios/:id/login-logs', authenticateToken, requireAdmin, async (
   }
 });
 
-// SESIONES - Revocar sesi??n (admin)
+// SESIONES - Revocar sesión (admin)
 app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -2051,7 +2082,7 @@ app.post('/api/sessions/:sessionId/revoke', authenticateToken, requireAdmin, asy
     }
     res.json({ ok: true, session_id: result.rows[0].session_id });
   } catch (error) {
-    console.error('Error revocando sesi?n:', error);
+    console.error('Error revocando sesión:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -2318,7 +2349,7 @@ app.post('/api/session/location', authenticateToken, async (req, res) => {
 // USUARIOS - Listar
 app.get('/api/usuarios', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at FROM usuarios ORDER BY id DESC');
+    const result = await pool.query('SELECT id, usuario, nombre, empresa, logo_url, role, gp, gp_qnap, gp_axis, partner_category, intcomex_profile, created_at, activo FROM usuarios ORDER BY id DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Error obteniendo usuarios:', error);
@@ -2462,39 +2493,99 @@ app.patch('/api/usuarios/me/partner-category', authenticateToken, async (req, re
   }
 });
 
-// USUARIOS - Resetear contrasena
-app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput, async (req, res) => {
+// Revoca las sesiones de un usuario, salvo (opcional) la sesion desde la que se pide.
+const revokeUserSessions = async (userId, exceptSessionId = null) => {
+  if (exceptSessionId) {
+    await pool.query(
+      'UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id <> $2 AND revoked = false',
+      [userId, exceptSessionId]
+    );
+    return;
+  }
+  await pool.query('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND revoked = false', [userId]);
+};
+
+// USUARIOS - Cambiar la propia contrasena (exige la actual; cierra las demas sesiones)
+app.patch('/api/usuarios/me/password', authenticateToken, validateOwnPasswordInput, async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'ContraseÃ±a requerida' });
+    const { password, password_actual: passwordActual } = req.body;
+    const actual = await pool.query('SELECT password FROM usuarios WHERE id = $1', [userId]);
+    if (actual.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    // 400 y no 401: el frontend trata cualquier 401 como sesion vencida y desloguea.
+    const valida = await bcrypt.compare(passwordActual, actual.rows[0].password || '');
+    if (!valida) return res.status(400).json({ error: 'La contraseña actual no es correcta' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, userId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+    const { sessionId } = getSessionHeaders(req);
+    await revokeUserSessions(userId, sessionId);
     res.json({ ok: true });
   } catch (error) {
-    console.error('Error actualizando contraseÃ±a propia:', error);
+    console.error('Error actualizando contraseña propia:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
+// USUARIOS - Resetear contrasena (admin): revoca todas las sesiones de ese usuario.
+// Si el admin se la cambia a si mismo por esta ruta, conserva la sesion desde la que lo hace.
 app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validatePasswordInput, async (req, res) => {
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contraseï¿½a requerida' });
+    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
-    res.json({ message: 'Contraseï¿½a actualizada' });
+    const targetId = result.rows[0].id;
+    const esPropio = Number(targetId) === Number(req.user.id);
+    await revokeUserSessions(targetId, esPropio ? getSessionHeaders(req).sessionId : null);
+    res.json({ message: 'Contraseña actualizada' });
   } catch (error) {
-    console.error('Error actualizando contraseï¿½a:', error);
+    console.error('Error actualizando contraseña:', error);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// USUARIOS - Activar / desactivar (admin). Al desactivar se revocan sus sesiones.
+// Un admin no puede desactivarse a si mismo ni dejar el sistema sin admins activos.
+app.patch('/api/usuarios/:id/activo', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { activo } = req.body || {};
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Usuario invalido' });
+    if (typeof activo !== 'boolean') return res.status(400).json({ error: 'activo debe ser true o false' });
+    if (!activo && id === Number(req.user.id)) {
+      return res.status(400).json({ error: 'No puedes desactivar tu propia cuenta' });
+    }
+    // Una sola sentencia: la condicion del "ultimo admin activo" se evalua junto con el UPDATE.
+    const result = await pool.query(
+      `UPDATE usuarios SET activo = $2
+       WHERE id = $1
+         AND ($2 OR LOWER(COALESCE(role, '')) <> 'admin' OR EXISTS (
+           SELECT 1 FROM usuarios otro
+           WHERE otro.id <> $1 AND LOWER(COALESCE(otro.role, '')) = 'admin' AND otro.activo = true
+         ))
+       RETURNING id, usuario, role, activo`,
+      [id, activo]
+    );
+    if (result.rows.length === 0) {
+      const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [id]);
+      if (existe.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+      return res.status(400).json({ error: 'Debe quedar al menos un administrador activo' });
+    }
+    if (!activo) await revokeUserSessions(id);
+    return res.json(result.rows[0]);
+  } catch (error) {
+    logError(req, error, 'usuario_activo_failed');
+    return res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -2513,7 +2604,7 @@ app.delete('/api/usuarios/:id', authenticateToken, requireAdmin, async (req, res
   }
 });
 
-// SHEETS - Listar pesta?as (admin)
+// SHEETS - Listar pestañas (admin)
 app.get('/api/sheets/tabs', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
@@ -2529,7 +2620,7 @@ app.get('/api/sheets/tabs', authenticateToken, requireAdmin, async (req, res) =>
     })).filter(t => t.title);
     res.json({ spreadsheetId, tabs });
   } catch (error) {
-    console.error('Error listando pesta?as:', error);
+    console.error('Error listando pestañas:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -3003,8 +3094,8 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, as
     invalidateCacheByPrefix([CACHE_KEY_OSO_ORDERS]);
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error guardando bo_meta:', error);
-    res.status(500).json({ error: 'Error del servidor', detail: error?.message || String(error) });
+    logError(req, error, 'bo_meta_update_failed');
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -3108,9 +3199,11 @@ const leerStockAgregado = async () => {
  */
 const COSTOS_CHILE_TIMEOUT_MS = 4000;
 const CACHE_KEY_COSTOS_CHILE_FALLO = 'cache:stock:costos-fallo';
-const leerCostosChile = async () => {
+// Devuelve { costos, motivo }: `costos` es null si no hay costo real y `motivo` dice por
+// que (timeout | fallo_reciente | sheets_no_configurado | error_lectura), sin detalles.
+const leerCostosChileConMotivo = async () => {
   // Tras un fallo reciente no se reintenta en cada request: el catálogo no espera a Sheets.
-  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) return null;
+  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) return { costos: null, motivo: 'fallo_reciente' };
   const lectura = leerStockAgregado();
   let timer;
   const limite = new Promise((resolve) => {
@@ -3122,17 +3215,18 @@ const leerCostosChile = async () => {
       // La lectura sigue en segundo plano y llena la cache para el próximo request.
       lectura.catch(() => {});
       logger.warn({ event: 'costo_chile_timeout' }, 'Stock lento; se cotiza con el costo calculado');
-      return null;
+      return { costos: null, motivo: 'timeout' };
     }
-    return mapaCostosChile(resultado);
+    return { costos: mapaCostosChile(resultado), motivo: null };
   } catch (error) {
     cacheSet(CACHE_KEY_COSTOS_CHILE_FALLO, true, 60 * 1000);
     logger.warn({ event: 'costo_chile_read_failed', err: compactErrorForLog(error) }, 'Sin costo real de stock; se usa el costo calculado');
-    return null;
+    return { costos: null, motivo: error?.status === 400 ? 'sheets_no_configurado' : 'error_lectura' };
   } finally {
     clearTimeout(timer);
   }
 };
+const leerCostosChile = async () => (await leerCostosChileConMotivo()).costos;
 
 // STOCK - disponible por MPN para entrega inmediata (neto de OSO, filas sumadas)
 app.get('/api/stock', authenticateToken, async (req, res) => {
@@ -3265,7 +3359,9 @@ app.get('/api/productos', authenticateToken, async (req, res) => {
     if (origen) {
       params.push(origen);
       whereParts.push(`origen = $${params.length}`);
-    } else {
+    }
+    // Solo el admin puede ver productos dados de baja (y solo al filtrar por origen).
+    if (!origen || !isAdmin) {
       whereParts.push('activo = true');
     }
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
@@ -3367,7 +3463,7 @@ app.post('/api/precios/calcular', authenticateToken, async (req, res) => {
     const ids = [...new Set(items.map((i) => Number(i?.producto_id)).filter((id) => Number.isInteger(id) && id > 0))];
     const filas = ids.length ? (await pool.query('SELECT * FROM productos WHERE id = ANY($1::int[])', [ids])).rows : [];
     const porId = new Map(filas.map((p) => [Number(p.id), p]));
-    const costosChile = await leerCostosChile();
+    const { costos: costosChile, motivo: costoChileMotivo } = await leerCostosChileConMotivo();
 
     const lineas = [];
     const noEncontrados = [];
@@ -3394,6 +3490,7 @@ app.post('/api/precios/calcular', authenticateToken, async (req, res) => {
       partner_category: nivel || 'todos',
       gp_por_defecto: gpPorDefecto,
       costo_chile_disponible: costosChile !== null,
+      ...(costosChile === null ? { costo_chile_motivo: costoChileMotivo } : {}),
       lineas,
       no_encontrados: noEncontrados
     });
@@ -3563,7 +3660,13 @@ app.get('/api/sync/status', authenticateToken, async (req, res) => {
        FROM sync_logs
        ORDER BY origen, created_at DESC`
     );
-    res.json({ syncs: result.rows });
+    if (req.user?.role === 'admin') {
+      return res.json({ syncs: result.rows });
+    }
+    // Resto de usuarios: solo estado y fecha, sin detalle de errores ni avisos internos.
+    return res.json({
+      syncs: result.rows.map(({ origen, status, created_at }) => ({ origen, status, created_at }))
+    });
   } catch (error) {
     logError(req, error, 'sync_status_failed');
     res.status(500).json({ error: 'Error del servidor' });
@@ -3639,19 +3742,18 @@ app.delete('/api/productos/:id', authenticateToken, requireCotizadorStockAdmin, 
 
 // COTIZACIONES - Guardar
 app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async (req, res) => {
+  const { cliente, items, total } = req.body;
+  // Validar entrada mínima antes de tomar una conexión del pool.
+  if (!cliente || typeof cliente !== 'object') {
+    return res.status(400).json({ error: 'Cliente requerido' });
+  }
   const client = await pool.connect();
   try {
-    const { cliente, items, total } = req.body;
     const usuarioId = req.user?.id || null;
     const usuarioName = req.user?.usuario || null;
     const isAdmin = canManageCotizadorStock(req.user?.role);
     let totalFinal = total;
     let itemsFinal = items;
-
-    // Validar entrada mÃ­nima
-    if (!cliente || typeof cliente !== 'object') {
-      return res.status(400).json({ error: 'Cliente requerido' });
-    }
 
     await client.query('BEGIN');
     if (!isAdmin) {
@@ -3660,7 +3762,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
       const gpQnap = parseGpValue(userRow.gp_qnap ?? userRow.gp ?? 0.15, 0.15);
       const gpAxis = parseGpValue(userRow.gp_axis ?? userRow.gp ?? 0.15, 0.15);
       const partnerCategory = userRow.partner_category || 'Partner Autorizado';
-      let totalSum = 0;
       const computedItems = [];
       const requestedItems = Array.isArray(items) ? items : [];
       const requestedProductIds = [...new Set(
@@ -3697,7 +3798,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
           ? calcularPrecioClienteAxis(precioDisty, gpUsed, partnerRebate, 0, costoReal)
           : calcularPrecioClienteQnap(precioDisty, gpUsed, costoReal);
         const precioTotal = precioUnitario * cantidad;
-        totalSum += precioTotal;
         computedItems.push({
           producto_id: productoId,
           marca: producto.marca || '',
@@ -3718,9 +3818,18 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
         });
       }
       itemsFinal = computedItems;
-      totalFinal = Number(totalSum.toFixed(2));
     }
-    
+
+    // Lineas normalizadas (unitario redondeado, total = unitario * cantidad redondeado).
+    const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
+      normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
+    );
+    if (!isAdmin) {
+      // La cabecera es exactamente la suma de los totales de linea ya redondeados (en centavos).
+      const centavos = rowsToInsert.reduce((suma, row) => suma + Math.round(row.precio_total * 100), 0);
+      totalFinal = centavos / 100;
+    }
+
     // Crear cotizacion
     const cotResult = await client.query(
       `INSERT INTO cotizaciones (
@@ -3757,9 +3866,6 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     const cotizacionId = cotResult.rows[0].id;
     
     // Insertar items en batch, con costo y rebate para el margen del admin.
-    const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
-      normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
-    );
     await insertarItems(client, cotizacionId, rowsToInsert);
 
     await client.query('COMMIT');
@@ -3799,7 +3905,7 @@ app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin
       [normalized, id]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'CotizaciÃ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     res.json(result.rows[0]);
   } catch (error) {
@@ -4111,11 +4217,11 @@ app.delete('/api/cotizaciones/:id', authenticateToken, requireOwnerOrAdmin(resol
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'CotizaciÃƒÂ³n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
 
     await client.query('COMMIT');
-    res.json({ message: 'CotizaciÃƒÂ³n eliminada', cotizacion: result.rows[0] });
+    res.json({ message: 'Cotización eliminada', cotizacion: result.rows[0] });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -4174,7 +4280,11 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
       proyecto: cliente?.proyecto || cliente?.telefono || 'N/A',
       fecha: payload?.created_at || payload?.fecha || new Date().toISOString()
     };
-    const pdfRole = String(payload?.usuario_role || req.user?.role || '').toLowerCase();
+    // usuario_role del body es el rol de quien creo la cotizacion y solo decide las notas
+    // al pie. Un admin puede indicarlo (baja PDFs de cotizaciones de otros); el resto usa
+    // siempre su propio rol y no puede fijarlo.
+    const rolPropio = String(req.user?.role || '').toLowerCase();
+    const pdfRole = rolPropio === 'admin' ? String(payload?.usuario_role || rolPropio).toLowerCase() : rolPropio;
     const isClient = pdfRole === 'client';
     const isAxisProfile = pdfRole === COTIZADOR_STOCK_ADMIN_ROLE;
     const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa, numero);
@@ -4193,8 +4303,7 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     return res.send(pdfBuffer);
   } catch (error) {
     logError(req, error, 'cotizacion_pdf_failed');
-    const detail = String(error?.message || '').slice(0, 220);
-    return res.status(500).json({ error: 'Error generando PDF', detail });
+    return res.status(500).json({ error: 'Error generando PDF' });
   }
 });
 
@@ -4207,7 +4316,7 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
       ? await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1', [id])
       : await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1 AND c.usuario_id = $2', [id, req.user.id]);
     if (cotizacion.rows.length === 0) {
-      return res.status(404).json({ error: 'Cotizaci?n no encontrada' });
+      return res.status(404).json({ error: 'Cotización no encontrada' });
     }
     
     const items = await pool.query(
@@ -4222,7 +4331,7 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
       resumen: resumenCotizacion(items.rows, req.user?.role)
     });
   } catch (error) {
-    console.error('Error obteniendo cotizaci?n:', error);
+    console.error('Error obteniendo cotización:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
@@ -4278,6 +4387,68 @@ const requireUsuarioIA = (req, res, next) =>
         .status(403)
         .json({ error: 'El asistente IA no está habilitado para tu usuario' });
 
+// --- Estado de integraciones (solo admin) ----------------------------------
+// Chequeo periodico de PostgreSQL, Google Sheets y costo Chile real. La lectura de
+// Sheets va SIN cache y con un cliente nuevo: si las credenciales se rompen, esto lo
+// ve aunque stock/precios sigan sirviendo datos cacheados.
+const integraciones = require('../services/integraciones');
+
+const chequearSheets = async () => {
+  const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+  if (!spreadsheetId) return { noConfigurado: true, detalle: 'GOOGLE_SHEETS_ID no configurado' };
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+    throw new Error('Faltan credenciales de Google Sheets');
+  }
+  const sheets = getSheetsClient(true);
+  const { data } = await withGoogleRetry('sheets.check', () =>
+    sheets.spreadsheets.values.get({ spreadsheetId, range: `${SHEETS_TAB_STOCK}!1:1` })
+  );
+  const encabezados = (data?.values?.[0] || []).length;
+  if (!encabezados) throw new Error(`La pestaña ${SHEETS_TAB_STOCK} no tiene encabezados`);
+  return `pestaña ${SHEETS_TAB_STOCK} legible (${encabezados} columnas)`;
+};
+
+const chequearCostoChile = async () => {
+  if (cacheGet(CACHE_KEY_COSTOS_CHILE_FALLO)) {
+    throw new Error('fallo reciente leyendo el costo Chile; los precios usan el costo estimado');
+  }
+  const mapa = mapaCostosChile(await leerStockAgregado());
+  const total = mapa.porMpn.size + mapa.porSku.size;
+  if (!total) throw new Error('el stock no trae filas con costo real');
+  return `${mapa.porMpn.size} productos con costo real`;
+};
+
+const monitorIntegraciones = integraciones.crearMonitor({
+  chequeo: integraciones.crearChequeo({
+    comprobaciones: [
+      { nombre: integraciones.NOMBRES.POSTGRES, ejecutar: async () => { await pool.query('SELECT 1'); return 'responde'; } },
+      { nombre: integraciones.NOMBRES.SHEETS, ejecutar: chequearSheets },
+      { nombre: integraciones.NOMBRES.COSTO_CHILE, depende: integraciones.NOMBRES.SHEETS, ejecutar: chequearCostoChile }
+    ]
+  }),
+  aviso: iaWhatsApp.habilitado()
+    ? integraciones.crearAvisoIntegraciones({ enviar: (texto) => iaWhatsApp.avisar(texto), logger })
+    : null,
+  logger
+});
+
+// GET /api/estado/integraciones            ultimo resultado en memoria
+// GET /api/estado/integraciones?forzar=1   corre un chequeo nuevo y lo devuelve
+app.get('/api/estado/integraciones', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const forzar = ['1', 'true'].includes(String(req.query.forzar || '').toLowerCase());
+    const resultado = forzar ? await monitorIntegraciones.revisar() : monitorIntegraciones.ultimo();
+    res.json(
+      resultado
+        ? { chequeado: true, ...resultado }
+        : { chequeado: false, ok: null, revisado_en: null, integraciones: [] }
+    );
+  } catch (error) {
+    logError(req, error, 'estado_integraciones_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
   const pendientes = asistenteIA.faltantes(iaConfig);
   const permitido = asistenteIA.usuarioPermitido(iaConfig, req.user?.usuario);
@@ -4291,6 +4462,11 @@ app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
     modelo: iaConsultas.modo() === 'api' ? iaConfig.model : null
   });
 });
+
+// Tiempos de las ultimas consultas del agente: solo numeros y nombres de herramienta.
+app.get('/api/ia/metricas', authenticateToken, requireAdmin, (req, res) =>
+  res.json(iaConsultas.metricas({ limite: req.query.limite }))
+);
 
 app.post(
   '/api/ia/consultas',
@@ -4418,7 +4594,8 @@ app.post(
   (req, res) => {
     const ok = iaConsultas.terminarAgente(req.params.id, {
       texto: req.body?.texto,
-      error: req.body?.error
+      error: req.body?.error,
+      metricas: req.body?.metricas
     });
     return ok
       ? res.json({ ok: true })
@@ -4485,6 +4662,8 @@ const startServer = async (port = PORT, options = {}) => {
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
+    // Chequeo de integraciones en segundo plano: nunca bloquea ni tumba el arranque.
+    monitorIntegraciones.iniciar({ intervaloMs: integraciones.leerConfigChequeo().intervaloMs });
     await ensureCotizacionNumero();
     await ensureCotizacionEdicion(pool);
     try {

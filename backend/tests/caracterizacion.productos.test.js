@@ -33,6 +33,10 @@ const ADMIN = { id: 1, usuario: 'admin', role: 'admin' };
 const CLIENTE = { id: 2, usuario: 'cliente', role: 'client' };
 const STOCK_ADMIN = { id: 3, usuario: 'nsteck', role: 'cot_stock_admin' };
 
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 const dbRouter = (tabla) => (sql, params) => {
   for (const [coincide, salida] of tabla) {
     if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
@@ -42,7 +46,10 @@ const dbRouter = (tabla) => (sql, params) => {
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 
 const sesionActiva = () => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd' }] }],
+  // Sesion + rol actual del usuario en la BD (por id; coincide con el claim de los tokens de prueba).
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({
+    rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd', role: rolDeId(p[0]) }]
+  })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 const rolDb = (role) => [incluye('SELECT role FROM usuarios WHERE id = $1'), { rows: [{ role }] }];
@@ -120,6 +127,13 @@ describe('GET /api/productos', () => {
     expect(res.body[0].precio_cliente).toBe(677.62);
   });
 
+  test('la visibilidad de costos usa el rol actual de la BD: claim "admin" de un cliente (id 2) no ve precio_disty ni gp', async () => {
+    mockQuery.mockImplementation(catalogoDb());
+    const res = await conAuth(request(app).get('/api/productos'), { id: 2, usuario: 'cliente', role: 'admin' });
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toMatch(/precio_disty|"gp"|rebate/);
+  });
+
   test('admin: recibe las filas completas (precio_disty y gp) mas costo_chile_real', async () => {
     mockQuery.mockImplementation(catalogoDb());
     const res = await conAuth(request(app).get('/api/productos'), ADMIN);
@@ -149,14 +163,22 @@ describe('GET /api/productos', () => {
     expect(calls.params).toEqual([]);
   });
 
-  test('SOSPECHOSO: con ?origen= se pierde el filtro activo = true (un cliente recibe tambien productos dados de baja)', async () => {
+  test('cliente con ?origen= conserva el filtro activo = true', async () => {
     const calls = {};
     mockQuery.mockImplementation(catalogoDb(calls));
     const res = await conAuth(request(app).get('/api/productos?origen=QNAP'), CLIENTE);
     expect(res.status).toBe(200);
+    expect(calls.sql).toContain('WHERE origen = $1 AND activo = true');
+    expect(calls.params).toEqual(['QNAP']);
+  });
+
+  test('admin con ?origen= sigue viendo tambien los productos dados de baja', async () => {
+    const calls = {};
+    mockQuery.mockImplementation(catalogoDb(calls));
+    const res = await conAuth(request(app).get('/api/productos?origen=QNAP'), ADMIN);
+    expect(res.status).toBe(200);
     expect(calls.sql).toContain('WHERE origen = $1');
     expect(calls.sql).not.toContain('activo = true');
-    expect(calls.params).toEqual(['QNAP']);
   });
 
   test('admin con ?page: respuesta paginada { data, meta } (pageSize maximo 200)', async () => {
@@ -298,6 +320,12 @@ describe('POST /api/precios/calcular', () => {
     const res = await calcular(CLIENTE, { items: [] });
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/^Sin permiso/);
+  });
+
+  test('el permiso sale del rol actual en la BD: un token con claim "admin" de un cliente (id 2) recibe 403', async () => {
+    preciosDb([]);
+    const res = await calcular({ id: 2, usuario: 'cliente', role: 'admin' }, { items: [{ producto_id: 3 }] });
+    expect(res.status).toBe(403);
   });
 
   test('items vacio, ausente o no arreglo: 400 "items es obligatorio"', async () => {

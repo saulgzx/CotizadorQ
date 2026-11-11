@@ -29,6 +29,13 @@ rellenes.
 
 - `buscar_productos({texto, origen:"AXIS", limite})` — búsqueda parcial por SKU, MPN o
   descripción. Devuelve `precio_cliente` y `tiempo_entrega` de catálogo, **sin stock**.
+- `cotizar_rapido({items, partner_category, gp_axis, gp_qnap})` — **camino por defecto
+  cuando el pedido ya nombra modelos o SKUs**: con todos los ítems en una sola llamada
+  (`sku` o MPN, `cantidad`, y `gp` por línea si hace falta) devuelve por línea el
+  producto resuelto, `precio_cliente` de lista, `stock`, la frase real de `entrega` y,
+  si pides nivel de partner o GP, el precio calculado; además totales y los SKUs no
+  resueltos o ambiguos. Si no está disponible en el conector, usa `consultar_producto`
+  y `calcular_precios` ítem por ítem.
 - `consultar_producto({sku})` — acepta SKU **o MPN**. Devuelve `precio_cliente`,
   `stock` y `entrega` (la frase real de disponibilidad).
 
@@ -36,9 +43,10 @@ rellenes.
   margen (GP) o, en Axis, con el rebate de un nivel de partner (Autorizado, Silver,
   Gold, Multiregional). El GP acepta `8` u `0.08`. Úsala siempre que pidan un nivel de
   partner, un margen distinto («gold al 8», «a 10% de margen») o el costo, y usa sus
-  precios en el preview. Stock y entrega siguen viniendo de `consultar_producto`.
+  precios en el preview. Stock y entrega siguen viniendo de `consultar_producto` (o de `cotizar_rapido`, que ya trae todo).
 
-**Regla dura:** ninguna línea llega al preview sin pasar por `consultar_producto`.
+**Regla dura:** ninguna línea llega al preview sin pasar por `cotizar_rapido` o
+`consultar_producto` (con `cotizar_rapido` basta: ya trae precio, stock y entrega).
 
 En Axis el campo `descripcion` del catálogo ya viene corto y en mayúsculas
 (`AXIS P1475-LE`, `AXIS T8120 15W MIDSPAN 1-PORT`) — exactamente como él lo pega en
@@ -139,7 +147,7 @@ Si no hay con qué itemizar, entrega solo B con el correo de relevamiento redact
 
 ## Errores que no se perdonan
 
-- Cotizar un precio sin confirmarlo con `consultar_producto` en esta sesión
+- Cotizar un precio sin confirmarlo con `cotizar_rapido` o `consultar_producto` en esta sesión
   (o con `calcular_precios` cuando pidieron otro nivel de partner o margen).
 - Entregar una cámara sin resolver montaje y alimentación, o sin decir por qué no van.
 - Omitir el estado de disponibilidad de una línea.

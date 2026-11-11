@@ -428,10 +428,10 @@ export const usuariosAPI = {
     }
     return response.json();
   },
-  updateOwnPassword: async (password) => {
+  updateOwnPassword: async (passwordActual, password) => {
     const response = await fetchWithAuth('/api/usuarios/me/password', {
       method: 'PATCH',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ password_actual: passwordActual, password }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -451,6 +451,17 @@ export const usuariosAPI = {
     return response.json();
   },
 
+  setActivo: async (id, activo) => {
+    const response = await fetchWithAuth(`/api/usuarios/${encodeURIComponent(id)}/activo`, {
+      method: 'PATCH',
+      body: JSON.stringify({ activo }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Error cambiando el estado del usuario');
+    }
+    return response.json();
+  },
   delete: async (id) => {
     const response = await fetchWithAuth(`/api/usuarios/${encodeURIComponent(id)}`, {
       method: 'DELETE',

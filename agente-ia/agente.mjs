@@ -42,6 +42,7 @@ export const leerConfig = (env) => ({
 
 // Solo lectura: catalogo MyQuote, fichas web y las skills. Nada de comandos ni escritura.
 export const herramientasPermitidas = (mcp) => [
+  `mcp__${mcp}__cotizar_rapido`,
   `mcp__${mcp}__buscar_productos`,
   `mcp__${mcp}__consultar_producto`,
   `mcp__${mcp}__simular_cotizacion`,
@@ -73,6 +74,7 @@ export const argumentosClaude = (config) => {
 // --- Lectura de la salida de Claude Code --------------------------------------
 
 const NOMBRES = {
+  cotizar_rapido: 'Cotizando (precio, stock y entrega)',
   buscar_productos: 'Buscando en MyQuote',
   consultar_producto: 'Consultando precio y stock',
   simular_cotizacion: 'Simulando la cotización',
@@ -82,23 +84,119 @@ const NOMBRES = {
   Skill: 'Cargando skill'
 };
 
+// cotizar_rapido / calcular_precios / simular_cotizacion: muestra los primeros SKUs de la lista.
+const detalleItems = (items) =>
+  Array.isArray(items) && items.length
+    ? `${items.slice(0, 4).map((i) => i?.sku).filter(Boolean).join(', ')}${items.length > 4 ? ` y ${items.length - 4} más` : ''}`
+    : '';
+
 export const describirHerramienta = (bloque) => {
-  const nombre = String(bloque?.name || '').replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '');
+  const nombre = nombreCorto(bloque?.name);
   if (nombre === 'Read') return null; // lectura de referencias de la skill: no aporta al usuario
   const input = bloque?.input || {};
-  const detalle = input.sku || input.texto || input.query || input.url || input.skill || input.command || '';
+  const detalle = detalleItems(input.items) || input.sku || input.texto || input.query || input.url || input.skill || input.command || '';
   const base = NOMBRES[nombre] || `Usando ${nombre}`;
   return detalle ? `${base}: ${String(detalle).slice(0, 80)}` : base;
 };
 
+// --- Medicion de tiempos ---------------------------------------------------------
+// Solo se guardan nombres de herramienta y duraciones: nunca el contenido de los
+// mensajes, los argumentos de las herramientas ni datos de clientes.
+
+const MAX_HERRAMIENTAS_MEDIDAS = 100;
+
+const nombreCorto = (nombre) => String(nombre || '').replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '');
+
+export const crearMetricas = (inicio) => ({
+  inicio,
+  arranqueMs: null, // lanzar el proceso -> primer evento
+  turnos: 0,
+  idsTurno: new Set(),
+  turnosCli: null, // num_turns que informa Claude Code al terminar
+  apiMs: null,
+  abiertas: new Map(), // tool_use_id -> { nombre, t }
+  herramientas: [] // { nombre, ms, error }
+});
+
+/** Registra un evento ya parseado. `t` es la hora (ms) en que llego. */
+export const medirEvento = (m, ev, t) => {
+  if (!m) return;
+  if (m.arranqueMs === null) m.arranqueMs = t - m.inicio;
+  if (ev.type === 'assistant') {
+    // Claude Code emite un evento por bloque: los bloques de un mismo mensaje comparten id.
+    const id = ev.message?.id;
+    if (id) {
+      if (!m.idsTurno.has(id)) {
+        m.idsTurno.add(id);
+        m.turnos += 1;
+      }
+    } else if (Array.isArray(ev.message?.content)) {
+      m.turnos += 1;
+    }
+    for (const b of ev.message?.content || []) {
+      if (b.type === 'tool_use' && b.id) m.abiertas.set(b.id, { nombre: nombreCorto(b.name), t });
+    }
+  } else if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
+    for (const b of ev.message.content) {
+      if (b.type !== 'tool_result') continue;
+      const abierta = m.abiertas.get(b.tool_use_id);
+      if (!abierta) continue;
+      m.abiertas.delete(b.tool_use_id);
+      if (m.herramientas.length < MAX_HERRAMIENTAS_MEDIDAS) {
+        m.herramientas.push({ nombre: abierta.nombre, ms: t - abierta.t, ...(b.is_error ? { error: true } : {}) });
+      }
+    }
+  } else if (ev.type === 'result') {
+    if (Number.isFinite(ev.num_turns)) m.turnosCli = ev.num_turns;
+    if (Number.isFinite(ev.duration_api_ms)) m.apiMs = ev.duration_api_ms;
+  }
+};
+
+/** Cierra la medicion y devuelve el objeto que se envia al backend. */
+export const cerrarMetricas = (m, t) => {
+  if (!m) return null;
+  // Una herramienta que no llego a responder (cancelada, tiempo agotado) se cierra al terminar.
+  for (const { nombre, t: desde } of m.abiertas.values()) {
+    if (m.herramientas.length < MAX_HERRAMIENTAS_MEDIDAS) m.herramientas.push({ nombre, ms: t - desde, sin_respuesta: true });
+  }
+  m.abiertas.clear();
+  return {
+    total_ms: Math.max(0, t - m.inicio),
+    arranque_ms: m.arranqueMs,
+    turnos: m.turnosCli ?? m.turnos,
+    ...(m.apiMs !== null ? { api_ms: m.apiMs } : {}),
+    herramientas: m.herramientas
+  };
+};
+
+const seg = (ms) => `${(ms / 1000).toFixed(1)} s`;
+
+/** Una linea para el log: total, arranque, turnos y tiempo por herramienta. */
+export const resumenMetricas = (met) => {
+  if (!met) return '';
+  const porNombre = new Map();
+  for (const h of met.herramientas) {
+    const a = porNombre.get(h.nombre) || { n: 0, ms: 0 };
+    a.n += 1;
+    a.ms += h.ms;
+    porNombre.set(h.nombre, a);
+  }
+  const herr = [...porNombre].map(([nombre, a]) => `${nombre}${a.n > 1 ? ` x${a.n}` : ''} ${seg(a.ms)}`).join(', ');
+  return (
+    `  ⏱ total ${seg(met.total_ms)} · arranque ${met.arranque_ms === null ? 'n/d' : seg(met.arranque_ms)} · ` +
+    `${met.turnos} turnos · herramientas: ${herr || 'ninguna'}`
+  );
+};
+
 /** Procesa una linea de stream-json y actualiza el estado. Devuelve los pasos nuevos. */
-export const procesarEvento = (estado, linea) => {
+export const procesarEvento = (estado, linea, t = Date.now()) => {
   let ev;
   try {
     ev = JSON.parse(linea);
   } catch {
     return [];
   }
+  medirEvento(estado.metricas, ev, t);
   const pasos = [];
   if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
     for (const b of ev.message.content) {
@@ -153,16 +251,17 @@ const crearApi = (config, fetchImpl = fetch, version = null) => {
 
 // --- Resolver una consulta ------------------------------------------------------
 
-export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = console.log }) =>
+export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = console.log, ahora = () => Date.now() }) =>
   new Promise((resolve) => {
     mkdirSync(config.carpetaTrabajo, { recursive: true });
+    const metricas = crearMetricas(ahora());
     const hijo = spawnImpl(config.claude, argumentosClaude(config), {
       cwd: config.carpetaTrabajo,
       // En Windows, "claude" sin ruta necesita el shell para resolverse; un .exe con ruta completa no.
       shell: process.platform === 'win32' && !/\.exe$/i.test(config.claude),
       stdio: ['pipe', 'pipe', 'pipe']
     });
-    const estado = { texto: '', final: null, error: null, terminado: false };
+    const estado = { texto: '', final: null, error: null, terminado: false, metricas };
     let pendientes = [];
     let ultimoEnvio = 0;
     let cancelada = false;
@@ -201,7 +300,7 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
       buffer = lineas.pop();
       for (const linea of lineas) {
         if (!linea.trim()) continue;
-        const nuevos = procesarEvento(estado, linea);
+        const nuevos = procesarEvento(estado, linea, ahora());
         if (nuevos.length) {
           pendientes.push(...nuevos);
           nuevos.forEach((p) => log(`  · ${p}`));
@@ -219,18 +318,21 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     hijo.on('close', async (codigo) => {
       clearInterval(latido);
       clearTimeout(limite);
-      if (buffer.trim()) procesarEvento(estado, buffer);
+      if (buffer.trim()) procesarEvento(estado, buffer, ahora());
       if (cancelada) return resolve({ cancelada: true });
       await enviarAvance(true);
       const texto = (estado.final || estado.texto || '').trim();
       let error = estado.error;
       if (!error && !texto) error = `Claude Code terminó sin respuesta (código ${codigo}). ${errStd.trim().slice(-300)}`;
+      const met = cerrarMetricas(metricas, ahora());
+      log(resumenMetricas(met));
       try {
-        await api.fin(trabajo.id, error ? { error } : { texto });
+        // "metricas" es opcional: un backend que no lo conoce lo ignora.
+        await api.fin(trabajo.id, error ? { error, metricas: met } : { texto, metricas: met });
       } catch (e) {
         log(`No se pudo entregar el resultado: ${e.message}`);
       }
-      resolve({ texto, error });
+      resolve({ texto, error, metricas: met });
     });
 
     hijo.stdin.on('error', () => {});

@@ -21,7 +21,8 @@ jest.mock('pg', () => ({
 
 jest.mock('bcryptjs', () => ({
   compare: mockCompare,
-  hash: jest.fn()
+  // El backend genera al arrancar un hash de relleno para usuarios inexistentes.
+  hash: jest.fn(async () => '$2a$10$hash-de-relleno')
 }));
 
 process.env.JWT_SECRET = 'stage6-tests-secret-with-minimum-32-chars';
@@ -41,6 +42,10 @@ let ipSeq = 0;
 const nuevaIp = () => `10.20.0.${++ipSeq}`;
 
 // Enruta SQL -> respuesta. Un SQL sin ruta lanza: asi un cambio de consultas se nota.
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 const dbRouter = (tabla) => (sql, params) => {
   for (const [coincide, salida] of tabla) {
     if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
@@ -50,8 +55,10 @@ const dbRouter = (tabla) => (sql, params) => {
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 
 const sesionRow = (extra = {}) => ({ id: 10, revoked: false, last_seen: hace(1000), device_id: 'dev-1', ...extra });
+// La sesion se lee junto con el rol actual del usuario (JOIN usuarios). Por defecto el
+// rol de la fila es el del id; una prueba puede fijarlo con sesionRow({ role }).
 const rutasSesion = (rowSesion) => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: rowSesion ? [rowSesion] : [] }],
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({ rows: rowSesion ? [{ role: rolDeId(p[0]), ...rowSesion }] : [] })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 
@@ -157,14 +164,22 @@ describe('POST /api/login', () => {
     expect(res.body.user.empresa).toBe('');
   });
 
-  test('sin cabecera x-session-id el login igual responde 200 con session_id null', async () => {
+  test('sin cabecera x-session-id el login genera el id de sesion, lo guarda y lo devuelve', async () => {
+    // Antes respondia session_id null y la sesion se creaba despues "al vuelo" con
+    // cualquier X-Session-Id. Ahora solo valen sesiones creadas en el login.
     mockCompare.mockResolvedValue(true);
-    mockQuery.mockImplementation(dbRouter(rutasLogin()));
+    const inserts = [];
+    const tabla = rutasLogin();
+    tabla.unshift([incluye('INSERT INTO sesiones'), (sql, p) => { inserts.push(p); return { rows: [] }; }]);
+    mockQuery.mockImplementation(dbRouter(tabla));
 
     const res = await request(app).post('/api/login').send({ usuario: 'admin', password: 'password123' });
 
     expect(res.status).toBe(200);
-    expect(res.body.session).toEqual({ session_id: null, revoked_sessions: [] });
+    expect(res.body.session.session_id).toMatch(/^srv-[0-9a-f-]{36}$/);
+    expect(res.body.session.revoked_sessions).toEqual([]);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].slice(0, 2)).toEqual([1, res.body.session.session_id]);
   });
 
   test('un cliente con otra sesion activa la revoca al iniciar una nueva (limite 1; admin 2)', async () => {
@@ -214,7 +229,7 @@ describe('POST /api/login', () => {
     expect(logs[0][2]).toBe(false);
   });
 
-  test('usuario inexistente: 401 con el MISMO mensaje, sin consultar bcrypt, fallo registrado sin user_id', async () => {
+  test('usuario inexistente: 401 con el MISMO mensaje; igual compara bcrypt contra un hash de relleno (mismo tiempo); fallo registrado sin user_id', async () => {
     const logs = [];
     mockQuery.mockImplementation(dbRouter(rutasLogin({ usuarios: [], onInsertLog: (p) => logs.push(p) })));
 
@@ -225,7 +240,8 @@ describe('POST /api/login', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/^Usuario o contrase.+a incorrectos$/);
-    expect(mockCompare).not.toHaveBeenCalled();
+    expect(mockCompare).toHaveBeenCalledTimes(1);
+    expect(mockCompare).toHaveBeenCalledWith('password123', '$2a$10$hash-de-relleno');
     expect(logs[0][0]).toBeNull();
     expect(logs[0][1]).toBe('fantasma');
     expect(logs[0][2]).toBe(false);
@@ -285,6 +301,19 @@ describe('POST /api/login', () => {
       estados.push(res.status);
     }
     expect(estados).toEqual([401, 401, 401, 401, 401, 429]);
+  });
+
+  test('cuerpo de login grande (> 2kb): 413 sin tocar la BD; otras rutas mantienen su limite', async () => {
+    const res = await request(app)
+      .post('/api/login')
+      .set('x-forwarded-for', nuevaIp())
+      .send({ usuario: 'admin', password: 'x'.repeat(4000) });
+    expect(res.status).toBe(413);
+    expect(mockQuery).not.toHaveBeenCalled();
+
+    // El mismo cuerpo en otra ruta lo acepta el parser global (llega a requireAuth: 401).
+    const otra = await request(app).post('/api/logout').send({ relleno: 'x'.repeat(4000) });
+    expect(otra.status).toBe(401);
   });
 
   test('error de BD durante el login: 500 generico', async () => {
@@ -388,21 +417,14 @@ describe('autenticacion y sesion en rutas protegidas (probado con POST /api/logo
     expect(mockQuery.mock.calls.some(([sql]) => sql.includes('SET last_seen = CURRENT_TIMESTAMP'))).toBe(true);
   });
 
-  test('SOSPECHOSO: token valido sin fila de sesion NO se rechaza; se crea la sesion al vuelo y sigue', async () => {
-    // validateSession devuelve reason "missing" -> onMissingSession -> upsertSession -> next().
-    const inserts = [];
-    mockQuery.mockImplementation(dbRouter([
-      ...rutasSesion(null),
-      [incluye('DELETE FROM sesiones WHERE user_id = $1'), { rows: [] }],
-      [incluye('SELECT id FROM sesiones WHERE user_id = $1 AND session_id = $2'), { rows: [] }],
-      [incluye('FROM sesiones', 'revoked = false'), { rows: [] }],
-      [incluye('INSERT INTO sesiones'), (sql, p) => { inserts.push(p); return { rows: [] }; }],
-      [incluye('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id = $2'), { rows: [] }]
-    ]));
+  test('token valido con un X-Session-Id que no salio de un login: 401 "Sesion invalida" y no se crea nada', async () => {
+    // Antes (SOSPECHOSO) validateSession devolvia "missing" y requireAuth creaba la
+    // sesion al vuelo: con un JWT robado bastaba inventar otro X-Session-Id.
+    mockQuery.mockImplementation(dbRouter(rutasSesion(null)));
     const res = await logout(tokenCliente(), 'sess-fantasma');
-    expect(res.status).toBe(200);
-    expect(inserts).toHaveLength(1);
-    expect(inserts[0].slice(0, 2)).toEqual([2, 'sess-fantasma']);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'Sesion invalida' });
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO sesiones|UPDATE sesiones/.test(sql))).toBe(false);
   });
 });
 
@@ -450,17 +472,30 @@ describe('roles frente a rutas protegidas', () => {
     expect(res.status).toBe(200);
   });
 
-  test('SOSPECHOSO: GET /api/cotizaciones decide admin por el claim del JWT, no por la BD (admin degradado conserva la vista completa hasta que vence el token)', async () => {
+  test('GET /api/cotizaciones decide admin por el rol ACTUAL de la BD, no por el claim del JWT (admin degradado ve solo las suyas)', async () => {
+    // Antes (SOSPECHOSO) un admin degradado conservaba la vista completa hasta que vencia su token.
     let sqlLista = '';
     mockQuery.mockImplementation(dbRouter([
-      ...sesionOk,
-      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [{ id: 1 }] }; }]
+      ...rutasSesion(sesionRow({ role: 'client' })),
+      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [] }; }]
     ]));
     const res = await get('/api/cotizaciones', makeToken({ id: 9, usuario: 'degradado', role: 'admin' }));
     expect(res.status).toBe(200);
+    expect(sqlLista).toContain('c.usuario_id = $1');
+  });
+
+  test('el rol se resuelve una vez por request, en la misma consulta de la sesion (sin consultas extra a usuarios)', async () => {
+    let sqlLista = '';
+    mockQuery.mockImplementation(dbRouter([
+      ...rutasSesion(sesionRow({ role: 'ADMIN' })),
+      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [] }; }]
+    ]));
+    // Claim "client" pero la BD dice admin (ascendido): ve todas. El rol se normaliza a minusculas.
+    const res = await get('/api/cotizaciones', makeToken({ id: 9, usuario: 'ascendido', role: 'client' }));
+    expect(res.status).toBe(200);
     expect(sqlLista).not.toContain('c.usuario_id = $1');
-    // Ningun SELECT role FROM usuarios: la BD ni se consulta.
-    expect(mockQuery.mock.calls.some(([sql]) => sql.includes('FROM usuarios'))).toBe(false);
+    const consultasUsuarios = mockQuery.mock.calls.filter(([sql]) => sql.includes('usuarios'));
+    expect(consultasUsuarios).toHaveLength(2); // JOIN de la sesion + la lista de cotizaciones
   });
 
   test('GET /api/sessions (solo admin): client y cot_stock_admin reciben 403', async () => {

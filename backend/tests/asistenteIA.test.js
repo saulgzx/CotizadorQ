@@ -97,6 +97,9 @@ describe('asistente IA', () => {
 
   test('las instrucciones cargan la skill y sus referencias', () => {
     const axis = construirSistema('AXIS');
+    expect(axis).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
+    expect(axis).toContain('Si cotizar_rapido no está disponible');
+    expect(axis).toContain('nunca para una consulta de precio, stock o plazo');
     expect(axis).toContain('<skill nombre="preventa-axis">');
     expect(axis).toContain('references/formato-respuesta.md');
     expect(axis).toContain('LISTA COTIZADORQ');
@@ -115,6 +118,7 @@ describe('asistente IA', () => {
     const toolset = p.tools.find((t) => t.type === 'mcp_toolset');
     expect(toolset.default_config).toEqual({ enabled: false });
     expect(Object.keys(toolset.configs)).toEqual([
+      'cotizar_rapido',
       'buscar_productos',
       'consultar_producto',
       'simular_cotizacion',
@@ -246,8 +250,20 @@ describe('asistente IA', () => {
       expect(web).toContain('preventa-axis');
       expect(web).toContain('LISTA COTIZADORQ');
       expect(web).toContain('calcular_precios');
+      expect(web).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
+      expect(web).toContain('Si cotizar_rapido no está disponible');
+      expect(web).toContain('en paralelo');
+      expect(web).toContain('solo para homologar un modelo, completar accesorios o responder una duda técnica; nunca para una consulta de precio, stock o plazo');
       expect(web).toContain('Gold');
       expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
+      // Marca conocida: la skill y sus referencias ya van en el prompt.
+      expect(web).toContain('ya está cargada, no uses Skill ni Read');
+      expect(web).toContain('<skill nombre="preventa-axis">');
+      expect(web).toContain('<referencia archivo="references/formato-respuesta.md">');
+      expect(web).not.toContain('<skill nombre="preventa-qnap">');
+      const qnap = construirPromptAgente({ ...entrada, marca: 'QNAP' });
+      expect(qnap).toContain('<skill nombre="preventa-qnap">');
+      expect(qnap).not.toContain('<skill nombre="preventa-axis">');
       const wa = construirPromptAgente({
         marca: null,
         canal: 'whatsapp',
@@ -261,6 +277,8 @@ describe('asistente IA', () => {
         ]
       });
       expect(wa).toContain('preventa-axis para Axis');
+      // Sin marca: no se precarga ninguna skill.
+      expect(wa).not.toContain('<skill nombre=');
       expect(wa).toContain('WhatsApp');
       expect(wa).toContain('<asistente>\nPropuesta TS-464');
       expect(wa.endsWith('y sin discos?')).toBe(true);
@@ -351,6 +369,64 @@ describe('asistente IA', () => {
       const vencida = gestor.obtener({ usuarioId: 2, id: b.id });
       expect(vencida.estado).toBe('error');
       expect(vencida.error).toMatch(/miniPC/);
+    });
+
+    test('guarda las metricas del agente, las saneadas, y calcula promedios por herramienta', async () => {
+      let t = 1000;
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() },
+        ahora: () => t
+      });
+      const correr = async (metricas, texto = 'ok') => {
+        const { id } = gestor.iniciar({ usuarioId: 1, entrada });
+        t += 500;
+        await gestor.tomarTrabajo({ esperaMs: 10 });
+        t += 2000;
+        gestor.terminarAgente(id, { texto, metricas });
+        return id;
+      };
+      await correr({
+        total_ms: 1800,
+        arranque_ms: 400,
+        turnos: 4,
+        herramientas: [
+          { nombre: 'consultar_producto', ms: 300 },
+          { nombre: 'consultar_producto', ms: 500, error: true },
+          { nombre: 'mal nombre con espacios', ms: 5 },
+          { nombre: 'Read', ms: 'no es numero' },
+          { nombre: 'Skill', ms: 200, contenido: 'datos de cliente' }
+        ],
+        contenido: 'datos de cliente'
+      });
+      // Un agente viejo no manda metricas: no rompe y queda registrada sin tiempos del agente.
+      await correr(undefined);
+      const r = gestor.metricas({ limite: 10 });
+      expect(r.consultas).toBe(2);
+      expect(r.ultimas[1].agente).toEqual({
+        total_ms: 1800,
+        arranque_ms: 400,
+        api_ms: null,
+        turnos: 4,
+        herramientas: [
+          { nombre: 'consultar_producto', ms: 300 },
+          { nombre: 'consultar_producto', ms: 500, error: true },
+          { nombre: 'Skill', ms: 200 }
+        ]
+      });
+      expect(r.ultimas[0].agente).toBeNull();
+      expect(r.ultimas[0].cola_ms).toBe(500);
+      expect(r.ultimas[0].total_backend_ms).toBe(2500);
+      expect(r.herramientas.consultar_producto).toEqual({
+        llamadas: 2,
+        ms_total: 800,
+        errores: 1,
+        ms_promedio: 400
+      });
+      expect(r.total_ms_promedio).toBe(1800);
+      expect(r.turnos_promedio).toBe(4);
+      expect(JSON.stringify(r)).not.toContain('datos de cliente');
+      expect(JSON.stringify(r)).not.toContain('Cotizar P1475-LE');
     });
 
     test('cancelar avisa al agente con un rechazo', async () => {

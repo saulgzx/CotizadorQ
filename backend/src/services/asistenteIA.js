@@ -26,6 +26,7 @@ const MARCAS = {
 const MCP_SERVER_NAME = 'myquote';
 // Solo lectura. generar_cotizacion, emitir_pdf y cotizar_y_emitir quedan apagadas.
 const HERRAMIENTAS_MYQUOTE = [
+  'cotizar_rapido',
   'buscar_productos',
   'consultar_producto',
   'simular_cotizacion',
@@ -106,13 +107,25 @@ const leerSkill = (skill) => {
   return texto;
 };
 
+// La web solo aporta datos tecnicos: nunca precio, stock ni plazo.
+const instruccionesWeb = (herramientas) =>
+  `Usa ${herramientas} solo para homologar un modelo, completar accesorios o responder una duda técnica; nunca para una consulta de precio, stock o plazo (eso sale solo del conector MyQuote).`;
+
+// Como usar el conector: comun al modo API y al agente.
+const INSTRUCCIONES_CONECTOR = [
+  'Cuando el pedido nombra modelos o SKUs concretos, usa cotizar_rapido con TODOS los ítems en una sola llamada (cantidad por ítem y, si piden nivel de partner Axis —Autorizado, Silver, Gold, Multiregional—, otro margen o GP, por ejemplo «gold al 8», partner_category y gp_axis/gp_qnap o gp por línea; 8 = 8%): devuelve precio de lista, stock, la frase real de entrega y el precio calculado, más los SKUs no resueltos o ambiguos. No consultes producto por producto.',
+  'Usa buscar_productos solo si hay que encontrar un producto (modelo sin SKU, homologación, accesorios).',
+  'Si cotizar_rapido no está disponible en el conector, usa consultar_producto por ítem (precio, stock y entrega) y calcular_precios para nivel de partner, margen o costo.',
+  'Cuando necesites varias herramientas independientes entre sí, pídelas en paralelo en el mismo turno en vez de una por una.'
+].join(' ');
+
 const construirSistema = (marca) => {
   const m = MARCAS[marca];
   const entorno = [
     `Estás dentro de MyQuote, la app web de cotización de Intcomex Chile, en el tab Asistente IA.`,
     `Aplica la skill ${m.skill} que sigue, incluidas sus referencias, que ya están cargadas abajo: no necesitas abrirlas.`,
-    `El conector MyQuote está disponible con buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8») o el costo, usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios; stock y entrega siguen saliendo de consultar_producto. Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
-    `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}.`,
+    `El conector MyQuote está disponible con cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. ${INSTRUCCIONES_CONECTOR} Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
+    `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}. ${instruccionesWeb('web_search y web_fetch')}`,
     `La respuesta se muestra como Markdown. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla debe ir como tabla Markdown.`,
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
   ].join('\n');
@@ -141,22 +154,26 @@ const FORMATO_WHATSAPP = [
 /** Texto completo que el agente le pasa a Claude Code. */
 const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
   const m = MARCAS[marca];
+  // Marca conocida: la skill y sus referencias viajan en el prompt y Claude Code no gasta turnos en Skill + Read.
   const skill = m
-    ? `Usa la skill ${m.skill}.`
+    ? `Aplica la skill ${m.skill}, que sigue abajo con sus referencias: ya está cargada, no uses Skill ni Read para abrirla.`
     : 'Usa la skill de preventa que corresponda: preventa-axis para Axis o videovigilancia, preventa-qnap para QNAP o almacenamiento. Si no se puede saber, pregunta.';
   const instrucciones = [
     '<instrucciones_myquote>',
     `Respondes un requerimiento de preventa recibido por ${canal === 'whatsapp' ? 'WhatsApp' : 'el tab Asistente IA de MyQuote'} (Intcomex Chile).`,
     skill,
-    'Precios, stock y plazos solo con el conector MyQuote (buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
-    'Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8»), o el costo: usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios. Stock y entrega siguen saliendo de consultar_producto. Sin nivel ni GP, el precio es el de consultar_producto.',
+    'Precios, stock y plazos solo con el conector MyQuote (cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
+    INSTRUCCIONES_CONECTOR,
+    'Sin nivel de partner ni GP, el precio es el de lista que entrega cotizar_rapido (o consultar_producto). El costo solo sale de calcular_precios o del cálculo de cotizar_rapido.',
+    instruccionesWeb('WebSearch y WebFetch'),
     'No ejecutes comandos ni modifiques archivos.',
     canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
     '</instrucciones_myquote>'
   ].join('\n');
+  const cabecera = m ? `${instrucciones}\n\n${leerSkill(m.skill)}` : instrucciones;
   const previos = mensajes.slice(0, -1);
   const ultimo = mensajes[mensajes.length - 1].content;
-  if (!previos.length) return `${instrucciones}\n\n${ultimo}`;
+  if (!previos.length) return `${cabecera}\n\n${ultimo}`;
   const historial = previos
     .map((msg) =>
       msg.role === 'user'
@@ -164,7 +181,7 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
         : `<asistente>\n${textoDeContenido(msg.content)}\n</asistente>`
     )
     .join('\n\n');
-  return `${instrucciones}\n\n<conversacion_previa>\n${historial}\n</conversacion_previa>\n\nNuevo mensaje del usuario:\n${ultimo}`;
+  return `${cabecera}\n\n<conversacion_previa>\n${historial}\n</conversacion_previa>\n\nNuevo mensaje del usuario:\n${ultimo}`;
 };
 
 // --- Validacion de la conversacion --------------------------------------------
@@ -263,8 +280,21 @@ const construirParametros = ({ config, marca, mensajes }) => {
 // Texto corto para mostrar mientras la IA usa una herramienta.
 const describirHerramienta = (bloque) => {
   const input = bloque?.input || {};
-  const detalle = input.sku || input.texto || input.query || input.url || '';
+  const detalle =
+    (Array.isArray(input.items) && input.items.length
+      ? `${input.items
+          .slice(0, 4)
+          .map((i) => i?.sku)
+          .filter(Boolean)
+          .join(', ')}${input.items.length > 4 ? ` y ${input.items.length - 4} más` : ''}`
+      : '') ||
+    input.sku ||
+    input.texto ||
+    input.query ||
+    input.url ||
+    '';
   const nombres = {
+    cotizar_rapido: 'Cotizando (precio, stock y entrega)',
     buscar_productos: 'Buscando en MyQuote',
     consultar_producto: 'Consultando precio y stock',
     simular_cotizacion: 'Simulando la cotización',
@@ -284,6 +314,78 @@ const AGENTE_SIN_LATIDO_MS = 3 * 60 * 1000; // consulta tomada sin avance: se de
 const COLA_MAX_ESPERA_MS = 5 * 60 * 1000; // nadie la tomo: falla
 const AGENTE_MAX_CHARS = 200000;
 
+// --- Metricas de tiempos que informa el agente ---------------------------------
+// Solo numeros y nombres de herramienta; nunca contenido de mensajes ni datos de clientes.
+
+const MAX_METRICAS_GUARDADAS = 100;
+const MAX_HERRAMIENTAS_METRICA = 100;
+
+const numeroMs = (v) =>
+  Number.isFinite(v) && v >= 0 && v < 24 * 3600 * 1000 ? Math.round(v) : null;
+
+/** Valida lo que manda el agente (campo opcional): descarta todo lo que no sea tiempo o nombre de herramienta. */
+const sanitizarMetricas = (m) => {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const herramientas = (Array.isArray(m.herramientas) ? m.herramientas : [])
+    .slice(0, MAX_HERRAMIENTAS_METRICA)
+    .map((h) => {
+      const nombre = String(h?.nombre ?? '');
+      const ms = numeroMs(h?.ms);
+      if (!/^[\w.-]{1,60}$/.test(nombre) || ms === null) return null;
+      return {
+        nombre,
+        ms,
+        ...(h.error === true ? { error: true } : {}),
+        ...(h.sin_respuesta === true ? { sin_respuesta: true } : {})
+      };
+    })
+    .filter(Boolean);
+  const turnos = Number.isInteger(m.turnos) && m.turnos >= 0 && m.turnos < 1000 ? m.turnos : null;
+  return {
+    total_ms: numeroMs(m.total_ms),
+    arranque_ms: numeroMs(m.arranque_ms),
+    api_ms: numeroMs(m.api_ms),
+    turnos,
+    herramientas
+  };
+};
+
+const promedio = (valores) =>
+  valores.length ? Math.round(valores.reduce((a, b) => a + b, 0) / valores.length) : null;
+
+/** Totales y promedio por herramienta de una lista de registros de metricas. */
+const resumirMetricas = (registros) => {
+  const porHerramienta = new Map();
+  for (const r of registros) {
+    for (const h of r.agente?.herramientas || []) {
+      const a = porHerramienta.get(h.nombre) || { llamadas: 0, ms_total: 0, errores: 0 };
+      a.llamadas += 1;
+      a.ms_total += h.ms;
+      if (h.error) a.errores += 1;
+      porHerramienta.set(h.nombre, a);
+    }
+  }
+  const campo = (f) => registros.map(f).filter((v) => Number.isFinite(v));
+  return {
+    consultas: registros.length,
+    total_ms_promedio: promedio(campo((r) => r.agente?.total_ms)),
+    arranque_ms_promedio: promedio(campo((r) => r.agente?.arranque_ms)),
+    cola_ms_promedio: promedio(campo((r) => r.cola_ms)),
+    turnos_promedio: (() => {
+      const t = campo((r) => r.agente?.turnos);
+      return t.length ? Number((t.reduce((a, b) => a + b, 0) / t.length).toFixed(1)) : null;
+    })(),
+    herramientas: Object.fromEntries(
+      [...porHerramienta]
+        .sort((a, b) => b[1].ms_total - a[1].ms_total)
+        .map(([nombre, a]) => [
+          nombre,
+          { ...a, ms_promedio: Math.round(a.ms_total / a.llamadas) }
+        ])
+    )
+  };
+};
+
 const crearGestorConsultas = ({
   crearCliente,
   config = leerConfig(),
@@ -295,6 +397,7 @@ const crearGestorConsultas = ({
   let esperas = []; // agentes esperando trabajo (long polling)
   let agenteVisto = 0;
   let agenteVersion = null; // SHA corto que informa el agente; un agente viejo no lo manda
+  const metricas = []; // ultimas consultas del agente con sus tiempos (en memoria)
 
   const vista = (c) => ({
     id: c.id,
@@ -459,6 +562,13 @@ const crearGestorConsultas = ({
       };
     },
 
+    /** Ultimas N consultas con sus tiempos y el resumen por herramienta (para admin). */
+    metricas({ limite = 20 } = {}) {
+      const n = Math.min(Math.max(Math.trunc(Number(limite)) || 20, 1), MAX_METRICAS_GUARDADAS);
+      const ultimas = metricas.slice(-n).reverse();
+      return { guardadas: metricas.length, ...resumirMetricas(ultimas), ultimas };
+    },
+
     iniciar({ usuarioId, entrada, canal = 'web', alTerminar = null }) {
       revisarVencidas();
       const enCurso = [...consultas.values()].filter(
@@ -556,10 +666,24 @@ const crearGestorConsultas = ({
       return true;
     },
 
-    terminarAgente(id, { texto, error } = {}) {
+    terminarAgente(id, { texto, error, metricas: informadas } = {}) {
       agenteVisto = ahora();
       const c = tomada(id);
       if (!c) return false;
+      // Opcional: un agente viejo no manda metricas.
+      const delAgente = sanitizarMetricas(informadas);
+      c.metricas = {
+        id: c.id,
+        canal: c.canal,
+        marca: c.marca,
+        resultado: error ? 'error' : 'lista',
+        creada: c.creada,
+        cola_ms: c.tomadaEn ? Math.max(0, c.tomadaEn - c.creada) : null,
+        total_backend_ms: Math.max(0, ahora() - c.creada),
+        agente: delAgente
+      };
+      metricas.push(c.metricas);
+      if (metricas.length > MAX_METRICAS_GUARDADAS) metricas.shift();
       if (error) {
         finalizar(c, {
           estado: 'error',
@@ -613,5 +737,6 @@ module.exports = {
   validarEntrada,
   construirParametros,
   describirHerramienta,
+  sanitizarMetricas,
   crearGestorConsultas
 };

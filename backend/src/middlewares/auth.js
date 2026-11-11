@@ -1,4 +1,4 @@
-const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSession, onMissingSession }) => {
+const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSession }) => {
   const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
   const canManageCotizadorStock = (role) => {
     const normalized = String(role || '').toLowerCase();
@@ -14,16 +14,16 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
       const user = jwt.verify(token, jwtSecret);
       req.user = user;
       const { sessionId } = getSessionHeaders(req);
-      const validation = await validateSession(user.id, sessionId, req, user.role);
+      // El JWT solo vale junto a una sesion creada en /api/login, no revocada ni
+      // vencida. Un X-Session-Id desconocido ya no crea la sesion al vuelo: con
+      // eso, cerrar sesion o revocarla no servia de nada ante un token robado.
+      const validation = await validateSession(user.id, sessionId, req);
       if (!validation.ok) {
-        if (validation.reason === 'missing') {
-          if (typeof onMissingSession === 'function') {
-            await onMissingSession(user, req);
-          }
-          return next();
-        }
         return res.status(401).json({ error: validation.reason || 'Sesion invalida' });
       }
+      // Rol actual de la BD (resuelto en la misma consulta de la sesion), no el del JWT:
+      // las rutas que miran req.user.role ven el rol vigente.
+      req.user = { ...user, role: validation.role };
       return next();
     } catch (error) {
       return res.status(401).json({ error: 'Token invalido' });

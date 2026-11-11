@@ -70,6 +70,10 @@ describe('WhatsApp', () => {
         'hub.challenge': '42'
       })
     ).toBeNull();
+    // Distinto largo, prefijo, vacio o no-texto (?hub.verify_token=a&hub.verify_token=b): null.
+    for (const token of ['verificaX', 'verif', '', ['verifica'], undefined]) {
+      expect(wa.verificar({ 'hub.mode': 'subscribe', 'hub.verify_token': token, 'hub.challenge': '42' })).toBeNull();
+    }
     const cuerpo = Buffer.from('{"a":1}');
     const firma = `sha256=${crypto.createHmac('sha256', 'secreto').update(cuerpo).digest('hex')}`;
     expect(wa.firmaValida(cuerpo, firma)).toBe(true);

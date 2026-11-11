@@ -1,0 +1,155 @@
+/**
+ * Tests de POST /api/cotizaciones/pdf: solo un admin puede indicar el rol del creador;
+ * nunca del body, y los errores no filtran detalle interno.
+ */
+const request = require('supertest');
+const jwt = require('jsonwebtoken');
+
+const mockQuery = jest.fn();
+const mockConnect = jest.fn();
+const mockTextos = [];
+
+jest.mock('pg', () => ({
+  Pool: jest.fn(() => ({ query: mockQuery, connect: mockConnect }))
+}));
+jest.mock('bcryptjs', () => ({ compare: jest.fn(), hash: jest.fn() }));
+// Registra cada texto que se escribe en el PDF para poder inspeccionar las notas.
+jest.mock('pdfkit', () => {
+  const Real = jest.requireActual('pdfkit');
+  return class PdfEspia extends Real {
+    text(t, ...rest) {
+      mockTextos.push(String(t));
+      return super.text(t, ...rest);
+    }
+  };
+});
+
+process.env.JWT_SECRET = 'stage6-tests-secret-with-minimum-32-chars';
+process.env.ALLOWED_ORIGINS = 'http://localhost:5173';
+process.env.GEO_ENABLED = 'false';
+process.env.GOOGLE_SHEETS_ID = '';
+process.env.GOOGLE_SHEETS_URL = '';
+
+const app = require('../src/app');
+
+const makeToken = (payload) => jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
+const dbRouter = (tabla) => (sql, params) => {
+  for (const [coincide, salida] of tabla) {
+    if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
+  }
+  throw new Error(`SQL sin manejar: ${sql}`);
+};
+const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
+const sesionActiva = () => [
+  // Sesion + rol actual del usuario en la BD (id 1 = admin; el resto, client).
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({
+    rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd', role: p[0] === 1 ? 'admin' : 'client' }]
+  })],
+  [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
+];
+const conAuth = (req, user) => req.set('Authorization', `Bearer ${makeToken(user)}`).set('x-session-id', 'sess-1');
+
+const CLIENTE = { id: 2, usuario: 'cliente', role: 'client' };
+const ADMIN = { id: 1, usuario: 'admin', role: 'admin' };
+const BODY = {
+  cliente: { nombre: 'Ana', empresa: 'ACME' },
+  items: [{ marca: 'QNAP', cantidad: 2, sku: 'NW1', mpn: 'TS-1', descripcion: 'NAS', precio_unitario: 100, precio_total: 200 }],
+  total: 200
+};
+const NOTA_CLIENTE = 'no constituye oferta formal';
+
+beforeEach(() => {
+  mockQuery.mockReset();
+  mockTextos.length = 0;
+  mockQuery.mockImplementation(dbRouter(sesionActiva()));
+});
+
+describe('POST /api/cotizaciones/pdf', () => {
+  test('cliente que manda usuario_role "admin": se usa su rol real (client) y el PDF lleva la nota de cliente', async () => {
+    const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), CLIENTE).send({ ...BODY, usuario_role: 'admin' });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+    expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(true);
+  });
+
+  test('admin que manda usuario_role "client": el PDF lleva la nota de cliente (rol de quien creo la cotizacion)', async () => {
+    const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), ADMIN).send({ ...BODY, usuario_role: 'client' });
+    expect(res.status).toBe(200);
+    expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(true);
+  });
+
+  test('admin sin usuario_role: se usa su rol (admin) y no lleva la nota de cliente', async () => {
+    const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), ADMIN).send(BODY);
+    expect(res.status).toBe(200);
+    expect(mockTextos.some((t) => t.includes(NOTA_CLIENTE))).toBe(false);
+  });
+
+  test('sin items: 400', async () => {
+    const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), CLIENTE).send({ items: [] });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('fugas de detalle interno', () => {
+  const SECRETO = 'password authentication failed for user "pg_secreto" en tabla interna';
+  let espiaError;
+  beforeEach(() => {
+    espiaError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => espiaError.mockRestore());
+
+  test('POST /api/cotizaciones/pdf: un fallo interno responde generico, sin detail', async () => {
+    const original = mockTextos.push;
+    mockTextos.push = () => { throw new Error(SECRETO); };
+    try {
+      const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), CLIENTE).send(BODY);
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Error generando PDF' });
+      expect(JSON.stringify(res.body)).not.toContain('pg_secreto');
+    } finally {
+      mockTextos.push = original;
+    }
+  });
+
+  test('PUT /api/bo-meta/:bo: un fallo de BD responde generico, sin detail', async () => {
+    mockQuery.mockImplementation(dbRouter([
+      ...sesionActiva(),
+      [incluye('SELECT role, empresa, intcomex_profile FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin', empresa: '', intcomex_profile: null }] }],
+      [incluye('bo_meta'), () => { throw new Error(SECRETO); }]
+    ]));
+    const res = await conAuth(request(app).put('/api/bo-meta/BO1'), ADMIN).send({ projectName: 'x' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Error del servidor' });
+  });
+
+  test('GET / publico: ?diag=1 no devuelve diagnostico de folios ni errores de BD', async () => {
+    mockQuery.mockImplementation(() => { throw new Error(SECRETO); });
+    const res = await request(app).get('/?diag=1');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('OK');
+    expect(res.body).not.toHaveProperty('diag_error');
+    expect(res.body).not.toHaveProperty('numero_seq_last');
+    expect(res.body).not.toHaveProperty('numero_column');
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  describe('GET /api/sync/status', () => {
+    const FILA = { origen: 'QNAP', trigger_source: 'cron', status: 'error', inserted: 1, updated: 2, skipped: 0, rejected: 0, total: 3, warnings: 'aviso interno', error: SECRETO, duration_ms: 5, created_at: '2026-01-01T00:00:00Z' };
+    beforeEach(() => {
+      mockQuery.mockImplementation(dbRouter([...sesionActiva(), [incluye('FROM sync_logs'), { rows: [FILA] }]]));
+    });
+
+    test('admin recibe el detalle completo', async () => {
+      const res = await conAuth(request(app).get('/api/sync/status'), ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body.syncs[0].error).toBe(SECRETO);
+      expect(res.body.syncs[0].warnings).toBe('aviso interno');
+    });
+
+    test('otros usuarios reciben solo origen, estado y fecha', async () => {
+      const res = await conAuth(request(app).get('/api/sync/status'), CLIENTE);
+      expect(res.status).toBe(200);
+      expect(res.body.syncs).toEqual([{ origen: 'QNAP', status: 'error', created_at: '2026-01-01T00:00:00Z' }]);
+    });
+  });
+});

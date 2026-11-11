@@ -14,3 +14,13 @@
   o desde `/api/usuarios`.
 - El backend no inicia si `JWT_SECRET` falta o tiene menos de 32 caracteres.
 - `ALLOWED_ORIGINS` controla CORS para navegadores; requests sin `Origin` (curl/postman) siguen permitidos.
+
+## Sesiones
+- Toda ruta con `requireAuth` exige `Authorization: Bearer <JWT>` y `X-Session-Id`. El JWT solo
+  vale junto a una sesion creada por `POST /api/login` para ese usuario, no revocada ni vencida.
+  Un `X-Session-Id` desconocido responde 401 `Sesion invalida` (antes se creaba al vuelo).
+- El cliente manda su propio `X-Session-Id` en el login (el frontend lo guarda en
+  `localStorage.sessionId`; el MCP usa uno fijo por proceso) y debe reusar ese mismo id en las
+  peticiones. Si el login llega sin `X-Session-Id`, el backend genera uno y lo devuelve en
+  `session.session_id`.
+- `POST /api/logout` y la revocacion desde el panel admin invalidan el token de esa sesion.

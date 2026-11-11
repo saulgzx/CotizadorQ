@@ -1426,6 +1426,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [usuarioPasswordById, setUsuarioPasswordById] = useState({});
   const [accountPassword, setAccountPassword] = useState('');
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState('');
+  const [accountPasswordCurrent, setAccountPasswordCurrent] = useState('');
   const [ownPartnerCategory, setOwnPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
   const [updatingCotizacionPartner, setUpdatingCotizacionPartner] = useState(false);
@@ -3878,6 +3879,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const updateOwnPassword = async () => {
+    if (!accountPasswordCurrent) {
+      notify('Ingrese su contraseña actual');
+      return;
+    }
     if (!accountPassword) {
       notify('Ingrese una contraseña');
       return;
@@ -3888,7 +3893,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     try {
       setSaving(true);
-      await usuariosAPI.updateOwnPassword(accountPassword);
+      await usuariosAPI.updateOwnPassword(accountPasswordCurrent, accountPassword);
+      setAccountPasswordCurrent('');
       setAccountPassword('');
       setAccountPasswordConfirm('');
       notify('Contraseña actualizada');
@@ -3917,6 +3923,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       notify(error.message || 'Error actualizando nivel de partner');
     } finally {
       setUpdatingOwnPartnerCategory(false);
+    }
+  };
+
+  const toggleUsuarioActivo = async (target) => {
+    const activar = target.activo === false;
+    if (!activar && !confirm('Desactivar esta cuenta? Se cerrarán sus sesiones y no podrá iniciar sesión.')) return;
+    try {
+      setUsuariosLoading(true);
+      const updated = await usuariosAPI.setActivo(target.id, activar);
+      setUsuarios(prev => prev.map(u => (u.id === target.id ? { ...u, activo: updated.activo } : u)));
+      notify(activar ? 'Cuenta activada' : 'Cuenta desactivada');
+    } catch (error) {
+      notify(error.message || 'Error cambiando el estado del usuario');
+    } finally {
+      setUsuariosLoading(false);
     }
   };
 
@@ -5921,6 +5942,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                       {initials || 'U'}
                                     </span>
                                     <span className="text-xs text-slate-700">{u.nombre || u.usuario}</span>
+                                    {u.activo === false && <span className="text-xs text-rose-600">(inactiva)</span>}
                                     {isIntcomexEmpresa && normalizeIntcomexProfile(u.intcomex_profile) && (
                                       <span className="text-xs uppercase text-slate-500">({normalizeIntcomexProfile(u.intcomex_profile)})</span>
                                     )}
@@ -5966,7 +5988,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <div className="mb-3 border rounded-xl p-3 bg-white/80">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="text-sm font-semibold text-slate-800">{selectedUser.usuario}</div>
+                          <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                            {selectedUser.usuario}
+                            {selectedUser.activo === false && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Inactiva</span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-500">{selectedUser.nombre || 'Sin nombre'}</div>
                           <div className="text-xs text-slate-400">
                             {selectedUser.empresa ? `Empresa: ${selectedUser.empresa}` : 'Sin empresa'}
@@ -6020,6 +6047,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             className="mq-btn mq-btn-xs mq-btn-secundario"
                           >
                             Reset
+                          </button>
+                          <button
+                            onClick={() => toggleUsuarioActivo(selectedUser)}
+                            disabled={usuariosLoading || (selectedUser.activo !== false && selectedUser.id === user?.id)}
+                            title={selectedUser.id === user?.id ? 'No puedes desactivar tu propia cuenta' : undefined}
+                            className="mq-btn mq-btn-xs mq-btn-secundario"
+                          >
+                            {selectedUser.activo === false ? 'Activar' : 'Desactivar'}
                           </button>
                           <button
                             onClick={() => deleteUsuario(selectedUser.id)}
@@ -6109,7 +6144,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         >
                           <div className="w-full text-left flex items-start justify-between gap-2">
                             <div>
-                              <div className="text-sm font-semibold text-slate-800">{u.usuario}</div>
+                              <div className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                                {u.usuario}
+                                {u.activo === false && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Inactiva</span>
+                                )}
+                              </div>
                               <div className="text-xs text-slate-500">{u.nombre || 'Sin nombre'}</div>
                               <div className="text-xs text-slate-400">
                                 {u.empresa ? `Empresa: ${u.empresa}` : 'Sin empresa'}
@@ -8635,6 +8675,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <h3 className="text-base font-semibold text-slate-900">Cambiar contraseña</h3>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                <label className="flex flex-col gap-1 text-xs text-slate-500 md:col-span-2">
+                  Contraseña actual
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={accountPasswordCurrent}
+                    onChange={e => setAccountPasswordCurrent(e.target.value)}
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                  />
+                </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Nueva contraseña
                   <input
