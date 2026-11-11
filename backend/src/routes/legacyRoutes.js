@@ -4401,7 +4401,10 @@ app.get(
     req.on('close', () => {
       cerrado = true;
     });
-    const trabajo = await iaConsultas.tomarTrabajo({ esperaMs });
+    const version = /^[\w.-]{1,40}$/.test(req.headers['x-agente-version'] || '')
+      ? req.headers['x-agente-version']
+      : null;
+    const trabajo = await iaConsultas.tomarTrabajo({ esperaMs, version });
     if (cerrado) {
       // El agente corto la conexion antes de recibirla: vuelve a la cola.
       if (trabajo) iaConsultas.liberarTrabajo(trabajo.id);

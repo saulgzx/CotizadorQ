@@ -294,6 +294,7 @@ const crearGestorConsultas = ({
   const cola = [];
   let esperas = []; // agentes esperando trabajo (long polling)
   let agenteVisto = 0;
+  let agenteVersion = null; // SHA corto que informa el agente; un agente viejo no lo manda
 
   const vista = (c) => ({
     id: c.id,
@@ -453,7 +454,8 @@ const crearGestorConsultas = ({
       return {
         conectado:
           agenteVisto > 0 && ahora() - agenteVisto < AGENTE_CONECTADO_MS,
-        vistoEn: agenteVisto || null
+        vistoEn: agenteVisto || null,
+        version: agenteVersion
       };
     },
 
@@ -517,8 +519,9 @@ const crearGestorConsultas = ({
 
     // --- API del agente ---
     /** Espera hasta esperaMs por una consulta; null si no hay. */
-    tomarTrabajo({ esperaMs = 25000 } = {}) {
+    tomarTrabajo({ esperaMs = 25000, version = null } = {}) {
       agenteVisto = ahora();
+      if (version) agenteVersion = String(version).slice(0, 40);
       revisarVencidas();
       const c = siguienteLibre();
       if (c) return Promise.resolve(paraAgente(c));
