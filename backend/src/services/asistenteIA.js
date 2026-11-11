@@ -28,7 +28,8 @@ const MCP_SERVER_NAME = 'myquote';
 const HERRAMIENTAS_MYQUOTE = [
   'buscar_productos',
   'consultar_producto',
-  'simular_cotizacion'
+  'simular_cotizacion',
+  'calcular_precios'
 ];
 
 const MARCADOR_LISTA = 'LISTA COTIZADORQ';
@@ -110,7 +111,7 @@ const construirSistema = (marca) => {
   const entorno = [
     `Estás dentro de MyQuote, la app web de cotización de Intcomex Chile, en el tab Asistente IA.`,
     `Aplica la skill ${m.skill} que sigue, incluidas sus referencias, que ya están cargadas abajo: no necesitas abrirlas.`,
-    `El conector MyQuote está disponible con buscar_productos, consultar_producto y simular_cotizacion. Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
+    `El conector MyQuote está disponible con buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8») o el costo, usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios; stock y entrega siguen saliendo de consultar_producto. Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
     `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}.`,
     `La respuesta se muestra como Markdown. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla debe ir como tabla Markdown.`,
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
@@ -267,6 +268,7 @@ const describirHerramienta = (bloque) => {
     buscar_productos: 'Buscando en MyQuote',
     consultar_producto: 'Consultando precio y stock',
     simular_cotizacion: 'Simulando la cotización',
+    calcular_precios: 'Calculando precio por partner y margen',
     web_search: 'Buscando fichas técnicas',
     web_fetch: 'Leyendo ficha técnica'
   };
