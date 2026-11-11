@@ -73,6 +73,7 @@ const NOMBRES = {
   buscar_productos: 'Buscando en MyQuote',
   consultar_producto: 'Consultando precio y stock',
   simular_cotizacion: 'Simulando la cotización',
+  calcular_precios: 'Calculando precio por partner y margen',
   WebSearch: 'Buscando fichas técnicas',
   WebFetch: 'Leyendo ficha técnica',
   Skill: 'Cargando skill'

@@ -32,6 +32,12 @@ con el fabricante. No lo rellenes con una suposición.
 - `consultar_producto({sku})` — acepta SKU **o MPN**. Devuelve `precio_cliente`,
   `stock` (unidades) y `entrega` (la frase real de disponibilidad).
 
+- `calcular_precios({items, partner_category, gp_axis, gp_qnap})` — precio con otro
+  margen (GP) o, en Axis, con el rebate de un nivel de partner (Autorizado, Silver,
+  Gold, Multiregional). El GP acepta `8` u `0.08`. Úsala siempre que pidan un nivel de
+  partner, un margen distinto («gold al 8», «a 10% de margen») o el costo, y usa sus
+  precios en el preview. Stock y entrega siguen viniendo de `consultar_producto`.
+
 **Regla dura:** ninguna línea llega al preview sin haber pasado por
 `consultar_producto`. `buscar_productos` sirve para encontrar; `consultar_producto`
 es lo que se cotiza.
@@ -152,7 +158,8 @@ todavía.
 
 ## Errores que no se perdonan
 
-- Cotizar un precio sin haberlo confirmado con `consultar_producto` en esta sesión.
+- Cotizar un precio sin haberlo confirmado con `consultar_producto` en esta sesión
+  (o con `calcular_precios` cuando pidieron otro nivel de partner o margen).
 - Omitir el estado de disponibilidad de una línea.
 - Itemizar un requerimiento vago sin relevamiento ni supuestos declarados.
 - Cotizar un rackeable sin resolver el kit de rieles.

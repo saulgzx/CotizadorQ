@@ -147,7 +147,8 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
     '<instrucciones_myquote>',
     `Respondes un requerimiento de preventa recibido por ${canal === 'whatsapp' ? 'WhatsApp' : 'el tab Asistente IA de MyQuote'} (Intcomex Chile).`,
     skill,
-    'Precios, stock y plazos solo con el conector MyQuote (buscar_productos, consultar_producto, simular_cotizacion). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
+    'Precios, stock y plazos solo con el conector MyQuote (buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
+    'Si piden un nivel de partner Axis (Autorizado, Silver, Gold, Multiregional), otro margen o GP (por ejemplo «gold al 8»), o el costo: usa calcular_precios con partner_category y gp_axis/gp_qnap (8 = 8%) y entrega esos precios. Stock y entrega siguen saliendo de consultar_producto. Sin nivel ni GP, el precio es el de consultar_producto.',
     'No ejecutes comandos ni modifiques archivos.',
     canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
     '</instrucciones_myquote>'
