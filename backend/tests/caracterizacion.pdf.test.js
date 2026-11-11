@@ -80,3 +80,67 @@ describe('POST /api/cotizaciones/pdf', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('fugas de detalle interno', () => {
+  const SECRETO = 'password authentication failed for user "pg_secreto" en tabla interna';
+  let espiaError;
+  beforeEach(() => {
+    espiaError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => espiaError.mockRestore());
+
+  test('POST /api/cotizaciones/pdf: un fallo interno responde generico, sin detail', async () => {
+    const original = mockTextos.push;
+    mockTextos.push = () => { throw new Error(SECRETO); };
+    try {
+      const res = await conAuth(request(app).post('/api/cotizaciones/pdf'), CLIENTE).send(BODY);
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Error generando PDF' });
+      expect(JSON.stringify(res.body)).not.toContain('pg_secreto');
+    } finally {
+      mockTextos.push = original;
+    }
+  });
+
+  test('PUT /api/bo-meta/:bo: un fallo de BD responde generico, sin detail', async () => {
+    mockQuery.mockImplementation(dbRouter([
+      ...sesionActiva(),
+      [incluye('SELECT role, empresa, intcomex_profile FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin', empresa: '', intcomex_profile: null }] }],
+      [incluye('bo_meta'), () => { throw new Error(SECRETO); }]
+    ]));
+    const res = await conAuth(request(app).put('/api/bo-meta/BO1'), ADMIN).send({ projectName: 'x' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Error del servidor' });
+  });
+
+  test('GET / publico: ?diag=1 no devuelve diagnostico de folios ni errores de BD', async () => {
+    mockQuery.mockImplementation(() => { throw new Error(SECRETO); });
+    const res = await request(app).get('/?diag=1');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('OK');
+    expect(res.body).not.toHaveProperty('diag_error');
+    expect(res.body).not.toHaveProperty('numero_seq_last');
+    expect(res.body).not.toHaveProperty('numero_column');
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  describe('GET /api/sync/status', () => {
+    const FILA = { origen: 'QNAP', trigger_source: 'cron', status: 'error', inserted: 1, updated: 2, skipped: 0, rejected: 0, total: 3, warnings: 'aviso interno', error: SECRETO, duration_ms: 5, created_at: '2026-01-01T00:00:00Z' };
+    beforeEach(() => {
+      mockQuery.mockImplementation(dbRouter([...sesionActiva(), [incluye('FROM sync_logs'), { rows: [FILA] }]]));
+    });
+
+    test('admin recibe el detalle completo', async () => {
+      const res = await conAuth(request(app).get('/api/sync/status'), ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body.syncs[0].error).toBe(SECRETO);
+      expect(res.body.syncs[0].warnings).toBe('aviso interno');
+    });
+
+    test('otros usuarios reciben solo origen, estado y fecha', async () => {
+      const res = await conAuth(request(app).get('/api/sync/status'), CLIENTE);
+      expect(res.status).toBe(200);
+      expect(res.body.syncs).toEqual([{ origen: 'QNAP', status: 'error', created_at: '2026-01-01T00:00:00Z' }]);
+    });
+  });
+});

@@ -1874,23 +1874,8 @@ app.get('/', async (req, res) => {
   // Solo un booleano global (sin detalle); omitido hasta que haya un primer chequeo.
   const ultimoChequeo = monitorIntegraciones.ultimo();
   if (ultimoChequeo) payload.integraciones_ok = ultimoChequeo.ok;
-  // Diagnóstico de migración del folio (solo con ?diag=1, para no consultar la DB en cada health-check).
-  if (req.query.diag === '1') {
-    try {
-      const col = await pool.query(
-        `SELECT 1 FROM information_schema.columns WHERE table_name = 'cotizaciones' AND column_name = 'numero' LIMIT 1`
-      );
-      payload.numero_column = col.rows.length > 0;
-      try {
-        const seq = await pool.query(`SELECT last_value FROM cotizacion_numero_seq`);
-        payload.numero_seq_last = seq.rows[0]?.last_value != null ? String(seq.rows[0].last_value) : null;
-      } catch {
-        payload.numero_seq_last = 'no-seq';
-      }
-    } catch (error) {
-      payload.diag_error = error.message;
-    }
-  }
+  // El diagnóstico del folio (?diag=1: columna y secuencia, o el error de la DB) ya no se
+  // expone en esta ruta pública; consultar la base directamente si hace falta.
   res.json(payload);
 });
 
@@ -3006,8 +2991,8 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, as
     invalidateCacheByPrefix([CACHE_KEY_OSO_ORDERS]);
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error guardando bo_meta:', error);
-    res.status(500).json({ error: 'Error del servidor', detail: error?.message || String(error) });
+    logError(req, error, 'bo_meta_update_failed');
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -3572,7 +3557,13 @@ app.get('/api/sync/status', authenticateToken, async (req, res) => {
        FROM sync_logs
        ORDER BY origen, created_at DESC`
     );
-    res.json({ syncs: result.rows });
+    if (req.user?.role === 'admin') {
+      return res.json({ syncs: result.rows });
+    }
+    // Resto de usuarios: solo estado y fecha, sin detalle de errores ni avisos internos.
+    return res.json({
+      syncs: result.rows.map(({ origen, status, created_at }) => ({ origen, status, created_at }))
+    });
   } catch (error) {
     logError(req, error, 'sync_status_failed');
     res.status(500).json({ error: 'Error del servidor' });
@@ -4208,8 +4199,7 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     return res.send(pdfBuffer);
   } catch (error) {
     logError(req, error, 'cotizacion_pdf_failed');
-    const detail = String(error?.message || '').slice(0, 220);
-    return res.status(500).json({ error: 'Error generando PDF', detail });
+    return res.status(500).json({ error: 'Error generando PDF' });
   }
 });
 
