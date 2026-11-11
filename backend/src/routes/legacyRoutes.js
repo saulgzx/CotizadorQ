@@ -4361,6 +4361,11 @@ app.get('/api/ia/estado', authenticateToken, requireAdmin, (req, res) => {
   });
 });
 
+// Tiempos de las ultimas consultas del agente: solo numeros y nombres de herramienta.
+app.get('/api/ia/metricas', authenticateToken, requireAdmin, (req, res) =>
+  res.json(iaConsultas.metricas({ limite: req.query.limite }))
+);
+
 app.post(
   '/api/ia/consultas',
   authenticateToken,
@@ -4487,7 +4492,8 @@ app.post(
   (req, res) => {
     const ok = iaConsultas.terminarAgente(req.params.id, {
       texto: req.body?.texto,
-      error: req.body?.error
+      error: req.body?.error,
+      metricas: req.body?.metricas
     });
     return ok
       ? res.json({ ok: true })

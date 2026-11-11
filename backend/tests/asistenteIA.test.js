@@ -353,6 +353,64 @@ describe('asistente IA', () => {
       expect(vencida.error).toMatch(/miniPC/);
     });
 
+    test('guarda las metricas del agente, las saneadas, y calcula promedios por herramienta', async () => {
+      let t = 1000;
+      const gestor = crearGestorConsultas({
+        config: configAgente,
+        logger: { error: jest.fn() },
+        ahora: () => t
+      });
+      const correr = async (metricas, texto = 'ok') => {
+        const { id } = gestor.iniciar({ usuarioId: 1, entrada });
+        t += 500;
+        await gestor.tomarTrabajo({ esperaMs: 10 });
+        t += 2000;
+        gestor.terminarAgente(id, { texto, metricas });
+        return id;
+      };
+      await correr({
+        total_ms: 1800,
+        arranque_ms: 400,
+        turnos: 4,
+        herramientas: [
+          { nombre: 'consultar_producto', ms: 300 },
+          { nombre: 'consultar_producto', ms: 500, error: true },
+          { nombre: 'mal nombre con espacios', ms: 5 },
+          { nombre: 'Read', ms: 'no es numero' },
+          { nombre: 'Skill', ms: 200, contenido: 'datos de cliente' }
+        ],
+        contenido: 'datos de cliente'
+      });
+      // Un agente viejo no manda metricas: no rompe y queda registrada sin tiempos del agente.
+      await correr(undefined);
+      const r = gestor.metricas({ limite: 10 });
+      expect(r.consultas).toBe(2);
+      expect(r.ultimas[1].agente).toEqual({
+        total_ms: 1800,
+        arranque_ms: 400,
+        api_ms: null,
+        turnos: 4,
+        herramientas: [
+          { nombre: 'consultar_producto', ms: 300 },
+          { nombre: 'consultar_producto', ms: 500, error: true },
+          { nombre: 'Skill', ms: 200 }
+        ]
+      });
+      expect(r.ultimas[0].agente).toBeNull();
+      expect(r.ultimas[0].cola_ms).toBe(500);
+      expect(r.ultimas[0].total_backend_ms).toBe(2500);
+      expect(r.herramientas.consultar_producto).toEqual({
+        llamadas: 2,
+        ms_total: 800,
+        errores: 1,
+        ms_promedio: 400
+      });
+      expect(r.total_ms_promedio).toBe(1800);
+      expect(r.turnos_promedio).toBe(4);
+      expect(JSON.stringify(r)).not.toContain('datos de cliente');
+      expect(JSON.stringify(r)).not.toContain('Cotizar P1475-LE');
+    });
+
     test('cancelar avisa al agente con un rechazo', async () => {
       const gestor = crearGestorConsultas({
         config: configAgente,

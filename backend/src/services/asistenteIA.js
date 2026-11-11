@@ -284,6 +284,78 @@ const AGENTE_SIN_LATIDO_MS = 3 * 60 * 1000; // consulta tomada sin avance: se de
 const COLA_MAX_ESPERA_MS = 5 * 60 * 1000; // nadie la tomo: falla
 const AGENTE_MAX_CHARS = 200000;
 
+// --- Metricas de tiempos que informa el agente ---------------------------------
+// Solo numeros y nombres de herramienta; nunca contenido de mensajes ni datos de clientes.
+
+const MAX_METRICAS_GUARDADAS = 100;
+const MAX_HERRAMIENTAS_METRICA = 100;
+
+const numeroMs = (v) =>
+  Number.isFinite(v) && v >= 0 && v < 24 * 3600 * 1000 ? Math.round(v) : null;
+
+/** Valida lo que manda el agente (campo opcional): descarta todo lo que no sea tiempo o nombre de herramienta. */
+const sanitizarMetricas = (m) => {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const herramientas = (Array.isArray(m.herramientas) ? m.herramientas : [])
+    .slice(0, MAX_HERRAMIENTAS_METRICA)
+    .map((h) => {
+      const nombre = String(h?.nombre ?? '');
+      const ms = numeroMs(h?.ms);
+      if (!/^[\w.-]{1,60}$/.test(nombre) || ms === null) return null;
+      return {
+        nombre,
+        ms,
+        ...(h.error === true ? { error: true } : {}),
+        ...(h.sin_respuesta === true ? { sin_respuesta: true } : {})
+      };
+    })
+    .filter(Boolean);
+  const turnos = Number.isInteger(m.turnos) && m.turnos >= 0 && m.turnos < 1000 ? m.turnos : null;
+  return {
+    total_ms: numeroMs(m.total_ms),
+    arranque_ms: numeroMs(m.arranque_ms),
+    api_ms: numeroMs(m.api_ms),
+    turnos,
+    herramientas
+  };
+};
+
+const promedio = (valores) =>
+  valores.length ? Math.round(valores.reduce((a, b) => a + b, 0) / valores.length) : null;
+
+/** Totales y promedio por herramienta de una lista de registros de metricas. */
+const resumirMetricas = (registros) => {
+  const porHerramienta = new Map();
+  for (const r of registros) {
+    for (const h of r.agente?.herramientas || []) {
+      const a = porHerramienta.get(h.nombre) || { llamadas: 0, ms_total: 0, errores: 0 };
+      a.llamadas += 1;
+      a.ms_total += h.ms;
+      if (h.error) a.errores += 1;
+      porHerramienta.set(h.nombre, a);
+    }
+  }
+  const campo = (f) => registros.map(f).filter((v) => Number.isFinite(v));
+  return {
+    consultas: registros.length,
+    total_ms_promedio: promedio(campo((r) => r.agente?.total_ms)),
+    arranque_ms_promedio: promedio(campo((r) => r.agente?.arranque_ms)),
+    cola_ms_promedio: promedio(campo((r) => r.cola_ms)),
+    turnos_promedio: (() => {
+      const t = campo((r) => r.agente?.turnos);
+      return t.length ? Number((t.reduce((a, b) => a + b, 0) / t.length).toFixed(1)) : null;
+    })(),
+    herramientas: Object.fromEntries(
+      [...porHerramienta]
+        .sort((a, b) => b[1].ms_total - a[1].ms_total)
+        .map(([nombre, a]) => [
+          nombre,
+          { ...a, ms_promedio: Math.round(a.ms_total / a.llamadas) }
+        ])
+    )
+  };
+};
+
 const crearGestorConsultas = ({
   crearCliente,
   config = leerConfig(),
@@ -295,6 +367,7 @@ const crearGestorConsultas = ({
   let esperas = []; // agentes esperando trabajo (long polling)
   let agenteVisto = 0;
   let agenteVersion = null; // SHA corto que informa el agente; un agente viejo no lo manda
+  const metricas = []; // ultimas consultas del agente con sus tiempos (en memoria)
 
   const vista = (c) => ({
     id: c.id,
@@ -459,6 +532,13 @@ const crearGestorConsultas = ({
       };
     },
 
+    /** Ultimas N consultas con sus tiempos y el resumen por herramienta (para admin). */
+    metricas({ limite = 20 } = {}) {
+      const n = Math.min(Math.max(Math.trunc(Number(limite)) || 20, 1), MAX_METRICAS_GUARDADAS);
+      const ultimas = metricas.slice(-n).reverse();
+      return { guardadas: metricas.length, ...resumirMetricas(ultimas), ultimas };
+    },
+
     iniciar({ usuarioId, entrada, canal = 'web', alTerminar = null }) {
       revisarVencidas();
       const enCurso = [...consultas.values()].filter(
@@ -556,10 +636,24 @@ const crearGestorConsultas = ({
       return true;
     },
 
-    terminarAgente(id, { texto, error } = {}) {
+    terminarAgente(id, { texto, error, metricas: informadas } = {}) {
       agenteVisto = ahora();
       const c = tomada(id);
       if (!c) return false;
+      // Opcional: un agente viejo no manda metricas.
+      const delAgente = sanitizarMetricas(informadas);
+      c.metricas = {
+        id: c.id,
+        canal: c.canal,
+        marca: c.marca,
+        resultado: error ? 'error' : 'lista',
+        creada: c.creada,
+        cola_ms: c.tomadaEn ? Math.max(0, c.tomadaEn - c.creada) : null,
+        total_backend_ms: Math.max(0, ahora() - c.creada),
+        agente: delAgente
+      };
+      metricas.push(c.metricas);
+      if (metricas.length > MAX_METRICAS_GUARDADAS) metricas.shift();
       if (error) {
         finalizar(c, {
           estado: 'error',
@@ -613,5 +707,6 @@ module.exports = {
   validarEntrada,
   construirParametros,
   describirHerramienta,
+  sanitizarMetricas,
   crearGestorConsultas
 };
