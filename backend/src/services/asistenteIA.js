@@ -28,7 +28,8 @@ const MCP_SERVER_NAME = 'myquote';
 const HERRAMIENTAS_MYQUOTE = [
   'buscar_productos',
   'consultar_producto',
-  'simular_cotizacion'
+  'simular_cotizacion',
+  'calcular_precios'
 ];
 
 const MARCADOR_LISTA = 'LISTA COTIZADORQ';
@@ -267,6 +268,7 @@ const describirHerramienta = (bloque) => {
     buscar_productos: 'Buscando en MyQuote',
     consultar_producto: 'Consultando precio y stock',
     simular_cotizacion: 'Simulando la cotización',
+    calcular_precios: 'Calculando precio por partner y margen',
     web_search: 'Buscando fichas técnicas',
     web_fetch: 'Leyendo ficha técnica'
   };

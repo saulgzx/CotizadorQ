@@ -117,7 +117,8 @@ describe('asistente IA', () => {
     expect(Object.keys(toolset.configs)).toEqual([
       'buscar_productos',
       'consultar_producto',
-      'simular_cotizacion'
+      'simular_cotizacion',
+      'calcular_precios'
     ]);
     expect(p.mcp_servers[0]).toMatchObject({
       url: 'https://mcp.example/mcp',
