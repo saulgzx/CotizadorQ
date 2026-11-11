@@ -41,6 +41,10 @@ let ipSeq = 0;
 const nuevaIp = () => `10.20.0.${++ipSeq}`;
 
 // Enruta SQL -> respuesta. Un SQL sin ruta lanza: asi un cambio de consultas se nota.
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 const dbRouter = (tabla) => (sql, params) => {
   for (const [coincide, salida] of tabla) {
     if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
@@ -50,8 +54,10 @@ const dbRouter = (tabla) => (sql, params) => {
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 
 const sesionRow = (extra = {}) => ({ id: 10, revoked: false, last_seen: hace(1000), device_id: 'dev-1', ...extra });
+// La sesion se lee junto con el rol actual del usuario (JOIN usuarios). Por defecto el
+// rol de la fila es el del id; una prueba puede fijarlo con sesionRow({ role }).
 const rutasSesion = (rowSesion) => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: rowSesion ? [rowSesion] : [] }],
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({ rows: rowSesion ? [{ role: rolDeId(p[0]), ...rowSesion }] : [] })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 
@@ -451,17 +457,30 @@ describe('roles frente a rutas protegidas', () => {
     expect(res.status).toBe(200);
   });
 
-  test('SOSPECHOSO: GET /api/cotizaciones decide admin por el claim del JWT, no por la BD (admin degradado conserva la vista completa hasta que vence el token)', async () => {
+  test('GET /api/cotizaciones decide admin por el rol ACTUAL de la BD, no por el claim del JWT (admin degradado ve solo las suyas)', async () => {
+    // Antes (SOSPECHOSO) un admin degradado conservaba la vista completa hasta que vencia su token.
     let sqlLista = '';
     mockQuery.mockImplementation(dbRouter([
-      ...sesionOk,
-      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [{ id: 1 }] }; }]
+      ...rutasSesion(sesionRow({ role: 'client' })),
+      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [] }; }]
     ]));
     const res = await get('/api/cotizaciones', makeToken({ id: 9, usuario: 'degradado', role: 'admin' }));
     expect(res.status).toBe(200);
+    expect(sqlLista).toContain('c.usuario_id = $1');
+  });
+
+  test('el rol se resuelve una vez por request, en la misma consulta de la sesion (sin consultas extra a usuarios)', async () => {
+    let sqlLista = '';
+    mockQuery.mockImplementation(dbRouter([
+      ...rutasSesion(sesionRow({ role: 'ADMIN' })),
+      [incluye('FROM cotizaciones c', 'LEFT JOIN usuarios u'), (sql) => { sqlLista = sql; return { rows: [] }; }]
+    ]));
+    // Claim "client" pero la BD dice admin (ascendido): ve todas. El rol se normaliza a minusculas.
+    const res = await get('/api/cotizaciones', makeToken({ id: 9, usuario: 'ascendido', role: 'client' }));
+    expect(res.status).toBe(200);
     expect(sqlLista).not.toContain('c.usuario_id = $1');
-    // Ningun SELECT role FROM usuarios: la BD ni se consulta.
-    expect(mockQuery.mock.calls.some(([sql]) => sql.includes('FROM usuarios'))).toBe(false);
+    const consultasUsuarios = mockQuery.mock.calls.filter(([sql]) => sql.includes('usuarios'));
+    expect(consultasUsuarios).toHaveLength(2); // JOIN de la sesion + la lista de cotizaciones
   });
 
   test('GET /api/sessions (solo admin): client y cot_stock_admin reciben 403', async () => {

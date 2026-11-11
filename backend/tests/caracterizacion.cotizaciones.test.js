@@ -32,6 +32,10 @@ const CLIENTE = { id: 2, usuario: 'cliente', role: 'client' };
 const OTRO_CLIENTE = { id: 4, usuario: 'otro', role: 'client' };
 const STOCK_ADMIN = { id: 3, usuario: 'nsteck', role: 'cot_stock_admin' };
 
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 const dbRouter = (tabla) => (sql, params) => {
   for (const [coincide, salida] of tabla) {
     if (coincide(sql)) return Promise.resolve(typeof salida === 'function' ? salida(sql, params) : salida);
@@ -41,7 +45,10 @@ const dbRouter = (tabla) => (sql, params) => {
 const incluye = (...partes) => (sql) => partes.every((p) => sql.includes(p));
 
 const sesionActiva = () => [
-  [incluye('SELECT id, revoked, last_seen, device_id FROM sesiones'), { rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd' }] }],
+  // Sesion + rol actual del usuario en la BD (por id; coincide con el claim de los tokens de prueba).
+  [incluye('FROM sesiones s JOIN usuarios u ON u.id = s.user_id'), (sql, p) => ({
+    rows: [{ id: 10, revoked: false, last_seen: new Date(Date.now() - 1000).toISOString(), device_id: 'd', role: rolDeId(p[0]) }]
+  })],
   [incluye('UPDATE sesiones', 'SET last_seen = CURRENT_TIMESTAMP'), { rows: [] }]
 ];
 
@@ -157,6 +164,21 @@ describe('POST /api/cotizaciones', () => {
     const totales = [0, 1, 2].map((i) => params[i * porFila + COL.precio_total]);
     const centavos = totales.reduce((s, t) => s + Math.round(t * 100), 0);
     expect(insertCotizacion(llamadas).params[4]).toBe(centavos / 100);
+  });
+
+  test('precios libres solo con el rol actual de la BD: un cliente (id 2) con claim "admin" igual recibe precios recalculados', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), { id: 2, usuario: 'cliente', role: 'admin' }).send({
+      cliente: CLIENTE_BODY,
+      total: 1,
+      items: [{ producto_id: 3, cantidad: 2, precio_unitario: 1 }]
+    });
+
+    expect(res.status).toBe(201);
+    expect(insertCotizacion(llamadas).params[4]).toBe(2804.5);
+    expect(insertItems(llamadas).params[COL.precio_unitario]).toBe(1402.25);
   });
 
   test('cliente con gp_qnap propio usa ese gp; con gp > 1 lo interpreta como porcentaje', async () => {

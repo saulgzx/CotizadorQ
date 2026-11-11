@@ -1788,11 +1788,15 @@ const upsertSession = async (user, req) => {
   return { sessionId, revokedSessions };
 };
 
-const validateSession = async (userId, sessionId, req, role) => {
+// Valida la sesion y, en la misma consulta, trae el rol ACTUAL del usuario desde la
+// BD: requireAuth lo deja en req.user.role, asi un cambio de rol rige de inmediato
+// y no cuando vence el JWT. Usuario borrado => sin filas => sesion invalida.
+const validateSession = async (userId, sessionId, req) => {
   if (!sessionId) return { ok: false, reason: 'Sesion requerida' };
-  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const result = await pool.query(
-    'SELECT id, revoked, last_seen, device_id FROM sesiones WHERE user_id = $1 AND session_id = $2',
+    `SELECT s.id, s.revoked, s.last_seen, s.device_id, u.role
+     FROM sesiones s JOIN usuarios u ON u.id = s.user_id
+     WHERE s.user_id = $1 AND s.session_id = $2`,
     [userId, sessionId]
   );
   if (result.rows.length === 0) {
@@ -1800,6 +1804,8 @@ const validateSession = async (userId, sessionId, req, role) => {
     return { ok: false, reason: 'Sesion invalida' };
   }
   const session = result.rows[0];
+  const role = String(session.role || '').toLowerCase();
+  const ttlDate = new Date(Date.now() - getSessionTtlMsForRole(role));
   const lastSeen = session.last_seen ? new Date(session.last_seen) : null;
   if (session.revoked) return { ok: false, reason: 'Sesion revocada' };
   if (!lastSeen || lastSeen.getTime() < ttlDate.getTime()) {
@@ -1817,7 +1823,7 @@ const validateSession = async (userId, sessionId, req, role) => {
      WHERE id = $1`,
     [session.id, ip || null, userAgent || null, deviceId || session.device_id || null]
   );
-  return { ok: true };
+  return { ok: true, role };
 };
 
 const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({

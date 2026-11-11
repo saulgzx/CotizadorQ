@@ -30,6 +30,10 @@ const activeSessionRow = {
   device_id: 'device-1'
 };
 
+// Rol actual en la BD por id de usuario: requireAuth lo lee junto con la sesion.
+const ROL_POR_ID = { 1: 'admin', 2: 'client', 3: 'cot_stock_admin', 4: 'client', 7: 'client', 20: 'client' };
+const rolDeId = (id) => ROL_POR_ID[id] || 'client';
+
 describe('API security and critical endpoints', () => {
   beforeEach(() => {
     mockQuery.mockReset();
@@ -39,7 +43,7 @@ describe('API security and critical endpoints', () => {
 
   test('POST /api/login returns token with valid credentials', async () => {
     mockCompare.mockResolvedValue(true);
-    mockQuery.mockImplementation((sql) => {
+    mockQuery.mockImplementation((sql, p) => {
       if (sql.includes('FROM login_logs') && sql.includes('success = false')) {
         return Promise.resolve({ rows: [{ user_failures: 0, ip_failures: 0 }] });
       }
@@ -127,9 +131,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/usuarios returns 403 for non-admin', async () => {
     const token = makeToken({ id: 2, usuario: 'client', role: 'client' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -150,9 +154,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/usuarios returns 403 for cotizador-stock admin', async () => {
     const token = makeToken({ id: 3, usuario: 'nsteck', role: 'cot_stock_admin' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -173,9 +177,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/usuarios returns 200 for admin', async () => {
     const token = makeToken({ id: 1, usuario: 'admin', role: 'admin' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -201,9 +205,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/productos returns critical data for authenticated admin', async () => {
     const token = makeToken({ id: 1, usuario: 'admin', role: 'admin' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -226,9 +230,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/productos returns critical data for cotizador-stock admin', async () => {
     const token = makeToken({ id: 3, usuario: 'nsteck', role: 'cot_stock_admin' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -252,9 +256,9 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/cotizaciones returns critical data for authenticated admin', async () => {
     const token = makeToken({ id: 1, usuario: 'admin', role: 'admin' });
-    mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) {
-        return Promise.resolve({ rows: [activeSessionRow] });
+    mockQuery.mockImplementation((sql, p) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] });
       }
       if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) {
         return Promise.resolve({ rows: [] });
@@ -275,8 +279,8 @@ describe('API security and critical endpoints', () => {
     expect(response.body[0]?.cliente_nombre).toBe('Cliente Demo');
   });
 
-  const sesionActiva = (sql) => {
-    if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) return { rows: [activeSessionRow] };
+  const sesionActiva = (sql, p) => {
+    if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) return { rows: [{ ...activeSessionRow, role: rolDeId(p?.[0]) }] };
     if (sql.includes('UPDATE sesiones') && sql.includes('SET last_seen = CURRENT_TIMESTAMP')) return { rows: [] };
     return null;
   };
@@ -288,8 +292,8 @@ describe('API security and critical endpoints', () => {
 
   test('GET /api/cotizaciones/:id never sends cost or margin to a client, even if the DB row has them', async () => {
     const token = makeToken({ id: 2, usuario: 'client', role: 'client' });
-    mockQuery.mockImplementation((sql) => {
-      const sesion = sesionActiva(sql);
+    mockQuery.mockImplementation((sql, p) => {
+      const sesion = sesionActiva(sql, p);
       if (sesion) return Promise.resolve(sesion);
       if (sql.includes('FROM cotizaciones c') && sql.includes('c.usuario_id = $2')) {
         return Promise.resolve({ rows: [{ id: 77, total: 2000, usuario_id: 2 }] });
@@ -314,8 +318,8 @@ describe('API security and critical endpoints', () => {
     mockConnect.mockResolvedValue(client);
     return client;
   };
-  const adminPut = (sql) => {
-    const sesion = sesionActiva(sql);
+  const adminPut = (sql, p) => {
+    const sesion = sesionActiva(sql, p);
     if (sesion) return Promise.resolve(sesion);
     if (sql.includes('SELECT role FROM usuarios WHERE id = $1')) return Promise.resolve({ rows: [{ role: 'admin' }] });
     throw new Error(`Unhandled pool SQL in PUT test: ${sql}`);

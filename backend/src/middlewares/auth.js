@@ -17,10 +17,13 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
       // El JWT solo vale junto a una sesion creada en /api/login, no revocada ni
       // vencida. Un X-Session-Id desconocido ya no crea la sesion al vuelo: con
       // eso, cerrar sesion o revocarla no servia de nada ante un token robado.
-      const validation = await validateSession(user.id, sessionId, req, user.role);
+      const validation = await validateSession(user.id, sessionId, req);
       if (!validation.ok) {
         return res.status(401).json({ error: validation.reason || 'Sesion invalida' });
       }
+      // Rol actual de la BD (resuelto en la misma consulta de la sesion), no el del JWT:
+      // las rutas que miran req.user.role ven el rol vigente.
+      req.user = { ...user, role: validation.role };
       return next();
     } catch (error) {
       return res.status(401).json({ error: 'Token invalido' });

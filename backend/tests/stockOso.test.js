@@ -29,7 +29,8 @@ const sesionActiva = {
   id: 10,
   revoked: false,
   last_seen: new Date(Date.now() + 60_000).toISOString(),
-  device_id: 'device-1'
+  device_id: 'device-1',
+  role: 'client'
 };
 
 // I = OH Unit USD (costo Chile real). RAIL-B02 viene en 4 filas que suman 40.
@@ -66,7 +67,7 @@ describe('stock disponible neto de lo asignado en OSO', () => {
     mockQuery.mockReset();
     mockValuesGet.mockReset();
     mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) return Promise.resolve({ rows: [sesionActiva] });
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) return Promise.resolve({ rows: [sesionActiva] });
       if (sql.includes('UPDATE sesiones')) return Promise.resolve({ rows: [] });
       throw new Error(`SQL no esperado: ${sql}`);
     });
@@ -107,7 +108,7 @@ describe('stock disponible neto de lo asignado en OSO', () => {
   test('el precio del cliente usa el costo Chile real (OH Unit USD) si hay disponible', async () => {
     hojas();
     mockQuery.mockImplementation((sql) => {
-      if (sql.includes('SELECT id, revoked, last_seen, device_id FROM sesiones')) return Promise.resolve({ rows: [sesionActiva] });
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) return Promise.resolve({ rows: [sesionActiva] });
       if (sql.includes('UPDATE sesiones')) return Promise.resolve({ rows: [] });
       if (sql.includes('SELECT * FROM productos')) {
         return Promise.resolve({ rows: [
