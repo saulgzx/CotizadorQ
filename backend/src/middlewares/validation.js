@@ -24,6 +24,13 @@ const passwordSchema = z.object({
   password: z.string().min(8).max(128)
 });
 
+// Cambio de la propia contrasena: exige la actual (sin minimo de largo, por si una
+// cuenta antigua tiene una contrasena corta).
+const ownPasswordSchema = z.object({
+  password_actual: z.string().min(1).max(128),
+  password: z.string().min(8).max(128)
+});
+
 const createUserSchema = z.object({
   usuario: z.string().trim().min(1).max(50),
   password: z.string().min(8).max(128)
@@ -84,6 +91,7 @@ const validateLoginInput = validate(loginSchema);
 const validateProductoInput = validate(productoSchema);
 const validateBulkProductosInput = validate(bulkProductosSchema);
 const validatePasswordInput = validate(passwordSchema);
+const validateOwnPasswordInput = validate(ownPasswordSchema);
 const validateCreateUserInput = validate(createUserSchema);
 const validateCotizacionInput = validate(cotizacionSchema);
 const validateCotizacionEditInput = validate(cotizacionEditSchema);
@@ -94,6 +102,7 @@ module.exports = {
   validateProductoInput,
   validateBulkProductosInput,
   validatePasswordInput,
+  validateOwnPasswordInput,
   validateCreateUserInput,
   validateCotizacionInput
 };

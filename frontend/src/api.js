@@ -428,10 +428,10 @@ export const usuariosAPI = {
     }
     return response.json();
   },
-  updateOwnPassword: async (password) => {
+  updateOwnPassword: async (passwordActual, password) => {
     const response = await fetchWithAuth('/api/usuarios/me/password', {
       method: 'PATCH',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ password_actual: passwordActual, password }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));

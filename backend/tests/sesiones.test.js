@@ -99,6 +99,24 @@ const crearBd = () => {
       afectadas.forEach((x) => { x.revoked = true; });
       return { rows: afectadas.map(({ session_id }) => ({ session_id })) };
     }
+    if (s.includes('SELECT password FROM usuarios WHERE id = $1')) {
+      const u = usuario(p[0]);
+      return { rows: u ? [{ password: u.password }] : [] };
+    }
+    if (s.includes('UPDATE usuarios SET password = $1 WHERE id = $2')) {
+      const u = usuario(p[1]);
+      if (!u) return { rows: [] };
+      u.password = p[0];
+      return { rows: [{ id: u.id }] };
+    }
+    if (s.includes('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id <> $2')) {
+      db.sesiones.filter((x) => x.user_id === Number(p[0]) && x.session_id !== p[1]).forEach((x) => { x.revoked = true; });
+      return { rows: [] };
+    }
+    if (s.includes('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND revoked = false')) {
+      db.sesiones.filter((x) => x.user_id === Number(p[0])).forEach((x) => { x.revoked = true; });
+      return { rows: [] };
+    }
     if (s.includes('SELECT role FROM usuarios WHERE id = $1')) {
       const u = usuario(p[0]);
       return { rows: u ? [{ role: u.role }] : [] };
@@ -227,6 +245,45 @@ describe('mcp_bot (servidor MCP)', () => {
     expect(nuevo.body.session.revoked_sessions).toEqual(['mcp-viejo']);
     expect((await listarUsuarios(viejo.body.token, 'mcp-viejo')).status).toBe(401);
     expect((await listarUsuarios(nuevo.body.token, 'mcp-nuevo')).status).toBe(403);
+  });
+});
+
+describe('cambio de contrasena', () => {
+  const cambiarPropia = (token, sid, body) =>
+    conSesion(request(app).patch('/api/usuarios/me/password'), token, sid).send(body);
+
+  test('/me/password exige la contrasena actual: sin ella 400, incorrecta 400 y nada cambia', async () => {
+    const res = await login('admin', 'sid-a');
+    const sinActual = await cambiarPropia(res.body.token, 'sid-a', { password: 'nueva-clave-123' });
+    expect(sinActual.status).toBe(400);
+    const incorrecta = await cambiarPropia(res.body.token, 'sid-a', { password_actual: 'otra-cosa', password: 'nueva-clave-123' });
+    expect(incorrecta.status).toBe(400);
+    expect(incorrecta.body.error).toMatch(/actual no es correcta/);
+    expect(bcrypt.compareSync(PASSWORD, bd.db.usuarios[0].password)).toBe(true);
+    // Un error de contrasena actual no cierra la sesion (no es 401).
+    expect((await listarUsuarios(res.body.token, 'sid-a')).status).toBe(200);
+  });
+
+  test('/me/password con la actual correcta: cambia, conserva esta sesion y revoca las demas', async () => {
+    const a = await login('admin', 'sid-a');
+    const b = await login('admin', 'sid-b');
+    const ok = await cambiarPropia(a.body.token, 'sid-a', { password_actual: PASSWORD, password: 'nueva-clave-123' });
+    expect(ok.status).toBe(200);
+    expect(bcrypt.compareSync('nueva-clave-123', bd.db.usuarios[0].password)).toBe(true);
+    expect((await listarUsuarios(a.body.token, 'sid-a')).status).toBe(200);
+    expect((await listarUsuarios(b.body.token, 'sid-b')).status).toBe(401);
+  });
+
+  test('admin resetea la contrasena de otro usuario: todas las sesiones de ese usuario se revocan', async () => {
+    const admin = await login('admin', 'sid-admin');
+    const bot = await login('mcp_bot', 'mcp-1');
+    expect((await listarUsuarios(bot.body.token, 'mcp-1')).status).toBe(403);
+    const res = await conSesion(request(app).patch('/api/usuarios/7/password'), admin.body.token, 'sid-admin')
+      .send({ password: 'clave-nueva-bot' });
+    expect(res.status).toBe(200);
+    expect((await listarUsuarios(bot.body.token, 'mcp-1')).status).toBe(401);
+    // El admin sigue dentro.
+    expect((await listarUsuarios(admin.body.token, 'sid-admin')).status).toBe(200);
   });
 });
 

@@ -1426,6 +1426,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [usuarioPasswordById, setUsuarioPasswordById] = useState({});
   const [accountPassword, setAccountPassword] = useState('');
   const [accountPasswordConfirm, setAccountPasswordConfirm] = useState('');
+  const [accountPasswordCurrent, setAccountPasswordCurrent] = useState('');
   const [ownPartnerCategory, setOwnPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
   const [updatingCotizacionPartner, setUpdatingCotizacionPartner] = useState(false);
@@ -3878,6 +3879,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const updateOwnPassword = async () => {
+    if (!accountPasswordCurrent) {
+      notify('Ingrese su contraseña actual');
+      return;
+    }
     if (!accountPassword) {
       notify('Ingrese una contraseña');
       return;
@@ -3888,7 +3893,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     try {
       setSaving(true);
-      await usuariosAPI.updateOwnPassword(accountPassword);
+      await usuariosAPI.updateOwnPassword(accountPasswordCurrent, accountPassword);
+      setAccountPasswordCurrent('');
       setAccountPassword('');
       setAccountPasswordConfirm('');
       notify('Contraseña actualizada');
@@ -8635,6 +8641,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <h3 className="text-base font-semibold text-slate-900">Cambiar contraseña</h3>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                <label className="flex flex-col gap-1 text-xs text-slate-500 md:col-span-2">
+                  Contraseña actual
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={accountPasswordCurrent}
+                    onChange={e => setAccountPasswordCurrent(e.target.value)}
+                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                  />
+                </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
                   Nueva contraseña
                   <input

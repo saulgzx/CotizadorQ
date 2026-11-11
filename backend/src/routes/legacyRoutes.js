@@ -17,6 +17,7 @@ const {
   validateProductoInput,
   validateBulkProductosInput,
   validatePasswordInput,
+  validateOwnPasswordInput,
   validateCreateUserInput,
   validateCotizacionInput,
   validateCotizacionEditInput
@@ -2452,18 +2453,38 @@ app.patch('/api/usuarios/me/partner-category', authenticateToken, async (req, re
   }
 });
 
-// USUARIOS - Resetear contrasena
-app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput, async (req, res) => {
+// Revoca las sesiones de un usuario, salvo (opcional) la sesion desde la que se pide.
+const revokeUserSessions = async (userId, exceptSessionId = null) => {
+  if (exceptSessionId) {
+    await pool.query(
+      'UPDATE sesiones SET revoked = true WHERE user_id = $1 AND session_id <> $2 AND revoked = false',
+      [userId, exceptSessionId]
+    );
+    return;
+  }
+  await pool.query('UPDATE sesiones SET revoked = true WHERE user_id = $1 AND revoked = false', [userId]);
+};
+
+// USUARIOS - Cambiar la propia contrasena (exige la actual; cierra las demas sesiones)
+app.patch('/api/usuarios/me/password', authenticateToken, validateOwnPasswordInput, async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Contraseña requerida' });
+    const { password, password_actual: passwordActual } = req.body;
+    const actual = await pool.query('SELECT password FROM usuarios WHERE id = $1', [userId]);
+    if (actual.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    // 400 y no 401: el frontend trata cualquier 401 como sesion vencida y desloguea.
+    const valida = await bcrypt.compare(passwordActual, actual.rows[0].password || '');
+    if (!valida) return res.status(400).json({ error: 'La contraseña actual no es correcta' });
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 RETURNING id', [hashedPassword, userId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+    const { sessionId } = getSessionHeaders(req);
+    await revokeUserSessions(userId, sessionId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Error actualizando contraseña propia:', error);
@@ -2471,6 +2492,8 @@ app.patch('/api/usuarios/me/password', authenticateToken, validatePasswordInput,
   }
 });
 
+// USUARIOS - Resetear contrasena (admin): revoca todas las sesiones de ese usuario.
+// Si el admin se la cambia a si mismo por esta ruta, conserva la sesion desde la que lo hace.
 app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validatePasswordInput, async (req, res) => {
   try {
     const { id } = req.params;
@@ -2481,6 +2504,9 @@ app.patch('/api/usuarios/:id/password', authenticateToken, requireAdmin, validat
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+    const targetId = result.rows[0].id;
+    const esPropio = Number(targetId) === Number(req.user.id);
+    await revokeUserSessions(targetId, esPropio ? getSessionHeaders(req).sessionId : null);
     res.json({ message: 'Contraseña actualizada' });
   } catch (error) {
     console.error('Error actualizando contraseña:', error);
