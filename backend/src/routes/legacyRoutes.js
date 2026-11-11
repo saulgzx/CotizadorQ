@@ -4440,7 +4440,38 @@ app.post('/api/whatsapp/webhook', (req, res) => {
   return undefined;
 });
 
-const startServer = async (port = PORT) => {
+// Arranque: antes de abrir HTTP se exige que PostgreSQL responda. Si tras unos reintentos
+// no hay conexion, el proceso termina con codigo 1 para que Railway lo reinicie (antes el
+// servidor quedaba arriba respondiendo 500). Ojo: esto distingue "no hay conexion" de
+// "fallo un paso de initDB": con conexion, initDB, ensureCotizacionNumero y
+// ensureCotizacionEdicion siguen aislados y un ALTER que falle no impide el arranque.
+const DB_CONNECT_RETRIES = Math.max(1, parseInt(process.env.DB_CONNECT_RETRIES || '5', 10) || 5);
+const DB_CONNECT_RETRY_DELAY_MS = Math.max(0, parseInt(process.env.DB_CONNECT_RETRY_DELAY_MS || '3000', 10) || 0);
+
+const waitForDatabase = async ({ retries = DB_CONNECT_RETRIES, delayMs = DB_CONNECT_RETRY_DELAY_MS } = {}) => {
+  for (let intento = 1; intento <= retries; intento += 1) {
+    try {
+      await pool.query('SELECT 1');
+      return true;
+    } catch (error) {
+      logger.warn(
+        { event: 'db_connect_retry', intento, retries, code: error?.code, message: error?.message },
+        'Sin conexion a PostgreSQL'
+      );
+      if (intento < retries) await sleep(delayMs * intento);
+    }
+  }
+  return false;
+};
+
+const startServer = async (port = PORT, options = {}) => {
+  const exit = options.exit || ((code) => process.exit(code));
+  const dbOk = await waitForDatabase(options);
+  if (!dbOk) {
+    logger.error({ event: 'db_unavailable' }, 'PostgreSQL no disponible tras los reintentos. Backend detenido.');
+    exit(1);
+    return null;
+  }
   const server = app.listen(port, async () => {
     console.log(`Servidor corriendo en puerto ${port}`);
     await initDB();
