@@ -107,6 +107,10 @@ const leerSkill = (skill) => {
   return texto;
 };
 
+// La web solo aporta datos tecnicos: nunca precio, stock ni plazo.
+const instruccionesWeb = (herramientas) =>
+  `Usa ${herramientas} solo para homologar un modelo, completar accesorios o responder una duda técnica; nunca para una consulta de precio, stock o plazo (eso sale solo del conector MyQuote).`;
+
 // Como usar el conector: comun al modo API y al agente.
 const INSTRUCCIONES_CONECTOR = [
   'Cuando el pedido nombra modelos o SKUs concretos, usa cotizar_rapido con TODOS los ítems en una sola llamada (cantidad por ítem y, si piden nivel de partner Axis —Autorizado, Silver, Gold, Multiregional—, otro margen o GP, por ejemplo «gold al 8», partner_category y gp_axis/gp_qnap o gp por línea; 8 = 8%): devuelve precio de lista, stock, la frase real de entrega y el precio calculado, más los SKUs no resueltos o ambiguos. No consultes producto por producto.',
@@ -121,7 +125,7 @@ const construirSistema = (marca) => {
     `Estás dentro de MyQuote, la app web de cotización de Intcomex Chile, en el tab Asistente IA.`,
     `Aplica la skill ${m.skill} que sigue, incluidas sus referencias, que ya están cargadas abajo: no necesitas abrirlas.`,
     `El conector MyQuote está disponible con cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion y calcular_precios. ${INSTRUCCIONES_CONECTOR} Desde aquí no se graban cotizaciones: si piden guardar, emitir PDF o enviar, indica que se hace desde el Cotizador de MyQuote.`,
-    `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}.`,
+    `Para especificaciones técnicas usa web_search y web_fetch, que solo alcanzan ${m.dominio}. ${instruccionesWeb('web_search y web_fetch')}`,
     `La respuesta se muestra como Markdown. Entrega primero «A — Preview para pegar» y luego «B — Control interno», como pide la skill. No envuelvas el preview en un bloque de código: la tabla debe ir como tabla Markdown.`,
     `Al final, después del bloque B, agrega un bloque de código con el título ${MARCADOR_LISTA}: una línea por producto cotizado con el SKU de Intcomex (o el MPN si el SKU es "To Create"), un tab y la cantidad. Sin encabezados ni precios. Si no cotizaste productos, omite el bloque.`
   ].join('\n');
@@ -161,6 +165,7 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
     'Precios, stock y plazos solo con el conector MyQuote (cotizar_rapido, buscar_productos, consultar_producto, simular_cotizacion, calcular_precios). No grabes cotizaciones ni emitas PDF: si lo piden, indica que se hace desde el Cotizador de MyQuote.',
     INSTRUCCIONES_CONECTOR,
     'Sin nivel de partner ni GP, el precio es el de lista que entrega cotizar_rapido (o consultar_producto). El costo solo sale de calcular_precios o del cálculo de cotizar_rapido.',
+    instruccionesWeb('WebSearch y WebFetch'),
     'No ejecutes comandos ni modifiques archivos.',
     canal === 'whatsapp' ? FORMATO_WHATSAPP : FORMATO_WEB,
     '</instrucciones_myquote>'

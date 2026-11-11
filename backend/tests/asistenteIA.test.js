@@ -99,6 +99,7 @@ describe('asistente IA', () => {
     const axis = construirSistema('AXIS');
     expect(axis).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
     expect(axis).toContain('Si cotizar_rapido no está disponible');
+    expect(axis).toContain('nunca para una consulta de precio, stock o plazo');
     expect(axis).toContain('<skill nombre="preventa-axis">');
     expect(axis).toContain('references/formato-respuesta.md');
     expect(axis).toContain('LISTA COTIZADORQ');
@@ -252,6 +253,7 @@ describe('asistente IA', () => {
       expect(web).toContain('cotizar_rapido con TODOS los ítems en una sola llamada');
       expect(web).toContain('Si cotizar_rapido no está disponible');
       expect(web).toContain('en paralelo');
+      expect(web).toContain('solo para homologar un modelo, completar accesorios o responder una duda técnica; nunca para una consulta de precio, stock o plazo');
       expect(web).toContain('Gold');
       expect(web.endsWith('Cotizar P1475-LE')).toBe(true);
       // Marca conocida: la skill y sus referencias ya van en el prompt.
