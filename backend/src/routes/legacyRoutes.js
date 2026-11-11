@@ -111,10 +111,11 @@ const { agregarStock, mapaCostosChile, costoChilePara } = require('../services/s
 const preciosPartner = require('../services/preciosPartner');
 const { construirMapaEta, textoEta, SEMANAS_ADICIONALES_DEFAULT } = require('../services/etaAxis');
 const SESSION_TTL_MIN = parseInt(process.env.SESSION_TTL_MIN || '10', 10);
-const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '43200', 10);
+// Sesion admin: 7 dias por defecto (10080 min), configurable por entorno.
+const ADMIN_SESSION_TTL_MIN = parseInt(process.env.ADMIN_SESSION_TTL_MIN || '10080', 10);
 const SESSION_TTL_MS = SESSION_TTL_MIN * 60 * 1000;
 const ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MIN * 60 * 1000;
-const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '30d';
+const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || '7d';
 const APP_VERSION = process.env.APP_VERSION || '2026-02-05-stock';
 const LOGIN_RATE_LIMIT_MAX = parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '5', 10);
 const LOGIN_RATE_LIMIT_WINDOW_MIN = parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MIN || '15', 10);
