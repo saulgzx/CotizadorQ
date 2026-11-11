@@ -3639,19 +3639,18 @@ app.delete('/api/productos/:id', authenticateToken, requireCotizadorStockAdmin, 
 
 // COTIZACIONES - Guardar
 app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async (req, res) => {
+  const { cliente, items, total } = req.body;
+  // Validar entrada mínima antes de tomar una conexión del pool.
+  if (!cliente || typeof cliente !== 'object') {
+    return res.status(400).json({ error: 'Cliente requerido' });
+  }
   const client = await pool.connect();
   try {
-    const { cliente, items, total } = req.body;
     const usuarioId = req.user?.id || null;
     const usuarioName = req.user?.usuario || null;
     const isAdmin = canManageCotizadorStock(req.user?.role);
     let totalFinal = total;
     let itemsFinal = items;
-
-    // Validar entrada mÃ­nima
-    if (!cliente || typeof cliente !== 'object') {
-      return res.status(400).json({ error: 'Cliente requerido' });
-    }
 
     await client.query('BEGIN');
     if (!isAdmin) {
