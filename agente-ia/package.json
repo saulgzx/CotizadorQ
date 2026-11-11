@@ -8,7 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node agente.mjs",
-    "test": "node --test test/agente.test.mjs"
+    "start": "node iniciar.mjs",
+    "agente": "node agente.mjs",
+    "test": "node --test test/agente.test.mjs test/actualizador.test.mjs"
   }
 }
