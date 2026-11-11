@@ -635,12 +635,13 @@ const getSheetsClient = (readOnly = true) => {
   if (!hasBegin || !hasEnd) {
     throw new Error('GOOGLE_PRIVATE_KEY invalida');
   }
-  const auth = new google.auth.JWT(
-    clientEmail,
-    null,
-    privateKey,
-    [readOnly ? SHEETS_SCOPE_READONLY : SHEETS_SCOPE_RW]
-  );
+  // Objeto de opciones: google-auth-library 10 ignora los argumentos posicionales
+  // y el cliente quedaria sin credenciales.
+  const auth = new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: [readOnly ? SHEETS_SCOPE_READONLY : SHEETS_SCOPE_RW]
+  });
   return google.sheets({ version: 'v4', auth });
 };
 
@@ -4508,6 +4509,7 @@ module.exports = {
   app,
   startServer,
   // Expuestos para pruebas.
+  getSheetsClient,
   GEO_PROVIDERS,
   resolveGeo
 };
