@@ -70,6 +70,8 @@ export interface LineaResuelta {
   stock: number | string | null;
   precio_unitario: number;
   precio_total: number;
+  /** GP pedido para esta linea (solo lo usa el calculo por partner); gana el primero si el producto se repite. */
+  gp?: number;
 }
 
 export interface SkuNoResuelto {
@@ -436,16 +438,15 @@ export const buscarProducto = (catalogo: Producto[], sku: string): Producto | nu
  * Los SKU que no existen se devuelven aparte, sin abortar la operacion.
  */
 export const resolverItems = async (
-  items: Array<{ sku: string; cantidad: number }>
+  items: Array<{ sku: string; cantidad: number; gp?: number }>
 ): Promise<{
   lineas: LineaResuelta[];
   noResueltos: SkuNoResuelto[];
   total: number;
   lectura: LecturaStock;
 }> => {
-  // Secuencial a proposito: el catalogo trae el token y el stock lo reusa.
-  const catalogo = await getCatalogo();
-  const lectura = await getStock();
+  // En paralelo: el login esta deduplicado (un solo login aunque lleguen juntos).
+  const [catalogo, lectura] = await Promise.all([getCatalogo(), getStock()]);
 
   // Se agrupa por producto_id y no por el texto pedido: un mismo producto puede
   // llegar dos veces, por SKU y por MPN, o repetido en la misma lista. Sin esto
@@ -472,6 +473,7 @@ export const resolverItems = async (
     if (existente) {
       existente.cantidad += cantidad;
       existente.precio_total = Number((existente.precio_unitario * existente.cantidad).toFixed(2));
+      if (existente.gp === undefined && item.gp !== undefined) existente.gp = item.gp;
       continue;
     }
     const precioUnitario = Number(producto.precio_cliente) || 0;
@@ -481,7 +483,8 @@ export const resolverItems = async (
       cantidad,
       stock: unidadesDe(lectura, producto),
       precio_unitario: Number(precioUnitario.toFixed(2)),
-      precio_total: Number((precioUnitario * cantidad).toFixed(2))
+      precio_total: Number((precioUnitario * cantidad).toFixed(2)),
+      ...(item.gp !== undefined ? { gp: item.gp } : {})
     });
   }
 

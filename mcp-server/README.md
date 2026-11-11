@@ -12,12 +12,45 @@ backend, dentro del mismo repo.
 | `buscar_productos` | No | Busqueda por texto, ordenada por coincidencia y stock |
 | `simular_cotizacion` | No | Calcula el total sin guardar nada. **Es el camino por defecto** |
 | `calcular_precios` | No | Costo, precio y margen por nivel de partner Axis y GP a pedido. Requiere la cuenta del bot en `PRECIOS_USUARIOS` del backend |
+| `cotizar_rapido` | No | **Todo en una llamada**: por item, producto resuelto, precio de lista, stock y entrega real (mismas reglas de «stock no verificado») y, si se pide, precio por partner/GP; mas totales y SKUs no resueltos. Ver abajo |
 | `generar_cotizacion` | **Si** | Graba la cotizacion y devuelve su id |
 | `emitir_pdf` | No | PDF en base64 de una cotizacion existente |
 | `cotizar_y_emitir` | **Si** | Encadena las dos anteriores |
 
 Las dos que escriben lo dicen explicitamente en su descripcion, para que el
 modelo pida confirmacion antes de invocarlas.
+
+## cotizar_rapido
+
+Pensada para el agente de IA: cuando el pedido ya nombra modelos o SKUs, una sola
+llamada reemplaza `consultar_producto` por item + `calcular_precios`. Lee catalogo
+y stock en paralelo, resuelve todos los items (un mismo producto repetido se suma)
+y hace como maximo **una** llamada de calculo al backend. Solo lectura.
+
+Entrada:
+
+```json
+{
+  "items": [{ "sku": "TS-464", "cantidad": 2, "gp": 8 }],
+  "partner_category": "Gold",
+  "gp_axis": 13,
+  "gp_qnap": 15
+}
+```
+
+`sku` acepta SKU o MPN. `gp` por linea, `partner_category`, `gp_axis` y `gp_qnap`
+son opcionales; si no se pide ninguno solo se entrega precio de lista (no se llama
+a `/api/precios/calcular`). Con GP pero sin `partner_category` Axis compara los 4 niveles.
+
+Salida: texto legible + JSON con `lineas[]` (`sku`, `mpn`, `descripcion`, `marca`,
+`origen`, `cantidad`, `precio_cliente`, `precio_total_lista`, `stock`, `entrega`,
+`entrega_catalogo`, `stock_verificado`, `sku_estado`, `eol`, garantia y
+`precio_calculado` o `null`), `no_resueltos[]` (inexistentes o ambiguos, con motivo),
+`calculo` (`pedido`, `disponible`, `aviso`), `totales` (`total_lista`,
+`total_calculado`, `margen_total`, `unidades`) y `stock` (diagnostico).
+
+Si el backend responde 403 al calculo (la cuenta no esta en `PRECIOS_USUARIOS`) o
+falla, la tool igual entrega lista y stock, con `calculo.disponible = false` y un aviso.
 
 ## Como calcula los precios
 
