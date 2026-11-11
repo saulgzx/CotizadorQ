@@ -1823,6 +1823,9 @@ const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrInt
   }
 });
 
+// Los fallos de un usuario se cuentan por usuario + IP: asi un tercero no puede dejar
+// fuera a otra persona (o a la cuenta del conector) fallando su contrasena desde otra IP.
+// El total por IP sigue frenando a quien prueba muchos usuarios desde un mismo origen.
 const isDbLoginRateLimited = async ({ usuario, req }) => {
   if (!LOGIN_RATE_LIMIT_ENABLED) return false;
   const ip = getRequestIp(req);
@@ -1834,7 +1837,7 @@ const isDbLoginRateLimited = async ({ usuario, req }) => {
     : 5;
   const result = await pool.query(
     `SELECT
-       COUNT(*) FILTER (WHERE usuario = $1) AS user_failures,
+       COUNT(*) FILTER (WHERE usuario = $1 AND ip_address = $2) AS user_failures,
        COUNT(*) FILTER (WHERE ip_address = $2) AS ip_failures
      FROM login_logs
      WHERE success = false

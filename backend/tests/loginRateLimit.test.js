@@ -53,6 +53,8 @@ describe('limite de intentos de login sin excepciones por usuario', () => {
 
       expect(response.status).toBe(429);
       expect(consultas.some((sql) => sql.includes('FROM usuarios'))).toBe(false);
+      // El conteo por usuario va atado a la IP: nadie bloquea una cuenta desde otra IP.
+      expect(consultas.some((sql) => sql.includes('usuario = $1 AND ip_address = $2'))).toBe(true);
     }
   );
 
