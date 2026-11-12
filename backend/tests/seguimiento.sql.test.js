@@ -28,6 +28,42 @@ describe('adaptador CRM', () => {
     await expect(crm.cambiarEtapa(db, 7, 'perdida')).rejects.toThrow(/motivo/);
   });
 
+  test('cambiarEtapa deriva el estado de las cotizaciones de la oportunidad (solo si cambió)', async () => {
+    const db = { query: jest.fn(async () => ({ rows: [], rowCount: 1 })) };
+    await crm.cambiarEtapa(db, 7, 'ganada');
+    expect(db.query).toHaveBeenCalledTimes(2);
+    const derivar = sqlDe(db, 1);
+    expect(derivar).toMatch(/UPDATE cotizaciones c SET estado = \(CASE WHEN o\.etapa = 'nueva' THEN 'revision'/);
+    expect(derivar).toMatch(/WHEN o\.etapa = 'ganada' THEN 'aprobada'/);
+    expect(derivar).toMatch(/WHERE o\.id = \$1 AND c\.oportunidad_id = o\.id/);
+    expect(db.query.mock.calls[1][1]).toEqual([7]);
+
+    const sinCambio = { query: jest.fn(async () => ({ rows: [], rowCount: 0 })) };
+    expect(await crm.cambiarEtapa(sinCambio, 7, 'ganada')).toBe(false);
+    expect(sinCambio.query).toHaveBeenCalledTimes(1);
+  });
+
+  test('cambiarEtapa: si derivar el estado falla, el cambio de etapa queda igual (best-effort)', async () => {
+    const { logger } = require('../src/utils/logger');
+    const espia = jest.spyOn(logger, 'error').mockImplementation(() => {});
+    let n = 0;
+    const db = { query: jest.fn(async () => { n += 1; if (n === 2) throw new Error('caida'); return { rows: [], rowCount: 1 }; }) };
+    expect(await crm.cambiarEtapa(db, 7, 'ganada')).toBe(true);
+    expect(espia).toHaveBeenCalledWith(expect.objectContaining({ event: 'crm_estado_error', oportunidad_id: 7 }), expect.any(String));
+    espia.mockRestore();
+  });
+
+  test('las oportunidades archivadas quedan fuera del alta, del ciclo/hoy/lista y de las más grandes', async () => {
+    const db = pool();
+    await crm.altaAutomatica(db, { desde: '2026-10-12T00:00:00.000Z' });
+    expect(sqlDe(db, 0)).toMatch(/AND o\.archivada_en IS NULL/);
+    expect(sqlDe(db, 0)).toMatch(/c1\.archivada_en IS NULL/);
+    await crm.oportunidadesParaSeguimiento(db);
+    expect(sqlDe(db, 1)).toMatch(/WHERE o\.archivada_en IS NULL ORDER BY s\.id/);
+    await crm.abiertasMasGrandes(db, 5);
+    expect(sqlDe(db, 2)).toMatch(/o\.archivada_en IS NULL/);
+  });
+
   test('oportunidadesParaSeguimiento filtra por estados, oportunidades o cotizaciones y calcula el monto del contrato', async () => {
     const db = pool([{ id: 1, monto: '1500.50', total: '1500.50' }]);
     const [fila] = await crm.oportunidadesParaSeguimiento(db, { estados: ['esperando'], oportunidadIds: ['3'] });

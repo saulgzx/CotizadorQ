@@ -7,8 +7,11 @@ const SEGURIDAD =
 
 const INSTRUCCIONES = {
   buscar_envios:
-    'Para cada ítem, busca en Elementos enviados desde `creada_en` un correo con un adjunto llamado ' +
-    '`pdf_nombre` (o cuyo adjunto contenga el folio "COT-<numero>" o "Cotización N°<numero>"). ' +
+    'Para cada ítem, busca en Elementos enviados desde `creada_en` un correo con un adjunto PDF cuyo ' +
+    'nombre sea `pdf_nombre_base` seguido de cualquier sufijo de versión `_v<N>.pdf` (por ejemplo ' +
+    '`<pdf_nombre_base>_v1.pdf` o `<pdf_nombre_base>_v3.pdf`: la cotización pudo editarse después de ' +
+    'enviarla; `pdf_nombre` es el nombre de la v1), o cuyo adjunto contenga el folio "COT-<numero>" o ' +
+    '"Cotización N°<numero>". ' +
     'Devuelve por ítem { cotizacion_id, encontrado, message_id?, conversation_id?, enviado_en? } ' +
     '(enviado_en en ISO 8601 con zona). ' +
     SEGURIDAD,

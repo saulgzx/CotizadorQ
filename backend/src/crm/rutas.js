@@ -309,7 +309,8 @@ const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
       const empresaId = idDe(req);
       const empresa = await repo.obtenerEmpresa(pool, empresaId);
       if (!empresa) throw noEncontrado('Empresa no encontrada');
-      const [contactos, oportunidades, cotizaciones, agregado] =
+      // Oportunidades y cotizaciones archivadas no salen en la ficha; solo se cuentan.
+      const [contactos, oportunidades, cotizaciones, agregado, archivadas] =
         await Promise.all([
           repo.listarContactosDeEmpresa(pool, empresaId),
           repo.listarOportunidades(pool, {
@@ -317,14 +318,16 @@ const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
             limite: 1000
           }),
           repo.listarCotizacionesDeEmpresa(pool, empresaId),
-          repo.resumenCotizacionesEmpresa(pool, empresaId)
+          repo.resumenCotizacionesEmpresa(pool, empresaId),
+          repo.contarArchivadasDeEmpresa(pool, empresaId)
         ]);
       res.json({
         empresa,
         contactos,
         oportunidades,
         cotizaciones,
-        resumen: reglas.resumenEmpresa(oportunidades, agregado)
+        resumen: reglas.resumenEmpresa(oportunidades, agregado),
+        archivadas
       });
     })
   );
@@ -503,11 +506,11 @@ const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
         });
         if (!actual) throw noEncontrado('Oportunidad no encontrada');
         await validarContacto(client, body.contacto_id, actual.empresa_id);
-        await repo.actualizarOportunidad(
-          client,
-          oportunidadId,
-          reglas.cambiosOportunidad(actual, body)
-        );
+        const cambios = reglas.cambiosOportunidad(actual, body);
+        await repo.actualizarOportunidad(client, oportunidadId, cambios);
+        // La etapa manda: el estado de sus cotizaciones se deriva en la misma transaccion.
+        if (cambios.etapa)
+          await repo.derivarEstadoCotizaciones(client, oportunidadId);
       });
       res.json(await repo.obtenerResumenOportunidad(pool, oportunidadId));
     })
@@ -552,6 +555,8 @@ const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
             ? { etapa: 'cotizada', etapa_desde: repositorio.AHORA }
             : {};
         await repo.actualizarOportunidad(client, oportunidadId, cambios);
+        // La cotizacion vinculada (y las demas) toman el estado derivado de la etapa.
+        await repo.derivarEstadoCotizaciones(client, oportunidadId);
       });
       res.json(await repo.obtenerResumenOportunidad(pool, oportunidadId));
     })

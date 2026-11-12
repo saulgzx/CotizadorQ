@@ -20,7 +20,11 @@ const {
   validateOwnPasswordInput,
   validateCreateUserInput,
   validateCotizacionInput,
-  validateCotizacionEditInput
+  validateCotizacionEditInput,
+  validateArchivarCotizaciones,
+  validateRestaurarCotizaciones,
+  validatePreviaArchivado,
+  parseCambioEstado
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
 const crm = require('../crm');
@@ -112,6 +116,7 @@ const {
   ensureCotizacionEdicion,
   esAdminCompleto
 } = require('../services/cotizacionItems');
+const versionesCotizacion = require('../services/cotizacionVersiones');
 const { calcularAsignaciones } = require('../services/stockDisponible');
 const { agregarStock, mapaCostosChile, costoChilePara } = require('../services/stockAgregado');
 const preciosPartner = require('../services/preciosPartner');
@@ -307,14 +312,21 @@ const getPdfDateKey = (value) => {
   return date.toLocaleDateString('en-CA');
 };
 
-const buildPdfFilename = (dateValue, projectName, integratorName, numero = null) => {
+/** Nombre del PDF sin la versión ni la extensión (el seguimiento busca el correo con esto). */
+const buildPdfBaseName = (dateValue, projectName, integratorName, numero = null) => {
   const dateKey = getPdfDateKey(dateValue) || getPdfDateKey(new Date());
   const project = sanitizePdfFilenamePart(projectName);
   const integrator = sanitizePdfFilenamePart(integratorName);
   const namePart = project || integrator || 'cotizacion';
   // El número de cotización va primero para que los archivos ordenen y se referencien por folio.
   const folio = numero ? `COT-${numero}_` : '';
-  return `${folio}${dateKey || 'export'}_${namePart}_v1`;
+  return `${folio}${dateKey || 'export'}_${namePart}`;
+};
+
+/** Nombre del PDF sin extensión: `<base>_v<version>` (versión real de la cotización; por defecto 1). */
+const buildPdfFilename = (dateValue, projectName, integratorName, numero = null, version = 1) => {
+  const v = Number.parseInt(version, 10);
+  return `${buildPdfBaseName(dateValue, projectName, integratorName, numero)}_v${Number.isFinite(v) && v > 0 ? v : 1}`;
 };
 
 const formatPdfDateEs = (value) => {
@@ -3922,27 +3934,66 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
   }
 });
 
-// COTIZACIONES - Actualizar estado
+// COTIZACIONES - Archivar / restaurar (solo admin). Declaradas antes de las rutas
+// /api/cotizaciones/:id para que "archivar" y "restaurar" no se lean como id.
+// Archivar una cotizacion archiva tambien su oportunidad cuando ya no le queda ninguna
+// cotizacion vigente; lo archivado sale de listados, embudos, resumenes y seguimiento.
+app.post('/api/cotizaciones/archivar', authenticateToken, requireAdmin, validateArchivarCotizaciones, async (req, res) => {
+  try {
+    const { ids, antes_de: antesDe } = req.body;
+    const resultado = await crm.conTransaccion(pool, (client) =>
+      crm.archivarCotizaciones(client, ids ? { ids } : { antesDe })
+    );
+    res.json(resultado);
+  } catch (error) {
+    logError(req, error, 'cotizacion_archivar_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// Conteos de lo que archivaria { antes_de }, sin modificar nada (dialogo de confirmacion).
+app.get('/api/cotizaciones/archivar/previa', authenticateToken, requireAdmin, validatePreviaArchivado, async (req, res) => {
+  try {
+    res.json(await crm.previaArchivado(pool, { antesDe: req.query.antes_de }));
+  } catch (error) {
+    logError(req, error, 'cotizacion_archivar_previa_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+app.post('/api/cotizaciones/restaurar', authenticateToken, requireAdmin, validateRestaurarCotizaciones, async (req, res) => {
+  try {
+    const resultado = await crm.conTransaccion(pool, (client) => crm.restaurarCotizaciones(client, { ids: req.body.ids }));
+    res.json(resultado);
+  } catch (error) {
+    logError(req, error, 'cotizacion_restaurar_failed');
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// COTIZACIONES - Cambiar estado comercial. La etapa de la oportunidad del CRM es la
+// fuente de verdad; cotizaciones.estado se deriva de ella. Dos formas de cuerpo:
+// nueva { etapa, motivo_perdida? } y heredada { estado } (se traduce con la tabla del CRM).
 app.patch('/api/cotizaciones/:id/estado', authenticateToken, requireOwnerOrAdmin(resolveCotizacionOwnerId, 'Cotizacion no encontrada'), async (req, res) => {
   try {
-    const { id } = req.params;
-    const { estado } = req.body;
-    const allowed = ['enviada', 'revision', 'rechazada', 'aprobada', 'pendiente'];
-    if (!estado || !allowed.includes(estado)) {
-      return res.status(400).json({ error: 'Estado invalido' });
-    }
-    const normalized = estado === 'pendiente' ? 'revision' : estado;
-    const result = await pool.query(
-      'UPDATE cotizaciones SET estado = $1 WHERE id = $2 RETURNING *',
-      [normalized, id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Cotización no encontrada' });
-    }
-    // CRM (best-effort, nunca rompe la ruta): aprobada => ganada, rechazada => perdida.
-    await crm.sincronizarEstadoCotizacion(pool, { oportunidadId: result.rows[0].oportunidad_id, estado: normalized });
-    res.json(result.rows[0]);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Id invalido' });
+    const cambio = parseCambioEstado(req.body);
+    if (!cambio.ok) return res.status(400).json({ error: cambio.error });
+    const { forma, etapa, estado, motivo_perdida: motivoPerdida } = cambio.data;
+    const estadoHeredado = forma === 'heredada' ? (estado === 'pendiente' ? 'revision' : estado) : null;
+    const cotizacion = await crm.cambiarEtapaDeCotizacion(pool, {
+      cotizacionId: id,
+      etapa: forma === 'nueva' ? etapa : crm.etapaDesdeEstado(estado),
+      motivoPerdida,
+      // 'rechazada' heredada no trae motivo: se usa el de siempre del cotizador.
+      motivoPorDefecto: forma === 'heredada' ? crm.MOTIVO_COTIZADOR : null,
+      estadoHeredado
+    });
+    if (!cotizacion) return res.status(404).json({ error: 'Cotización no encontrada' });
+    res.json(cotizacion);
   } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
     logError(req, error, 'cotizacion_estado_failed');
     res.status(500).json({ error: 'Error del servidor' });
   }
@@ -3978,30 +4029,70 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotiza
       });
     }
 
-    // La version vigente se guarda completa antes de sobrescribirla.
     const itemsActuales = await client.query(
       'SELECT * FROM cotizacion_items WHERE cotizacion_id = $1 ORDER BY id',
       [id]
     );
+    const lineas = items.map((item, index) => normalizarLineaAdmin(item, index));
+    const total = Number(lineas.reduce((sum, linea) => sum + linea.precio_total, 0).toFixed(2));
+    const c = cliente && typeof cliente === 'object' ? cliente : {};
+    const campo = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? (c[clave] ?? '') : actual[columna]);
+    const fecha = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? textoONull(c[clave]) : actual[columna]);
+    const cabecera = {
+      cliente_nombre: String(campo('nombre', 'cliente_nombre') ?? '').slice(0, 100),
+      cliente_empresa: String(campo('empresa', 'cliente_empresa') ?? '').slice(0, 100),
+      cliente_email: String(campo('email', 'cliente_email') ?? '').slice(0, 100),
+      cliente_telefono: String(campo('telefono', 'cliente_telefono') ?? '').slice(0, 50),
+      cliente_final: textoONull(campo('cliente_final', 'cliente_final')),
+      fecha_ejecucion: fecha('fecha_ejecucion', 'fecha_ejecucion'),
+      fecha_implementacion: fecha('fecha_implementacion', 'fecha_implementacion'),
+      vms: textoONull(campo('vms', 'vms'))
+    };
+
+    // Nada cambio (cliente, estado y lineas en orden): no se versiona ni se escribe.
+    if (versionesCotizacion.sinCambios({ actual, itemsActuales: itemsActuales.rows, cabecera, lineas, estado })) {
+      await client.query('ROLLBACK');
+      return res.json({
+        ...actual,
+        items: serializarItems(itemsActuales.rows, req.user?.role),
+        resumen: resumenCotizacion(itemsActuales.rows, req.user?.role),
+        sin_cambios: true
+      });
+    }
+
+    // La version vigente queda guardada completa antes de sobrescribirla. Si es la primera
+    // vez que tiene fila, con su autor y fecha originales y sin nota (la nota es de la
+    // edicion que produce la version nueva).
+    const autoria = versionesCotizacion.autoriaVigente(actual);
     await client.query(
-      `INSERT INTO cotizacion_versiones (cotizacion_id, version, snapshot, total, nota, creado_por)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO cotizacion_versiones (cotizacion_id, version, snapshot, total, nota, creado_por, creado_en)
+       VALUES ($1, $2, $3, $4, NULL, $5, COALESCE($6::timestamp, CURRENT_TIMESTAMP))
        ON CONFLICT (cotizacion_id, version) DO NOTHING`,
       [
         id,
         versionActual,
         JSON.stringify({ cotizacion: actual, items: itemsActuales.rows }),
         actual.total,
-        textoONull(nota),
-        req.user?.usuario || null
+        autoria.creado_por,
+        autoria.creado_en
       ]
     );
 
-    const lineas = items.map((item, index) => normalizarLineaAdmin(item, index));
-    const total = Number(lineas.reduce((sum, linea) => sum + linea.precio_total, 0).toFixed(2));
-    const c = cliente && typeof cliente === 'object' ? cliente : {};
-    const campo = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? (c[clave] ?? '') : actual[columna]);
-    const fecha = (clave, columna) => (Object.prototype.hasOwnProperty.call(c, clave) ? textoONull(c[clave]) : actual[columna]);
+    // Estado (forma heredada): con oportunidad se cambia su etapa con las reglas del CRM y
+    // se deriva el estado de todas sus cotizaciones, en esta misma transaccion; sin
+    // oportunidad se guarda el estado tal cual.
+    let estadoDirecto = null;
+    if (estado) {
+      const oportunidad = actual.oportunidad_id
+        ? await crm.aplicarEtapaOportunidad(client, {
+          oportunidadId: actual.oportunidad_id,
+          etapa: crm.etapaDesdeEstado(estado),
+          motivoPorDefecto: crm.MOTIVO_COTIZADOR,
+          estadoHeredado: estado
+        })
+        : null;
+      if (!oportunidad) estadoDirecto = estado;
+    }
 
     const updated = await client.query(
       `UPDATE cotizaciones
@@ -4021,16 +4112,16 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotiza
        WHERE id = $13
        RETURNING *`,
       [
-        String(campo('nombre', 'cliente_nombre') ?? '').slice(0, 100),
-        String(campo('empresa', 'cliente_empresa') ?? '').slice(0, 100),
-        String(campo('email', 'cliente_email') ?? '').slice(0, 100),
-        String(campo('telefono', 'cliente_telefono') ?? '').slice(0, 50),
-        textoONull(campo('cliente_final', 'cliente_final')),
-        fecha('fecha_ejecucion', 'fecha_ejecucion'),
-        fecha('fecha_implementacion', 'fecha_implementacion'),
-        textoONull(campo('vms', 'vms')),
+        cabecera.cliente_nombre,
+        cabecera.cliente_empresa,
+        cabecera.cliente_email,
+        cabecera.cliente_telefono,
+        cabecera.cliente_final,
+        cabecera.fecha_ejecucion,
+        cabecera.fecha_implementacion,
+        cabecera.vms,
         total,
-        estado || null,
+        estadoDirecto,
         versionActual + 1,
         req.user?.usuario || null,
         id
@@ -4043,14 +4134,35 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotiza
       'SELECT * FROM cotizacion_items WHERE cotizacion_id = $1 ORDER BY id',
       [id]
     );
+    // La version nueva tambien queda guardada: snapshot ya actualizado, la nota de esta
+    // edicion, quien edita y ahora. Asi la lista v1...vN queda completa.
+    await client.query(
+      `INSERT INTO cotizacion_versiones (cotizacion_id, version, snapshot, total, nota, creado_por, creado_en)
+       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+       ON CONFLICT (cotizacion_id, version) DO UPDATE
+         SET snapshot = EXCLUDED.snapshot, total = EXCLUDED.total, nota = EXCLUDED.nota,
+             creado_por = EXCLUDED.creado_por, creado_en = EXCLUDED.creado_en`,
+      [
+        id,
+        versionActual + 1,
+        JSON.stringify({ cotizacion: updated.rows[0], items: nuevosItems.rows }),
+        total,
+        textoONull(nota),
+        req.user?.usuario || null
+      ]
+    );
     await client.query('COMMIT');
-    // CRM (best-effort): el editor tambien puede aprobar o rechazar.
-    if (estado) await crm.sincronizarEstadoCotizacion(pool, { oportunidadId: updated.rows[0]?.oportunidad_id, estado });
+    // Sin oportunidad: se intenta enlazar con el CRM (crea la oportunidad con la etapa del
+    // estado). Transaccion propia y nunca lanza; si no se puede, queda el estado guardado.
+    if (estadoDirecto && !actual.empresa_id) {
+      await crm.enlazarCotizacionNueva(client, { cotizacionId: id });
+    }
 
     res.json({
       ...updated.rows[0],
       items: serializarItems(nuevosItems.rows, req.user?.role),
-      resumen: resumenCotizacion(nuevosItems.rows, req.user?.role)
+      resumen: resumenCotizacion(nuevosItems.rows, req.user?.role),
+      sin_cambios: false
     });
   } catch (error) {
     try {
@@ -4065,17 +4177,25 @@ app.put('/api/cotizaciones/:id', authenticateToken, requireAdmin, validateCotiza
   }
 });
 
-// COTIZACIONES - Versiones anteriores (admin)
+// COTIZACIONES - Versiones v1...vN (admin). La vigente siempre aparece: si aun no tiene
+// fila en cotizacion_versiones (nunca editada o editada antes de guardar ambas filas) se
+// sintetiza desde la tabla cotizaciones.
+const SELECT_COTIZACION_VERSION = 'SELECT * FROM cotizaciones WHERE id = $1';
+
 app.get('/api/cotizaciones/:id/versiones', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Id invalido' });
+    const cotizacion = await pool.query(SELECT_COTIZACION_VERSION, [id]);
+    if (cotizacion.rows.length === 0) return res.status(404).json({ error: 'Cotizacion no encontrada' });
     const result = await pool.query(
       `SELECT version, total, nota, creado_por, creado_en
        FROM cotizacion_versiones
        WHERE cotizacion_id = $1
        ORDER BY version DESC`,
-      [req.params.id]
+      [id]
     );
-    res.json(result.rows);
+    res.json(versionesCotizacion.listarVersiones(result.rows, cotizacion.rows[0]));
   } catch (error) {
     logError(req, error, 'cotizacion_versiones_failed');
     res.status(500).json({ error: 'Error del servidor' });
@@ -4084,23 +4204,42 @@ app.get('/api/cotizaciones/:id/versiones', authenticateToken, requireAdmin, asyn
 
 app.get('/api/cotizaciones/:id/versiones/:version', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const id = parseInt(req.params.id, 10);
+    const version = parseInt(req.params.version, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(version)) return res.status(404).json({ error: 'Version no encontrada' });
     const result = await pool.query(
       `SELECT version, total, nota, creado_por, creado_en, snapshot
        FROM cotizacion_versiones
        WHERE cotizacion_id = $1 AND version = $2`,
-      [req.params.id, req.params.version]
+      [id, version]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Version no encontrada' });
-    const row = result.rows[0];
-    const snapshot = row.snapshot || {};
+    if (result.rows.length > 0) {
+      const row = result.rows[0];
+      const snapshot = row.snapshot || {};
+      return res.json({
+        version: row.version,
+        total: row.total,
+        nota: row.nota,
+        creado_por: row.creado_por,
+        creado_en: row.creado_en,
+        cotizacion: snapshot.cotizacion || null,
+        items: serializarItems(snapshot.items || [], req.user?.role)
+      });
+    }
+    // La vigente sin fila: snapshot desde las tablas actuales.
+    const cotizacion = await pool.query(SELECT_COTIZACION_VERSION, [id]);
+    const actual = cotizacion.rows[0];
+    if (!actual || (Number(actual.version) || 1) !== version) {
+      return res.status(404).json({ error: 'Version no encontrada' });
+    }
+    const items = await pool.query('SELECT * FROM cotizacion_items WHERE cotizacion_id = $1 ORDER BY id', [id]);
     res.json({
-      version: row.version,
-      total: row.total,
-      nota: row.nota,
-      creado_por: row.creado_por,
-      creado_en: row.creado_en,
-      cotizacion: snapshot.cotizacion || null,
-      items: serializarItems(snapshot.items || [], req.user?.role)
+      version,
+      total: actual.total,
+      nota: null,
+      ...versionesCotizacion.autoriaVigente(actual),
+      cotizacion: actual,
+      items: serializarItems(items.rows, req.user?.role)
     });
   } catch (error) {
     logError(req, error, 'cotizacion_version_failed');
@@ -4120,43 +4259,72 @@ app.get('/api/cotizaciones/funnel', authenticateToken, requireAdmin, async (req,
     const hasRange = isValidDate(from) || isValidDate(to);
 
     const params = [];
-    let whereSql = 'WHERE 1=1';
+    // Las archivadas no cuentan en el embudo.
+    let whereSql = 'WHERE c.archivada_en IS NULL';
     if (hasRange) {
       if (isValidDate(from)) {
         params.push(from);
-        whereSql += ` AND created_at::date >= $${params.length}`;
+        whereSql += ` AND c.created_at::date >= $${params.length}`;
       }
       if (isValidDate(to)) {
         params.push(to);
-        whereSql += ` AND created_at::date <= $${params.length}`;
+        whereSql += ` AND c.created_at::date <= $${params.length}`;
       }
     } else {
       params.push(String(days));
-      whereSql += ` AND created_at >= NOW() - ($${params.length} || ' days')::interval`;
+      whereSql += ` AND c.created_at >= NOW() - ($${params.length} || ' days')::interval`;
     }
 
     if (empresa) {
       params.push(`%${empresa}%`);
-      whereSql += ` AND cliente_empresa ILIKE $${params.length}`;
+      whereSql += ` AND c.cliente_empresa ILIKE $${params.length}`;
     }
 
+    // Por estado (derivado, compatibilidad) y por etapa de la oportunidad (fuente de verdad).
     const result = await pool.query(
       `SELECT
-         CASE WHEN estado = 'pendiente' OR estado IS NULL THEN 'revision' ELSE estado END AS estado,
+         CASE WHEN c.estado = 'pendiente' OR c.estado IS NULL THEN 'revision' ELSE c.estado END AS estado,
+         COALESCE(o.etapa, ${crm.etapaDesdeEstadoSql('c.estado')}) AS etapa,
          COUNT(*)::int AS count,
-         COALESCE(SUM(total), 0)::numeric AS amount
-       FROM cotizaciones
+         COALESCE(SUM(c.total), 0)::numeric AS amount
+       FROM cotizaciones c
+       LEFT JOIN crm_oportunidades o ON o.id = c.oportunidad_id
        ${whereSql}
-       GROUP BY 1`,
+       GROUP BY 1, 2`,
       params
     );
+    const sumar = (clave) => {
+      const mapa = new Map();
+      for (const fila of result.rows) {
+        const acc = mapa.get(fila[clave]) || { count: 0, amount: 0 };
+        acc.count += Number(fila.count) || 0;
+        acc.amount = Math.round((acc.amount + (Number(fila.amount) || 0)) * 100) / 100;
+        mapa.set(fila[clave], acc);
+      }
+      return mapa;
+    };
+    const porEstado = sumar('estado');
+    const porEtapa = sumar('etapa');
+    const stages = [...porEstado].map(([estado, v]) => ({ estado, ...v }));
+    const etapas = crm.ETAPAS.map((etapa) => ({ etapa, ...(porEtapa.get(etapa) || { count: 0, amount: 0 }) }));
 
-    res.json({ days: hasRange ? null : days, from: isValidDate(from) ? from : '', to: isValidDate(to) ? to : '', empresa, stages: result.rows });
+    res.json({ days: hasRange ? null : days, from: isValidDate(from) ? from : '', to: isValidDate(to) ? to : '', empresa, stages, etapas });
   } catch (error) {
     console.error('Error obteniendo funnel:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
+
+// Columnas del CRM en el listado y el detalle de cotizaciones: etapa (la de su
+// oportunidad; sin oportunidad, la derivada del estado) y motivo_perdida para todos;
+// el nombre de la empresa del CRM (empresa_crm) solo para el admin. archivada_en ya
+// viene en c.*.
+const columnasCrmCotizacion = (isAdmin) =>
+  `COALESCE(o.etapa, ${crm.etapaDesdeEstadoSql('c.estado')}) AS etapa, o.motivo_perdida` +
+  (isAdmin ? ', ce.nombre AS empresa_crm' : '');
+const joinsCrmCotizacion = (isAdmin) =>
+  'LEFT JOIN crm_oportunidades o ON o.id = c.oportunidad_id' +
+  (isAdmin ? ' LEFT JOIN crm_empresas ce ON ce.id = c.empresa_id' : '');
 
 // COTIZACIONES - Obtener todas
 app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
@@ -4169,8 +4337,15 @@ app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
     const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.min(pageSizeRaw, 200) : 50;
 
-    const whereSql = isAdmin ? '' : 'WHERE c.usuario_id = $1';
+    // Admin: sin las archivadas por defecto; con ?archivadas=1, SOLO las archivadas.
+    // El resto ve todas las suyas, como siempre.
+    const soloArchivadas = isAdmin && ['1', 'true'].includes(String(req.query.archivadas || ''));
     const params = isAdmin ? [] : [req.user.id];
+    const whereSql = isAdmin
+      ? `WHERE c.archivada_en IS ${soloArchivadas ? 'NOT NULL' : 'NULL'}`
+      : 'WHERE c.usuario_id = $1';
+    const columnasCrm = columnasCrmCotizacion(isAdmin);
+    const joinsCrm = joinsCrmCotizacion(isAdmin);
 
     const attachItems = async (rows) => {
       if (!includeItems) return rows;
@@ -4195,9 +4370,10 @@ app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
 
     if (!hasPagination) {
       const result = await pool.query(
-        `SELECT c.*, u.role AS usuario_role
+        `SELECT c.*, u.role AS usuario_role, ${columnasCrm}
          FROM cotizaciones c
          LEFT JOIN usuarios u ON c.usuario_id = u.id
+         ${joinsCrm}
          ${whereSql}
          ORDER BY c.created_at DESC`,
         params
@@ -4217,9 +4393,10 @@ app.get('/api/cotizaciones', authenticateToken, async (req, res) => {
     const offset = (page - 1) * pageSize;
     const pagedParams = [...params, pageSize, offset];
     const dataResult = await pool.query(
-      `SELECT c.*, u.role AS usuario_role
+      `SELECT c.*, u.role AS usuario_role, ${columnasCrm}
        FROM cotizaciones c
        LEFT JOIN usuarios u ON c.usuario_id = u.id
+       ${joinsCrm}
        ${whereSql}
        ORDER BY c.created_at DESC
        LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}`,
@@ -4323,7 +4500,8 @@ app.post('/api/cotizaciones/pdf', authenticateToken, async (req, res) => {
     const pdfRole = rolPropio === 'admin' ? String(payload?.usuario_role || rolPropio).toLowerCase() : rolPropio;
     const isClient = pdfRole === 'client';
     const isAxisProfile = pdfRole === COTIZADOR_STOCK_ADMIN_ROLE;
-    const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa, numero);
+    // La version de la cotizacion (v1...vN) va en el nombre; sin dato, v1.
+    const filename = buildPdfFilename(cotizacion.fecha, cotizacion.proyecto, cotizacion.empresa, numero, payload?.version);
 
     const pdfBuffer = await generateCotizacionPdfBuffer({
       cotizacion,
@@ -4348,9 +4526,11 @@ app.get('/api/cotizaciones/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const isAdmin = req.user?.role === 'admin';
+    const base = `SELECT c.*, u.role AS usuario_role, ${columnasCrmCotizacion(isAdmin)}
+      FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id ${joinsCrmCotizacion(isAdmin)}`;
     const cotizacion = isAdmin
-      ? await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1', [id])
-      : await pool.query('SELECT c.*, u.role AS usuario_role FROM cotizaciones c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = $1 AND c.usuario_id = $2', [id, req.user.id]);
+      ? await pool.query(`${base} WHERE c.id = $1`, [id])
+      : await pool.query(`${base} WHERE c.id = $1 AND c.usuario_id = $2`, [id, req.user.id]);
     if (cotizacion.rows.length === 0) {
       return res.status(404).json({ error: 'Cotización no encontrada' });
     }
@@ -4648,7 +4828,8 @@ const seguimiento = require('../seguimiento').montarSeguimiento({
   authAgente: [agenteLimiter, requireAgente],
   whatsapp: iaWhatsApp,
   leerStock: leerStockAgregado,
-  pdfNombre: ({ created_at, proyecto, empresa, numero }) => buildPdfFilename(created_at, proyecto, empresa, numero),
+  // Nombre sin version: la cotizacion pudo editarse despues de enviarse (el adjunto es `<base>_vN.pdf`).
+  pdfNombre: ({ created_at, proyecto, empresa, numero }) => buildPdfBaseName(created_at, proyecto, empresa, numero),
   logger
 });
 
@@ -4750,7 +4931,8 @@ module.exports = {
   getSheetsClient,
   GEO_PROVIDERS,
   resolveGeo,
-  buildPdfFilename
+  buildPdfFilename,
+  buildPdfBaseName
 };
 
 

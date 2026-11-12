@@ -90,7 +90,7 @@ const FORMATO = `FORMATO DE SALIDA: termina tu respuesta con UN ÚNICO bloque de
 const POR_TIPO = {
   buscar_envios: {
     borradores: '; en esta tarea NO crees borradores',
-    cuerpo: `TAREA buscar_envios: para cada cotización, busca en la carpeta Enviados, desde \`creada_en\`, el correo que lleva adjunto el PDF llamado \`pdf_nombre\` (o un adjunto cuyo nombre contenga "Cotización N°<numero>" o el número de folio). Si hay varios, elige el primero enviado después de \`creada_en\`. Puedes apoyarte en \`cliente_email\` (destinatario) y \`cliente_empresa\`.
+    cuerpo: `TAREA buscar_envios: para cada cotización, busca en la carpeta Enviados, desde \`creada_en\`, el correo que lleva adjunto el PDF cuyo nombre empieza con \`pdf_nombre_base\` y termina en \`_v<N>.pdf\` (cualquier versión; si el ítem no trae \`pdf_nombre_base\`, usa \`pdf_nombre\`) (o un adjunto cuyo nombre contenga "Cotización N°<numero>" o el número de folio). Si hay varios, elige el primero enviado después de \`creada_en\`. Puedes apoyarte en \`cliente_email\` (destinatario) y \`cliente_empresa\`.
 Resultado por ítem: {"cotizacion_id", "encontrado": true|false, "message_id", "conversation_id", "enviado_en", "para": ["email"], "asunto"}. Si no lo encuentras: {"cotizacion_id", "encontrado": false}. Usa los identificadores tal como los entrega el conector.`
   },
   revisar_hilos: {

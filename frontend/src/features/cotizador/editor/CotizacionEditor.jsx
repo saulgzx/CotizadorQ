@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cotizacionesAPI } from '../../../api';
-import { COTIZACION_ESTADOS, DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
+import { DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
+import { ETAPAS } from '../../crm/formato';
+import { etapaDeCotizacion } from '../../crm/etapasCotizacion';
+import { notify } from '../../ui/toast';
+import PanelVersiones from './PanelVersiones';
 import { formatCurrency } from '../cotizadorHelpers';
 import { estadoMargen } from '../margen';
 import {
@@ -35,8 +39,7 @@ const formDesdeCotizacion = (cot) => ({
   cliente_final: cot?.cliente_final || '',
   fecha_ejecucion: fechaInput(cot?.fecha_ejecucion),
   fecha_implementacion: fechaInput(cot?.fecha_implementacion),
-  vms: cot?.vms || '',
-  estado: !cot?.estado || cot.estado === 'pendiente' ? 'revision' : cot.estado
+  vms: cot?.vms || ''
 });
 
 const fechaHora = (valor) => {
@@ -180,105 +183,6 @@ const BuscadorProductos = ({ productos, onAgregar }) => {
   );
 };
 
-const PanelVersiones = ({ cotizacionId, versionActual, onCerrar, onCargar }) => {
-  const [versiones, setVersiones] = useState(null);
-  const [error, setError] = useState('');
-  const [detalle, setDetalle] = useState(null);
-  const [cargando, setCargando] = useState(false);
-
-  useEffect(() => {
-    let vivo = true;
-    cotizacionesAPI
-      .getVersiones(cotizacionId)
-      .then((data) => vivo && setVersiones(Array.isArray(data) ? data : []))
-      .catch((e) => vivo && setError(e.message));
-    return () => {
-      vivo = false;
-    };
-  }, [cotizacionId]);
-
-  const ver = async (version) => {
-    try {
-      setCargando(true);
-      setDetalle(await cotizacionesAPI.getVersion(cotizacionId, version));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setCargando(false);
-    }
-  };
-
-  return (
-    <div className='fixed inset-0 z-[60] flex justify-end bg-slate-950/40 backdrop-blur-[2px]' onClick={onCerrar}>
-      <aside
-        className='flex h-full w-full max-w-md flex-col bg-white shadow-float dark:bg-slate-900'
-        onClick={(e) => e.stopPropagation()}
-        aria-label='Versiones anteriores'
-      >
-        <div className='flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700'>
-          <div>
-            <h3 className='font-semibold text-slate-800'>Versiones anteriores</h3>
-            <p className='text-xs text-slate-500'>Vigente: v{versionActual}. Cada guardado conserva la versión previa.</p>
-          </div>
-          <button type='button' onClick={onCerrar} className='grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100' aria-label='Cerrar'>
-            ✕
-          </button>
-        </div>
-        <div className='flex-1 overflow-auto p-4'>
-          {error && <div className='mb-3 rounded bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'>{error}</div>}
-          {versiones === null && !error && <div className='text-sm text-slate-500'>Cargando…</div>}
-          {versiones?.length === 0 && (
-            <div className='text-sm text-slate-500'>Todavía no hay versiones anteriores: esta cotización nunca se editó.</div>
-          )}
-          <ul className='space-y-2'>
-            {(versiones || []).map((v) => (
-              <li key={v.version} className='rounded-lg border border-slate-200 p-3 dark:border-slate-700'>
-                <div className='flex items-center justify-between gap-2'>
-                  <span className='font-semibold text-slate-800'>v{v.version}</span>
-                  <span className='text-sm font-semibold tabular-nums text-slate-700'>{formatCurrency(Number(v.total) || 0)}</span>
-                </div>
-                <div className='text-xs text-slate-500'>
-                  Reemplazada el {fechaHora(v.creado_en)}
-                  {v.creado_por ? ` por ${v.creado_por}` : ''}
-                </div>
-                {v.nota && <div className='mt-1 text-xs italic text-slate-600'>“{v.nota}”</div>}
-                <button
-                  type='button'
-                  onClick={() => ver(v.version)}
-                  disabled={cargando}
-                  className='mt-2 mq-btn mq-btn-xs mq-btn-fantasma text-slate-900'
-                >
-                  {cargando ? 'Cargando…' : 'Ver detalle'}
-                </button>
-                {detalle?.version === v.version && (
-                  <div className='mt-2 space-y-1 border-t border-slate-100 pt-2 dark:border-slate-700'>
-                    {(detalle.items || []).map((item) => (
-                      <div key={item.id} className='flex justify-between gap-2 text-xs text-slate-600'>
-                        <span className='truncate'>
-                          {item.cantidad}× {item.sku || item.mpn}
-                        </span>
-                        <span className='tabular-nums'>{formatCurrency(Number(item.precio_total) || 0)}</span>
-                      </div>
-                    ))}
-                    <button
-                      type='button'
-                      onClick={() => onCargar(detalle)}
-                      className='mt-2 w-full mq-btn mq-btn-sm mq-btn-primario'
-                    >
-                      Cargar v{v.version} en el editor
-                    </button>
-                    <p className='text-xs text-slate-500'>No se guarda hasta que presiones Guardar: queda como una versión nueva.</p>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </aside>
-    </div>
-  );
-};
-
 const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
   const esAxis = linea.origen === 'AXIS';
   const sinDisty = !(Number(linea.precio_disty) > 0);
@@ -364,6 +268,9 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
   const [modoCosto, setModoCosto] = useState(MODO_COSTO.MANTENER_PRECIO);
   const [gpMasivo, setGpMasivo] = useState('');
   const [nota, setNota] = useState('');
+  // La etapa se guarda aparte (PATCH /estado): no crea versión nueva.
+  const [etapa, setEtapa] = useState('nueva');
+  const [motivoPerdida, setMotivoPerdida] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   const [conflicto, setConflicto] = useState(false);
@@ -386,6 +293,8 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
       setForm(nuevoForm);
       setLineas(nuevasLineas);
       setHuellaGuardada(huella(nuevoForm, nuevasLineas));
+      setEtapa(etapaDeCotizacion(data));
+      setMotivoPerdida(data.motivo_perdida || '');
       totalOriginal.current = Number(data.total) || 0;
       setNota('');
     } catch (e) {
@@ -399,7 +308,10 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
     cargar();
   }, [cargar]);
 
-  const sucio = !cargando && cot && huella(form, lineas) !== huellaGuardada;
+  const contenidoSucio = Boolean(!cargando && cot && huella(form, lineas) !== huellaGuardada);
+  const etapaOriginal = cot ? etapaDeCotizacion(cot) : 'nueva';
+  const etapaCambio = Boolean(cot) && (etapa !== etapaOriginal || (etapa === 'perdida' && motivoPerdida.trim() !== (cot.motivo_perdida || '')));
+  const sucio = contenidoSucio || etapaCambio;
   const resumen = useMemo(() => resumenLineas(lineas), [lineas]);
 
   const cerrar = useCallback(() => {
@@ -502,19 +414,61 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
     if (resumen.negativas > 0 && !window.confirm(`${resumen.negativas} línea(s) quedan con margen negativo. ¿Guardar igual?`)) {
       return;
     }
+    if (etapaCambio && etapa === 'perdida' && !motivoPerdida.trim()) {
+      setError('Indica el motivo de la pérdida.');
+      return;
+    }
     try {
       setGuardando(true);
       setError('');
-      const { estado, ...cliente } = form;
-      const actualizada = await cotizacionesAPI.update(cotizacionId, {
-        expected_version: cot?.version || undefined,
-        estado,
-        nota: nota.trim() || undefined,
-        cliente,
-        items: lineas.map((l, i) => lineaAPayload(l, i))
-      });
-      const combinada = { ...cot, ...actualizada };
+      let combinada = { ...cot };
+      let versionNueva = false;
+      if (contenidoSucio) {
+        const actualizada = await cotizacionesAPI.update(cotizacionId, {
+          expected_version: cot?.version || undefined,
+          nota: nota.trim() || undefined,
+          cliente: form,
+          items: lineas.map((l, i) => lineaAPayload(l, i))
+        });
+        if (actualizada?.sin_cambios) {
+          // El servidor no encontró diferencias: no se creó versión.
+          setHuellaGuardada(huella(form, lineas));
+          if (!etapaCambio) {
+            setAviso('No hay cambios que guardar: no se creó una versión nueva.');
+            notify('No hay cambios que guardar', { tipo: 'info' });
+            return;
+          }
+        } else {
+          versionNueva = true;
+          combinada = { ...combinada, ...actualizada };
+        }
+      }
+      if (etapaCambio) {
+        let conEtapa;
+        try {
+          conEtapa = await cotizacionesAPI.updateEstado(cotizacionId, {
+            etapa,
+            motivo_perdida: etapa === 'perdida' ? motivoPerdida.trim() : undefined
+          });
+        } catch (e) {
+          if (!versionNueva) throw e;
+          // La versión nueva ya quedó guardada: se refleja y solo falta la etapa.
+          setCot(combinada);
+          setHuellaGuardada(huella(form, lineas));
+          setNota('');
+          onSaved?.(combinada);
+          setError(`Se guardó la v${combinada.version || ''}, pero no se pudo cambiar la etapa: ${e.message || 'error del servidor'}`);
+          return;
+        }
+        combinada = {
+          ...combinada,
+          etapa: conEtapa?.etapa || etapa,
+          estado: conEtapa?.estado || combinada.estado,
+          motivo_perdida: etapa === 'perdida' ? (conEtapa?.motivo_perdida ?? motivoPerdida.trim()) : combinada.motivo_perdida
+        };
+      }
       onSaved?.(combinada);
+      if (versionNueva) notify(`Guardada como v${combinada.version || (cot?.version || 1) + 1}`, { tipo: 'ok' });
       if (conPdf) await onExportPdf?.(combinada);
       onClose();
     } catch (e) {
@@ -559,7 +513,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
       return original ? { ...linea, nueva: false, original } : { ...linea, nueva: true, original: null };
     });
     if (detalle.cotizacion) {
-      setForm((prev) => ({ ...formDesdeCotizacion(detalle.cotizacion), estado: prev.estado }));
+      setForm(formDesdeCotizacion(detalle.cotizacion));
     }
     setLineas(restauradas);
     setNota(`Restaurada desde v${detalle.version}`);
@@ -597,14 +551,14 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
         {cot && (
           <>
             <select
-              value={form.estado}
-              onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value }))}
+              value={etapa}
+              onChange={(e) => setEtapa(e.target.value)}
               className={`${inputBase} py-1.5`}
-              aria-label='Estado'
+              aria-label='Etapa'
             >
-              {COTIZACION_ESTADOS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              {ETAPAS.map((o) => (
+                <option key={o.clave} value={o.clave}>
+                  {o.nombre}
                 </option>
               ))}
             </select>
@@ -924,7 +878,20 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
               )}
               <p className='text-xs text-slate-400'>Costo y margen solo se ven con tu cuenta admin; el PDF y el cliente ven precios.</p>
 
-              <Campo label='Qué cambió (queda en el historial)'>
+              {etapa === 'perdida' && (
+                <Campo label='Motivo de la pérdida'>
+                  <textarea
+                    value={motivoPerdida}
+                    onChange={(e) => setMotivoPerdida(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder='Ej. Precio, eligió otra marca, proyecto cancelado'
+                    className={`${inputBase} w-full normal-case tracking-normal`}
+                  />
+                </Campo>
+              )}
+
+              <Campo label={`Nota de la v${(cot?.version || 1) + 1} (qué cambia en esta versión)`}>
                 <textarea
                   value={nota}
                   onChange={(e) => setNota(e.target.value)}
@@ -934,6 +901,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                   className={`${inputBase} w-full normal-case tracking-normal`}
                 />
               </Campo>
+              <p className='-mt-2 text-xs text-slate-400'>Queda guardada en la versión nueva. Cambiar solo la etapa no crea versión.</p>
 
               {error && <div className='rounded bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'>{error}</div>}
 
@@ -989,6 +957,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
         <PanelVersiones
           cotizacionId={cotizacionId}
           versionActual={cot.version || 1}
+          numero={cot.numero || `#${cot.id}`}
           onCerrar={() => setVerVersiones(false)}
           onCargar={cargarVersion}
         />

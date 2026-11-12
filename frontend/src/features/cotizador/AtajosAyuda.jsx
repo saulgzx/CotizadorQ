@@ -8,7 +8,7 @@ const Tecla = ({ children }) => (
 
 export const ATAJOS = [
   { grupo: 'En toda la app', teclas: [['Ctrl', 'K']], texto: 'Buscar vistas y productos' },
-  { grupo: 'En toda la app', teclas: [['Alt', '1…6']], texto: 'Ir a Dashboard, Cotizador, Historial, Stock, Órdenes, CRM' },
+  { grupo: 'En toda la app', teclas: [['Alt', '1…6']], texto: 'Ir a Dashboard, Cotizador, Cotizaciones, Stock, Órdenes, CRM' },
   { grupo: 'En toda la app', teclas: [['?']], texto: 'Mostrar esta ayuda' },
   { grupo: 'Cotizador', teclas: [['/']], texto: 'Buscar producto para agregar' },
   { grupo: 'Cotizador', teclas: [['↑', '↓'], ['Enter']], texto: 'Elegir resultado y agregarlo; el buscador sigue abierto' },
@@ -18,7 +18,7 @@ export const ATAJOS = [
   { grupo: 'CRM', teclas: [['/']], texto: 'Buscar en el CRM (empresas u oportunidades)' },
   { grupo: 'CRM', teclas: [['N']], texto: 'Crear empresa u oportunidad según la pestaña' },
   { grupo: 'CRM', teclas: [['Esc']], texto: 'Cerrar el diálogo abierto' },
-  { grupo: 'Historial', teclas: [['E'], ['P'], ['D']], texto: 'Editar, descargar PDF o duplicar la cotización abierta' },
+  { grupo: 'Cotizaciones', teclas: [['E'], ['P'], ['D']], texto: 'Editar, descargar PDF o duplicar la cotización abierta' },
   { grupo: 'Editor de cotización', teclas: [['Ctrl', 'S']], texto: 'Guardar cambios' },
   { grupo: 'Editor de cotización', teclas: [['Esc']], texto: 'Cerrar el editor' }
 ];

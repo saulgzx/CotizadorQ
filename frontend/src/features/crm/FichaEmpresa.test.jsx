@@ -48,10 +48,10 @@ describe('FichaEmpresa', () => {
     expect(screen.getByLabelText('Etapa de Cotización #101')).toHaveValue('cotizada');
   });
 
-  test('la cotización abre el historial por id', async () => {
+  test('la cotización abre la pestaña Cotizaciones por id', async () => {
     const onAbrir = vi.fn();
     renderConQuery(<FichaEmpresa empresaId={10} onVolver={() => {}} onAbrirCotizacion={onAbrir} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Abrir cotización 101 en el historial' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir cotización 101 en Cotizaciones' }));
     expect(onAbrir).toHaveBeenCalledWith(77);
   });
 

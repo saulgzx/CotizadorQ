@@ -7,9 +7,13 @@
  *   DESPUES del COMMIT de la cotizacion, en su propia transaccion, y nunca lanza: si el
  *   CRM falla, la cotizacion ya esta guardada y solo queda el error en el log (la
  *   migracion del siguiente arranque la enlaza, porque busca cotizaciones sin empresa).
- * - sincronizarEstadoCotizacion: aprobada/rechazada cierran la oportunidad abierta.
+ * - aplicarEtapaOportunidad: cambia la etapa de una oportunidad con las reglas del CRM y
+ *   deriva cotizaciones.estado de todas sus cotizaciones (dentro de una transaccion).
+ * - cambiarEtapaDeCotizacion: PATCH /api/cotizaciones/:id/estado. La etapa de la
+ *   oportunidad es la fuente de verdad; el estado de la cotizacion se deriva de ella.
  */
 const repositorio = require('./repositorio');
+const reglas = require('./reglas');
 const {
   MOTIVO_MIGRADO,
   MOTIVO_COTIZADOR,
@@ -19,6 +23,7 @@ const {
   normalizarEmail,
   combinarMarcas,
   etapaDesdeEstado,
+  estadoDesdeEtapa,
   esEtapaCerrada
 } = require('./normalizar');
 const { logger: loggerApp } = require('../utils/logger');
@@ -146,6 +151,8 @@ const enlazarAOportunidad = async (
     oportunidad_id: oportunidad.id
   };
   await repo.vincularCotizacion(db, cotizacion.id, vinculo);
+  // La cotizacion entra a una oportunidad que ya tiene etapa: su estado se deriva de ella.
+  await repo.derivarEstadoCotizaciones(db, oportunidad.id);
   return { ...vinculo, oportunidad_creada: false };
 };
 
@@ -274,25 +281,123 @@ const enlazarCotizacionNueva = async (
   }
 };
 
-const ETAPA_POR_ESTADO = { aprobada: 'ganada', rechazada: 'perdida' };
+/**
+ * Cambia la etapa de una oportunidad (bloqueada aqui) con las reglas del CRM
+ * (reglas.cambiosOportunidad: etapa_desde, cerrada_en, motivo obligatorio para perdida,
+ * salir de perdida borra el motivo; puede REABRIR una cerrada) y deriva el estado de
+ * todas sus cotizaciones. Corre en la transaccion de `db`.
+ *
+ * - motivoPerdida: el que indico el usuario (forma nueva).
+ * - motivoPorDefecto: se usa al PASAR a perdida sin motivo (forma heredada 'rechazada').
+ * - estadoHeredado: forma heredada { estado }. Si la etapa actual ya deriva ese estado
+ *   (p. ej. 'enviada' con la oportunidad en negociacion) no se toca la etapa.
+ *
+ * Devuelve la oportunidad como quedo, o null si no existe.
+ */
+const aplicarEtapaOportunidad = async (
+  db,
+  {
+    oportunidadId,
+    etapa,
+    motivoPerdida = null,
+    motivoPorDefecto = null,
+    estadoHeredado = null,
+    repo = repositorio
+  }
+) => {
+  const oportunidad = await repo.obtenerOportunidad(db, oportunidadId, {
+    bloquear: true
+  });
+  if (!oportunidad) return null;
+  let actualizada = oportunidad;
+  const mismoEstado =
+    estadoHeredado && estadoDesdeEtapa(oportunidad.etapa) === estadoHeredado;
+  if (!mismoEstado) {
+    const cuerpo = { etapa };
+    const motivo =
+      motivoPerdida ||
+      (etapa === 'perdida' && oportunidad.etapa !== 'perdida'
+        ? motivoPorDefecto
+        : null);
+    if (motivo) cuerpo.motivo_perdida = motivo;
+    const cambios = reglas.cambiosOportunidad(oportunidad, cuerpo);
+    if (Object.keys(cambios).length > 0) {
+      actualizada =
+        (await repo.actualizarOportunidad(db, oportunidad.id, cambios)) ||
+        oportunidad;
+    }
+  }
+  await repo.derivarEstadoCotizaciones(db, oportunidad.id);
+  return actualizada;
+};
 
 /**
- * Cotizacion aprobada => su oportunidad abierta pasa a ganada; rechazada => perdida
- * ("Rechazada en el cotizador"). Best-effort: nunca lanza. Devuelve la fila cerrada o null.
+ * PATCH /api/cotizaciones/:id/estado. Si la cotizacion no tiene oportunidad, primero
+ * intenta enlazarla (enlazarCotizacionNueva, transaccion propia, nunca lanza). Luego,
+ * en una transaccion: con oportunidad, cambia su etapa (aplicarEtapaOportunidad) y
+ * deriva el estado de todas sus cotizaciones; sin oportunidad, guarda solo el estado
+ * derivado. Devuelve la cotizacion (c.*) con `etapa` y `motivo_perdida`, o null si no existe.
+ * Lanza { status: 400 } si las reglas del CRM rechazan el cambio.
  */
-const sincronizarEstadoCotizacion = async (
-  db,
-  { oportunidadId, estado, repo = repositorio, log = loggerApp }
+const cambiarEtapaDeCotizacion = async (
+  pool,
+  {
+    cotizacionId,
+    etapa,
+    motivoPerdida = null,
+    motivoPorDefecto = null,
+    estadoHeredado = null,
+    repo = repositorio,
+    log = loggerApp
+  }
 ) => {
-  const etapa = ETAPA_POR_ESTADO[estado];
-  if (!etapa || !oportunidadId) return null;
+  const previa = await repo.obtenerCotizacion(pool, cotizacionId);
+  if (!previa) return null;
+  if (!previa.oportunidad_id && !previa.empresa_id) {
+    const client = await pool.connect();
+    try {
+      await enlazarCotizacionNueva(client, { cotizacionId, repo, log });
+    } finally {
+      client.release();
+    }
+  }
+  const existe = await repo.conTransaccion(pool, async (client) => {
+    const cotizacion = await repo.obtenerCotizacion(client, cotizacionId);
+    if (!cotizacion) return false;
+    const oportunidad = cotizacion.oportunidad_id
+      ? await aplicarEtapaOportunidad(client, {
+          oportunidadId: cotizacion.oportunidad_id,
+          etapa,
+          motivoPerdida,
+          motivoPorDefecto,
+          estadoHeredado,
+          repo
+        })
+      : null;
+    if (!oportunidad) {
+      await repo.guardarEstadoCotizacion(
+        client,
+        cotizacion.id,
+        estadoDesdeEtapa(etapa)
+      );
+    }
+    return true;
+  });
+  if (!existe) return null;
+  return repo.obtenerCotizacionConEtapa(pool, cotizacionId);
+};
+
+/**
+ * Despues de cambiar la etapa de una oportunidad FUERA de una transaccion (seguimiento
+ * automatico): deriva el estado de sus cotizaciones. Best-effort: nunca lanza.
+ */
+const derivarEstadoSinFallar = async (
+  db,
+  oportunidadId,
+  { repo = repositorio, log = loggerApp } = {}
+) => {
   try {
-    return await repo.cerrarOportunidadAbierta(
-      db,
-      oportunidadId,
-      etapa,
-      etapa === 'perdida' ? MOTIVO_COTIZADOR : null
-    );
+    return await repo.derivarEstadoCotizaciones(db, oportunidadId);
   } catch (error) {
     log.error(
       {
@@ -300,7 +405,7 @@ const sincronizarEstadoCotizacion = async (
         oportunidad_id: oportunidadId,
         err: { message: error?.message, code: error?.code }
       },
-      'No se pudo actualizar la oportunidad tras el cambio de estado'
+      'No se pudo derivar el estado de las cotizaciones tras el cambio de etapa'
     );
     return null;
   }
@@ -312,5 +417,7 @@ module.exports = {
   resolverContacto,
   enlazarCotizacion,
   enlazarCotizacionNueva,
-  sincronizarEstadoCotizacion
+  aplicarEtapaOportunidad,
+  cambiarEtapaDeCotizacion,
+  derivarEstadoSinFallar
 };

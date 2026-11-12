@@ -25,6 +25,7 @@ process.env.GOOGLE_SHEETS_ID = '';
 process.env.GOOGLE_SHEETS_URL = '';
 
 const app = require('../src/app');
+const { crearBdCotizacionEstado } = require('./helpers/bdCotizacionEstado');
 
 const makeToken = (payload) => jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 const ADMIN = { id: 1, usuario: 'admin', role: 'admin' };
@@ -503,85 +504,180 @@ describe('GET /api/cotizaciones/:id', () => {
 });
 
 describe('PATCH /api/cotizaciones/:id/estado', () => {
+  // La etapa de la oportunidad es la fuente de verdad; cotizaciones.estado se deriva.
+  // Antes era un UPDATE directo del estado; ahora pasa por el CRM (crm.cambiarEtapaDeCotizacion),
+  // asi que estos tests usan una BD falsa con estado (tests/helpers/bdCotizacionEstado.js).
   const patch = (id, body, user) => conAuth(request(app).patch(`/api/cotizaciones/${id}/estado`), user).send(body);
-  const poolEstado = (role, duenos) => {
-    const updates = [];
-    mockQuery.mockImplementation(poolConDueno({
-      role,
-      duenos,
-      extra: [[incluye('UPDATE cotizaciones SET estado = $1 WHERE id = $2 RETURNING *'), (sql, p) => {
-        updates.push(p);
-        return { rows: String(p[1]) === '404' ? [] : [{ id: Number(p[1]), estado: p[0] }] };
-      }]]
-    }));
-    return updates;
+  const preparar = (role, duenos, { cotizaciones = [{ id: 77, usuario_id: 2, estado: 'revision' }], oportunidades = [] } = {}) => {
+    const bd = crearBdCotizacionEstado({ cotizaciones, oportunidades });
+    mockQuery.mockImplementation(bd.conRespaldo(poolConDueno({ role, duenos })));
+    mockConnect.mockResolvedValue(bd.cliente);
+    return bd;
   };
+  const escrituras = (bd) => bd.sqls.filter((s) => s.startsWith('UPDATE'));
 
-  test.each(['enviada', 'revision', 'rechazada', 'aprobada'])('admin: estado "%s" permitido y se guarda tal cual', async (estado) => {
-    const updates = poolEstado('admin', { 77: 2 });
-    const res = await patch(77, { estado }, ADMIN);
-    expect(res.status).toBe(200);
-    expect(res.body.estado).toBe(estado);
-    expect(updates).toEqual([[estado, '77']]);
+  describe('forma heredada { estado }', () => {
+    test.each([
+      ['enviada', 'cotizada'],
+      ['revision', 'nueva'],
+      ['rechazada', 'perdida'],
+      ['aprobada', 'ganada']
+    ])('admin: estado "%s" se guarda (sin oportunidad) y responde la etapa "%s"', async (estado, etapa) => {
+      const bd = preparar('admin', { 77: 2 });
+      const res = await patch(77, { estado }, ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: 77, estado, etapa });
+      expect(bd.cots.get(77).estado).toBe(estado);
+    });
+
+    test('"pendiente" es un alias: se guarda como "revision" (etapa nueva)', async () => {
+      const bd = preparar('admin', { 77: 2 });
+      const res = await patch(77, { estado: 'pendiente' }, ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ estado: 'revision', etapa: 'nueva' });
+      expect(bd.cots.get(77).estado).toBe('revision');
+    });
+
+    test('con oportunidad: cambia su etapa y deriva el estado de TODAS sus cotizaciones', async () => {
+      const bd = preparar('admin', { 77: 2 }, {
+        cotizaciones: [{ id: 77, usuario_id: 2, estado: 'revision', oportunidad_id: 9, empresa_id: 3 }, { id: 78, estado: 'revision', oportunidad_id: 9, empresa_id: 3 }],
+        oportunidades: [{ id: 9, etapa: 'nueva' }]
+      });
+      const res = await patch(77, { estado: 'aprobada' }, ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ estado: 'aprobada', etapa: 'ganada' });
+      expect(bd.ops.get(9).cerrada_en).toBeInstanceOf(Date);
+      expect(bd.cots.get(78).estado).toBe('aprobada');
+    });
+
+    test('"rechazada" usa el motivo por defecto del cotizador', async () => {
+      const bd = preparar('admin', { 77: 2 }, {
+        cotizaciones: [{ id: 77, usuario_id: 2, estado: 'enviada', oportunidad_id: 9, empresa_id: 3 }],
+        oportunidades: [{ id: 9, etapa: 'cotizada' }]
+      });
+      const res = await patch(77, { estado: 'rechazada' }, ADMIN);
+      expect(res.body).toMatchObject({ estado: 'rechazada', etapa: 'perdida', motivo_perdida: 'Rechazada en el cotizador' });
+      expect(bd.ops.get(9).motivo_perdida).toBe('Rechazada en el cotizador');
+    });
+
+    test('"enviada" con la oportunidad en negociacion no la hace retroceder', async () => {
+      const bd = preparar('admin', { 77: 2 }, {
+        cotizaciones: [{ id: 77, usuario_id: 2, estado: 'enviada', oportunidad_id: 9, empresa_id: 3 }],
+        oportunidades: [{ id: 9, etapa: 'negociacion' }]
+      });
+      const res = await patch(77, { estado: 'enviada' }, ADMIN);
+      expect(res.body).toMatchObject({ estado: 'enviada', etapa: 'negociacion' });
+      expect(bd.sqls.some((s) => s.startsWith('UPDATE crm_oportunidades'))).toBe(false);
+    });
+
+    test('reabre: "enviada" sobre una oportunidad ganada la vuelve a cotizada', async () => {
+      const bd = preparar('admin', { 77: 2 }, {
+        cotizaciones: [{ id: 77, usuario_id: 2, estado: 'aprobada', oportunidad_id: 9, empresa_id: 3 }],
+        oportunidades: [{ id: 9, etapa: 'ganada', cerrada_en: new Date() }]
+      });
+      const res = await patch(77, { estado: 'enviada' }, ADMIN);
+      expect(res.body).toMatchObject({ estado: 'enviada', etapa: 'cotizada' });
+      expect(bd.ops.get(9).cerrada_en).toBeNull();
+    });
+
+    test.each([['borrada'], ['APROBADA'], ['']])('estado "%s" rechazado con 400 "Estado invalido"', async (estado) => {
+      const bd = preparar('admin', { 77: 2 });
+      const res = await patch(77, { estado }, ADMIN);
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: 'Estado invalido' });
+      expect(escrituras(bd)).toEqual([]);
+    });
+
+    test('sin estado ni etapa en el cuerpo: 400', async () => {
+      preparar('admin', { 77: 2 });
+      const res = await patch(77, {}, ADMIN);
+      expect(res.status).toBe(400);
+    });
   });
 
-  test('"pendiente" es un alias: se guarda como "revision"', async () => {
-    const updates = poolEstado('admin', { 77: 2 });
-    const res = await patch(77, { estado: 'pendiente' }, ADMIN);
-    expect(res.status).toBe(200);
-    expect(updates).toEqual([['revision', '77']]);
-  });
+  describe('forma nueva { etapa, motivo_perdida? }', () => {
+    const conOp = (etapa = 'nueva', extra = {}) => ({
+      cotizaciones: [{ id: 77, usuario_id: 2, estado: 'revision', oportunidad_id: 9, empresa_id: 3 }],
+      oportunidades: [{ id: 9, etapa, ...extra }]
+    });
 
-  test.each([['borrada'], ['APROBADA'], ['']])('estado "%s" rechazado con 400 "Estado invalido"', async (estado) => {
-    const updates = poolEstado('admin', { 77: 2 });
-    const res = await patch(77, { estado }, ADMIN);
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Estado invalido' });
-    expect(updates).toEqual([]);
-  });
+    test('cambia la etapa (negociacion) y deriva el estado', async () => {
+      const bd = preparar('admin', { 77: 2 }, conOp('nueva'));
+      const res = await patch(77, { etapa: 'negociacion' }, ADMIN);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: 77, estado: 'enviada', etapa: 'negociacion' });
+      expect(bd.ops.get(9).etapa).toBe('negociacion');
+    });
 
-  test('sin estado en el cuerpo: 400', async () => {
-    poolEstado('admin', { 77: 2 });
-    const res = await patch(77, {}, ADMIN);
-    expect(res.status).toBe(400);
+    test('perdida con motivo; luego reabrir a nueva borra el motivo', async () => {
+      const bd = preparar('admin', { 77: 2 }, conOp('cotizada'));
+      const perdida = await patch(77, { etapa: 'perdida', motivo_perdida: '  Precio  alto ' }, ADMIN);
+      expect(perdida.body).toMatchObject({ estado: 'rechazada', etapa: 'perdida', motivo_perdida: 'Precio alto' });
+      const reabierta = await patch(77, { etapa: 'nueva' }, ADMIN);
+      expect(reabierta.body).toMatchObject({ estado: 'revision', etapa: 'nueva', motivo_perdida: null });
+      expect(bd.ops.get(9).cerrada_en).toBeNull();
+    });
+
+    test('perdida sin motivo => 400 "Indica el motivo de la pérdida" sin escribir', async () => {
+      const bd = preparar('admin', { 77: 2 }, conOp('cotizada'));
+      for (const body of [{ etapa: 'perdida' }, { etapa: 'perdida', motivo_perdida: '   ' }]) {
+        const res = await patch(77, body, ADMIN);
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'Indica el motivo de la pérdida' });
+      }
+      expect(escrituras(bd)).toEqual([]);
+    });
+
+    test('etapa invalida => 400', async () => {
+      preparar('admin', { 77: 2 }, conOp());
+      const res = await patch(77, { etapa: 'cerrada' }, ADMIN);
+      expect(res).toMatchObject({ status: 400, body: { error: 'Etapa invalida' } });
+    });
+
+    test('sin oportunidad (y sin poder enlazarla): guarda solo el estado derivado', async () => {
+      const bd = preparar('admin', { 77: 2 });
+      const res = await patch(77, { etapa: 'ganada' }, ADMIN);
+      expect(res.body).toMatchObject({ estado: 'aprobada', etapa: 'ganada' });
+      expect(bd.cots.get(77).estado).toBe('aprobada');
+    });
   });
 
   test('cliente dueno puede cambiar el estado de su cotizacion', async () => {
-    const updates = poolEstado('client', { 77: 2 });
+    const bd = preparar('client', { 77: 2 });
     const res = await patch(77, { estado: 'enviada' }, CLIENTE);
     expect(res.status).toBe(200);
-    expect(updates).toEqual([['enviada', '77']]);
+    expect(bd.cots.get(77).estado).toBe('enviada');
   });
 
-  test('SOSPECHOSO: el cliente dueno puede marcar su propia cotizacion como "aprobada"', async () => {
-    const updates = poolEstado('client', { 77: 2 });
-    const res = await patch(77, { estado: 'aprobada' }, CLIENTE);
-    expect(res.status).toBe(200);
-    expect(updates).toEqual([['aprobada', '77']]);
+  test('SOSPECHOSO: el cliente dueno puede marcar su propia cotizacion como "aprobada" (o ganada)', async () => {
+    const bd = preparar('client', { 77: 2 });
+    expect((await patch(77, { estado: 'aprobada' }, CLIENTE)).status).toBe(200);
+    expect((await patch(77, { etapa: 'ganada' }, CLIENTE)).status).toBe(200);
+    expect(bd.cots.get(77).estado).toBe('aprobada');
   });
 
   test('cliente que no es dueno: 403 "Permiso denegado" sin actualizar', async () => {
-    const updates = poolEstado('client', { 77: 2 });
+    const bd = preparar('client', { 77: 2 });
     const res = await patch(77, { estado: 'aprobada' }, OTRO_CLIENTE);
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ error: 'Permiso denegado' });
-    expect(updates).toEqual([]);
+    expect(bd.sqls).toEqual([]);
   });
 
   test('cot_stock_admin no es admin aqui: sobre cotizacion ajena recibe 403', async () => {
-    const updates = poolEstado('cot_stock_admin', { 77: 2 });
-    const res = await patch(77, { estado: 'aprobada' }, STOCK_ADMIN);
+    const bd = preparar('cot_stock_admin', { 77: 2 });
+    const res = await patch(77, { etapa: 'ganada' }, STOCK_ADMIN);
     expect(res.status).toBe(403);
-    expect(updates).toEqual([]);
+    expect(bd.sqls).toEqual([]);
   });
 
-  test('cotizacion inexistente: no-admin recibe 404 (resolucion de dueno); admin recibe 404 por UPDATE vacio', async () => {
-    poolEstado('client', {});
+  test('cotizacion inexistente: no-admin recibe 404 (resolucion de dueno); admin recibe 404 del CRM', async () => {
+    preparar('client', {}, { cotizaciones: [] });
     const noAdmin = await patch(404, { estado: 'enviada' }, CLIENTE);
     expect(noAdmin.status).toBe(404);
 
     mockQuery.mockReset();
-    poolEstado('admin', {});
+    preparar('admin', {}, { cotizaciones: [] });
     const admin = await patch(404, { estado: 'enviada' }, ADMIN);
     expect(admin.status).toBe(404);
   });

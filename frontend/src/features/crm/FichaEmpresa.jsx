@@ -7,6 +7,7 @@ import { useMoverOportunidad } from './EmbudoTab';
 import { ETAPAS, diasTexto, fechaCL, mensajeError, nombreEtapa, porcentaje, usd } from './formato';
 import { claseInput } from './Dialogo';
 import { EstadoVacio, ListaEsqueleto, TarjetasEsqueleto } from '../ui/Esqueleto';
+import { EtapaCotizacion } from './CotizacionesPiezas';
 import { notify } from '../ui/toast';
 
 const Seccion = ({ titulo, accion, children }) => (
@@ -192,7 +193,7 @@ export default function FichaEmpresa({ empresaId, onVolver, onAbrirCotizacion, r
                 <tr>
                   <th scope='col' className='px-2 py-1 font-semibold'>N°</th>
                   <th scope='col' className='px-2 py-1 font-semibold'>Fecha</th>
-                  <th scope='col' className='px-2 py-1 font-semibold'>Estado</th>
+                  <th scope='col' className='px-2 py-1 font-semibold'>Etapa</th>
                   <th scope='col' className='px-2 py-1 text-right font-semibold'>Total</th>
                 </tr>
               </thead>
@@ -201,13 +202,13 @@ export default function FichaEmpresa({ empresaId, onVolver, onAbrirCotizacion, r
                   <tr key={c.id}>
                     <td className='px-2 py-1.5 font-medium'>
                       {onAbrirCotizacion ? (
-                        <button type='button' onClick={() => onAbrirCotizacion(c.id)} className='text-blue-700 hover:underline dark:text-blue-300' aria-label={`Abrir cotización ${c.numero} en el historial`}>
+                        <button type='button' onClick={() => onAbrirCotizacion(c.id)} className='text-blue-700 hover:underline dark:text-blue-300' aria-label={`Abrir cotización ${c.numero} en Cotizaciones`}>
                           #{c.numero}
                         </button>
                       ) : `#${c.numero}`}
                     </td>
                     <td className='px-2 py-1.5 text-slate-600 dark:text-slate-300'>{fechaCL(c.created_at)}</td>
-                    <td className='px-2 py-1.5 capitalize text-slate-600 dark:text-slate-300'>{c.estado}</td>
+                    <td className='px-2 py-1.5'><EtapaCotizacion cot={c} /></td>
                     <td className='px-2 py-1.5 text-right tabular-nums'>{usd(c.total)}</td>
                   </tr>
                 ))}

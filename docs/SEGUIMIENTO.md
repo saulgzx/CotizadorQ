@@ -10,12 +10,19 @@ miniPC) y avisa al dueño. El dueño revisa y envía.
 ## Cómo funciona
 
 1. **Alta automática.** En cada ciclo, toda oportunidad del CRM en etapa `nueva` o `cotizada` con una
-   cotización vinculada creada en los últimos 30 días (`SEGUIMIENTO_DIAS_ALTA`) y sin seguimiento entra
-   en `buscando_envio`. Así, al activar el módulo por primera vez no entran cotizaciones viejas.
+   cotización vinculada (no archivada) creada en los últimos 30 días (`SEGUIMIENTO_DIAS_ALTA`) y sin
+   seguimiento entra en `buscando_envio`. Así, al activar el módulo por primera vez no entran cotizaciones
+   viejas. Una cotización recién creada (estado `revision`) tiene su oportunidad en `nueva`.
 2. **Vincular el correo.** En cada turno de revisión se crea una tarea `buscar_envios`: el agente busca
-   en Enviados el correo con el PDF de la cotización (`pdf_nombre` sale de `buildPdfFilename`, el mismo
-   nombre que genera `POST /api/cotizaciones/pdf`). Si en 10 días hábiles no aparece, queda `sin_envio`
+   en Enviados el correo con el PDF de la cotización. Si en 10 días hábiles no aparece, queda `sin_envio`
    (aparece en el resumen; "reanudar" vuelve a buscar).
+   - El PDF se llama `<base>_v<N>.pdf` (`buildPdfFilename` en `POST /api/cotizaciones/pdf`; `N` es la
+     `version` de la cotización que manda el frontend, por defecto 1). Como la cotización puede editarse
+     después de enviarla, no se sabe qué versión salió: cada ítem lleva `pdf_nombre_base` (`<base>`, de
+     `buildPdfBaseName`, sin versión ni extensión) y `pdf_nombre` (`<base>_v1.pdf`, por compatibilidad
+     con el agente actual, cuyo prompt nombra ese campo). Las `instrucciones` de la tarea piden aceptar
+     cualquier sufijo `_v<N>.pdf`, y se mantiene el respaldo por folio ("COT-<numero>" / "Cotización
+     N°<numero>"), que también encuentra cualquier versión.
 3. **Cadencia** (días hábiles de Chile, acciones a las 08:00 de Chile del día que toca):
    - 1er seguimiento: 3 días hábiles después del envío.
    - 2º seguimiento: 7 días hábiles después de que el dueño **envió** el 1º.
@@ -33,6 +40,14 @@ miniPC) y avisa al dueño. El dueño revisa y envía.
    - Un correo manual del dueño en el hilo reinicia la espera del paso actual.
 5. **Oportunidad cambiada a mano** a `ganada`, `perdida` o `negociacion` mientras está en seguimiento:
    el seguimiento se pausa.
+6. **Estado de la cotización.** Cuando el seguimiento cambia la etapa (`crmAdaptador.cambiarEtapa`:
+   `negociacion` al responder, `perdida` "Sin respuesta" al cerrar...), deriva `cotizaciones.estado` de
+   todas las cotizaciones de la oportunidad con la tabla del CRM (`docs/CRM.md`, "Estado y etapa").
+   Es best-effort: si ese `UPDATE` falla se registra `crm_estado_error` y el cambio de etapa queda.
+7. **Archivadas.** Una oportunidad archivada (`crm_oportunidades.archivada_en`, ver archivado en
+   `docs/CRM.md`) queda congelada: no entra al alta, no la toma el ciclo y no sale en `/hoy`, `/lista`,
+   `/oportunidad/:id` (404), ni en las 5 abiertas más grandes del resumen semanal. Su fila de
+   `crm_seguimientos` no se borra: al restaurarla, el seguimiento sigue donde estaba.
 
 Solo se guarda del correo lo que pide el contrato: ids (message/conversation/borrador), fechas,
 remitente (en el evento de respuesta) y un resumen de ≤ 400 caracteres al que además se le quitan
@@ -132,7 +147,8 @@ hay que agregarlos al archivo.
 `crm_seguimiento_estado`. Se crean al arrancar (idempotente). Las claves foráneas hacia
 `crm_oportunidades` se agregan solo cuando esa tabla existe (se reintenta en cada arranque).
 
-Todo acceso a las tablas del CRM pasa por `backend/src/seguimiento/crmAdaptador.js`.
+Todo acceso a las tablas del CRM pasa por `backend/src/seguimiento/crmAdaptador.js` (que para derivar el
+estado reutiliza `crm/enlace.derivarEstadoSinFallar`).
 
 ## Cómo verificar tras el deploy
 

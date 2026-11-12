@@ -80,7 +80,9 @@ describe('empresas', () => {
 
     const res = await get(`/empresas/${empresa.id}`);
     expect(res.status).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual(['contactos', 'cotizaciones', 'empresa', 'oportunidades', 'resumen']);
+    // + archivadas: conteos de lo archivado, que no sale en la ficha.
+    expect(Object.keys(res.body).sort()).toEqual(['archivadas', 'contactos', 'cotizaciones', 'empresa', 'oportunidades', 'resumen']);
+    expect(res.body.archivadas).toEqual({ oportunidades: 0, cotizaciones: 0 });
     expect(res.body.cotizaciones[0]).toEqual({
       id: cot.id, numero: cot.numero, total: 1000, estado: 'revision', created_at: expect.any(String), contacto_id: null, oportunidad_id: null
     });
@@ -201,7 +203,9 @@ describe('contactos', () => {
 describe('oportunidades', () => {
   const RESUMEN = [
     'id', 'titulo', 'etapa', 'empresa_id', 'empresa_nombre', 'contacto_id', 'contacto_nombre', 'marca', 'es_proyecto', 'monto',
-    'fecha_cierre_estimada', 'motivo_perdida', 'cotizaciones', 'dias_en_etapa', 'created_at', 'updated_at'
+    'fecha_cierre_estimada', 'motivo_perdida', 'cotizaciones', 'dias_en_etapa', 'created_at', 'updated_at',
+    // Para que el tablero enlace a la cotizacion vigente mas reciente.
+    'cotizacion_id', 'cotizacion_numero', 'archivada_en'
   ];
 
   test('POST 201 devuelve OportunidadResumen; valida empresa, contacto, etapa, marca, monto y fecha', async () => {
@@ -262,8 +266,9 @@ describe('oportunidades', () => {
 
     const res = await post(`/oportunidades/${op.id}/cotizaciones`, { cotizacion_id: cot.id });
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ etapa: 'cotizada', cotizaciones: 1, monto: 321.46 });
-    expect(mem.estado.cotizaciones[0]).toMatchObject({ empresa_id: empresa.id, oportunidad_id: op.id });
+    expect(res.body).toMatchObject({ etapa: 'cotizada', cotizaciones: 1, monto: 321.46, cotizacion_id: cot.id, cotizacion_numero: cot.numero });
+    // La cotizacion vinculada toma el estado derivado de la etapa.
+    expect(mem.estado.cotizaciones[0]).toMatchObject({ empresa_id: empresa.id, oportunidad_id: op.id, estado: 'enviada' });
 
     expect((await post(`/oportunidades/${op.id}/cotizaciones`, { cotizacion_id: 999 })).status).toBe(404);
     expect((await post('/oportunidades/999/cotizaciones', { cotizacion_id: cot.id })).status).toBe(404);
@@ -318,5 +323,84 @@ describe('embudo', () => {
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Error del servidor' });
     expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ event: 'crm_error' }), expect.any(String));
+  });
+});
+
+describe('etapa -> estado de las cotizaciones', () => {
+  test('PATCH /oportunidades/:id con etapa deriva el estado de todas sus cotizaciones (en la misma transaccion)', async () => {
+    const empresa = await crearEmpresa('Sonda');
+    const op = (await post('/oportunidades', { empresa_id: empresa.id, titulo: 'X' })).body;
+    const a = mem.agregarCotizacion({ cliente_empresa: 'Sonda' });
+    const b = mem.agregarCotizacion({ cliente_empresa: 'Sonda' });
+    await post(`/oportunidades/${op.id}/cotizaciones`, { cotizacion_id: a.id });
+    await post(`/oportunidades/${op.id}/cotizaciones`, { cotizacion_id: b.id });
+
+    const estados = () => mem.estado.cotizaciones.map((c) => c.estado);
+    expect(estados()).toEqual(['enviada', 'enviada']);
+    await patch(`/oportunidades/${op.id}`, { etapa: 'ganada' });
+    expect(estados()).toEqual(['aprobada', 'aprobada']);
+    await patch(`/oportunidades/${op.id}`, { etapa: 'perdida', motivo_perdida: 'Precio' });
+    expect(estados()).toEqual(['rechazada', 'rechazada']);
+    await patch(`/oportunidades/${op.id}`, { etapa: 'nueva' });
+    expect(estados()).toEqual(['revision', 'revision']);
+    await patch(`/oportunidades/${op.id}`, { etapa: 'negociacion' });
+    expect(estados()).toEqual(['enviada', 'enviada']);
+  });
+
+  test('sin cambio de etapa no se deriva nada; si derivar falla, el PATCH no queda a medias', async () => {
+    const empresa = await crearEmpresa('Sonda');
+    const op = (await post('/oportunidades', { empresa_id: empresa.id, titulo: 'X' })).body;
+    mem.llamadas.length = 0;
+    await patch(`/oportunidades/${op.id}`, { titulo: 'Y' });
+    expect(mem.llamadas).not.toContain('derivarEstadoCotizaciones');
+
+    mem.fallarEn('derivarEstadoCotizaciones');
+    const res = await patch(`/oportunidades/${op.id}`, { etapa: 'ganada' });
+    expect(res.status).toBe(500);
+    expect(mem.estado.oportunidades[0].etapa).toBe('nueva'); // ROLLBACK
+  });
+});
+
+describe('archivadas', () => {
+  const preparar = async () => {
+    const empresa = await crearEmpresa('Sonda');
+    const viva = (await post('/oportunidades', { empresa_id: empresa.id, titulo: 'Viva', monto_manual: 100 })).body;
+    const archivada = (await post('/oportunidades', { empresa_id: empresa.id, titulo: 'Archivada', monto_manual: 900 })).body;
+    const cotViva = mem.agregarCotizacion({ cliente_empresa: 'Sonda', total: 100 });
+    const cotArch = mem.agregarCotizacion({ cliente_empresa: 'Sonda', total: 900 });
+    await post(`/oportunidades/${viva.id}/cotizaciones`, { cotizacion_id: cotViva.id });
+    await post(`/oportunidades/${archivada.id}/cotizaciones`, { cotizacion_id: cotArch.id });
+    await mem.repo.archivarCotizaciones(null, { ids: [cotArch.id] });
+    return { empresa, viva, archivada, cotViva, cotArch };
+  };
+
+  test('archivar por ids archiva la oportunidad que se queda sin cotizaciones vigentes', async () => {
+    const { archivada, cotArch } = await preparar();
+    expect(mem.estado.cotizaciones.find((c) => c.id === cotArch.id).archivada_en).toBeInstanceOf(Date);
+    expect(mem.estado.oportunidades.find((o) => o.id === archivada.id).archivada_en).toBeInstanceOf(Date);
+  });
+
+  test('no salen en GET /oportunidades, el embudo ni los agregados de empresas', async () => {
+    const { viva } = await preparar();
+    expect((await get('/oportunidades')).body.items.map((o) => o.id)).toEqual([viva.id]);
+    const embudo = (await get('/embudo')).body;
+    expect(embudo.abiertas).toEqual({ cantidad: 1, monto: 100 });
+    const [empresa] = (await get('/empresas')).body.items;
+    expect(empresa).toMatchObject({ oportunidades_abiertas: 1, monto_abierto: 100 });
+  });
+
+  test('la ficha de la empresa las excluye y las cuenta en `archivadas`', async () => {
+    const { empresa, viva, cotViva } = await preparar();
+    const ficha = (await get(`/empresas/${empresa.id}`)).body;
+    expect(ficha.oportunidades.map((o) => o.id)).toEqual([viva.id]);
+    expect(ficha.cotizaciones.map((c) => c.id)).toEqual([cotViva.id]);
+    expect(ficha.resumen).toMatchObject({ cotizaciones: 1, monto_cotizado: 100 });
+    expect(ficha.archivadas).toEqual({ oportunidades: 1, cotizaciones: 1 });
+  });
+
+  test('restaurar las devuelve a los listados', async () => {
+    const { cotArch, archivada } = await preparar();
+    expect(await mem.repo.restaurarCotizaciones(null, { ids: [cotArch.id] })).toEqual({ cotizaciones: 1, oportunidades: 1 });
+    expect((await get('/oportunidades')).body.items.map((o) => o.id)).toContain(archivada.id);
   });
 });

@@ -40,6 +40,8 @@ export function useCambiarEtapa() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: queryKeys.crm.todo });
+      // La etapa de la oportunidad es la de su cotización: la lista de Cotizaciones también cambia.
+      qc.invalidateQueries({ queryKey: queryKeys.cotizaciones });
     }
   });
 }

@@ -22,6 +22,7 @@ process.env.GOOGLE_SHEETS_URL = '';
 
 const app = require('../src/app');
 const crm = require('../src/crm');
+const { crearBdCotizacionEstado } = require('./helpers/bdCotizacionEstado');
 const { logger } = require('../src/utils/logger');
 
 const makeToken = (payload) => jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
@@ -165,7 +166,8 @@ describe('POST /api/cotizaciones enlaza con el CRM', () => {
     expect(sqls[sqls.length - 1]).toBe('COMMIT');
     expect(llamadas.find((l) => l.sql.includes('INSERT INTO crm_empresas')).params.slice(0, 2)).toEqual(['SONDA S.A.', 'sonda']);
     const op = llamadas.find((l) => l.sql.includes('INSERT INTO crm_oportunidades')).params;
-    expect(op.slice(0, 5)).toEqual([7, 8, 'Cotización #65900', 'cotizada', 'MIXTA']);
+    // Cotizacion nueva (estado revision) => oportunidad en etapa 'nueva' (antes 'cotizada').
+    expect(op.slice(0, 5)).toEqual([7, 8, 'Cotización #65900', 'nueva', 'MIXTA']);
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
@@ -207,47 +209,52 @@ describe('POST /api/cotizaciones enlaza con el CRM', () => {
   });
 });
 
-describe('PATCH /api/cotizaciones/:id/estado cierra la oportunidad', () => {
-  const poolEstado = ({ oportunidadId = 9, fallaCrm = false } = {}) => {
-    const crmUpdates = [];
-    mockQuery.mockImplementation(dbRouter([
+describe('PATCH /api/cotizaciones/:id/estado mueve la etapa de la oportunidad', () => {
+  // Antes: UPDATE del estado + cierre best-effort de la oportunidad (solo aprobada/rechazada).
+  // Ahora la etapa manda: se cambia con las reglas del CRM y el estado se deriva, todo en
+  // una transaccion; si la BD falla, nada cambia y responde 500.
+  const preparar = ({ etapa = 'cotizada', oportunidadId = 9, falla = null } = {}) => {
+    const bd = crearBdCotizacionEstado({
+      cotizaciones: [{ id: 77, usuario_id: 1, estado: 'enviada', oportunidad_id: oportunidadId, empresa_id: oportunidadId ? 3 : 4 }],
+      oportunidades: oportunidadId ? [{ id: oportunidadId, etapa }] : [],
+      falla
+    });
+    mockQuery.mockImplementation(bd.conRespaldo(dbRouter([
       ...sesionActiva(),
-      [incluye('SELECT role, empresa, intcomex_profile FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin', empresa: '', intcomex_profile: null }] }],
-      [incluye('UPDATE cotizaciones SET estado = $1 WHERE id = $2 RETURNING *'), (sql, p) => ({ rows: [{ id: Number(p[1]), estado: p[0], oportunidad_id: oportunidadId }] })],
-      [incluye('UPDATE crm_oportunidades'), (sql, p) => {
-        if (fallaCrm) throw new Error('crm caido');
-        crmUpdates.push(p);
-        return { rows: [{ id: p[0], etapa: p[1] }] };
-      }]
-    ]));
-    return crmUpdates;
+      [incluye('SELECT role, empresa, intcomex_profile FROM usuarios WHERE id = $1'), { rows: [{ role: 'admin', empresa: '', intcomex_profile: null }] }]
+    ])));
+    mockConnect.mockResolvedValue(bd.cliente);
+    return bd;
   };
-  const patch = (estado) => conAuth(request(app).patch('/api/cotizaciones/77/estado'), ADMIN).send({ estado });
+  const patch = (body) => conAuth(request(app).patch('/api/cotizaciones/77/estado'), ADMIN).send(body);
 
-  test('aprobada => ganada; rechazada => perdida con motivo', async () => {
-    let updates = poolEstado();
-    expect((await patch('aprobada')).status).toBe(200);
-    expect(updates).toEqual([[9, 'ganada', null]]);
+  test('aprobada => ganada; rechazada => perdida con motivo del cotizador; enviada reabre', async () => {
+    let bd = preparar();
+    expect((await patch({ estado: 'aprobada' })).status).toBe(200);
+    expect(bd.ops.get(9)).toMatchObject({ etapa: 'ganada', motivo_perdida: null });
 
-    updates = poolEstado();
-    expect((await patch('rechazada')).status).toBe(200);
-    expect(updates).toEqual([[9, 'perdida', 'Rechazada en el cotizador']]);
+    bd = preparar();
+    expect((await patch({ estado: 'rechazada' })).status).toBe(200);
+    expect(bd.ops.get(9)).toMatchObject({ etapa: 'perdida', motivo_perdida: 'Rechazada en el cotizador' });
+
+    const res = await patch({ estado: 'enviada' });
+    expect(res.body).toMatchObject({ estado: 'enviada', etapa: 'cotizada', motivo_perdida: null });
+    expect(bd.ops.get(9).cerrada_en).toBeNull();
   });
 
-  test('enviada o sin oportunidad vinculada: no toca el CRM', async () => {
-    let updates = poolEstado();
-    expect((await patch('enviada')).status).toBe(200);
-    expect(updates).toEqual([]);
-    updates = poolEstado({ oportunidadId: null });
-    expect((await patch('aprobada')).status).toBe(200);
-    expect(updates).toEqual([]);
+  test('sin oportunidad vinculada: no toca crm_oportunidades', async () => {
+    const bd = preparar({ oportunidadId: null });
+    expect((await patch({ estado: 'aprobada' })).status).toBe(200);
+    expect(bd.sqls.some((s) => s.includes('crm_oportunidades SET'))).toBe(false);
+    expect(bd.cots.get(77).estado).toBe('aprobada');
   });
 
-  test('si el CRM falla, el cambio de estado responde 200 igual', async () => {
-    poolEstado({ fallaCrm: true });
-    const res = await patch('aprobada');
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ id: 77, estado: 'aprobada' });
-    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ event: 'crm_estado_error' }), expect.any(String));
+  test('si la BD falla al cambiar la etapa: 500 y la oportunidad no cambia', async () => {
+    const bd = preparar({ falla: (sql) => sql.startsWith('UPDATE crm_oportunidades') });
+    const res = await patch({ etapa: 'ganada' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Error del servidor' });
+    expect(bd.ops.get(9).etapa).toBe('cotizada');
+    expect(bd.cliente.query.mock.calls.map(([sql]) => sql)).toContain('ROLLBACK');
   });
 });

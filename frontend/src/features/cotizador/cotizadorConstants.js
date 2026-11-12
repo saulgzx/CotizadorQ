@@ -13,12 +13,7 @@ export const SESSION_TTL_MS = 10 * 60 * 1000;
 export const SESSION_HEARTBEAT_MS = 30 * 1000;
 
 export const DEFAULT_AXIS_PARTNER = 'Partner Autorizado';
-export const COTIZACION_ESTADOS = [
-  { value: 'enviada', label: 'Cotización Enviada', short: 'E' },
-  { value: 'revision', label: 'Cotización en Revisión', short: 'R' },
-  { value: 'rechazada', label: 'Cotización Rechazada', short: 'X' },
-  { value: 'aprobada', label: 'Cotización Aceptada', short: 'A' }
-];
+// Las etapas de una cotización son las del CRM: ver ETAPAS en features/crm/formato.js.
 
 export const COTIZADOR_STOCK_ADMIN_ROLE = 'cot_stock_admin';
 

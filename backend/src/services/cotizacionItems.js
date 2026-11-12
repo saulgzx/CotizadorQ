@@ -219,6 +219,9 @@ const ensureCotizacionEdicion = async (pool) => {
     `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP`,
     `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS updated_by VARCHAR(50)`,
+    // Archivado (con su oportunidad del CRM): sale de listados y embudos; se puede restaurar.
+    `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS archivada_en TIMESTAMP`,
+    `CREATE INDEX IF NOT EXISTS cotizaciones_vigentes_created_idx ON cotizaciones(created_at) WHERE archivada_en IS NULL`,
     `CREATE TABLE IF NOT EXISTS cotizacion_versiones (
        id SERIAL PRIMARY KEY,
        cotizacion_id INTEGER NOT NULL REFERENCES cotizaciones(id) ON DELETE CASCADE,
