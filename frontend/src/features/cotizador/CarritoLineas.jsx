@@ -4,6 +4,7 @@ import Icono from '../ui/Icono';
 import MargenChip from './MargenChip';
 import { formatCurrency } from './cotizadorHelpers';
 import { partesEntrega } from './entregaStock';
+import { esFueraDeLista } from './fueraDeLista';
 
 // Carrito del cotizador con el mismo formato que el editor de cotizaciones:
 // una fila por producto, costo ⇄ GP ⇄ precio enlazados y margen a la vista.
@@ -140,9 +141,14 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
       {item.costoChile > 0 ? (
         <div className='rounded-md bg-emerald-50 px-2 py-1 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300' title='OH Unit USD de la hoja Stock'>
           <div className='font-semibold'>Real stock {formatCurrency(item.costoChile)}</div>
-          <button type='button' onClick={() => onCambio(item.id, 'costoChile', null)} className='underline decoration-dotted'>
-            usar costo disty
-          </button>
+          {esFueraDeLista(item) ? (
+            // Sin lista de precios no hay costo disty al que volver.
+            <span>Fuera de lista de precios</span>
+          ) : (
+            <button type='button' onClick={() => onCambio(item.id, 'costoChile', null)} className='underline decoration-dotted'>
+              usar costo disty
+            </button>
+          )}
         </div>
       ) : (
         <NumeroInput value={item.precio} onCommit={(v) => onCambio(item.id, 'precio', v)} ariaLabel='Costo disty' />
