@@ -2922,13 +2922,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   }, [isLoggedIn, navRestriction, currentView]);
 
-  // Command palette: Ctrl+K / Cmd+K alterna el buscador rápido.
+  // Atajos globales: Ctrl+K / Cmd+K alterna el buscador rápido y Ctrl+M / Cmd+M
+  // el índice de navegación. Funcionan escribiendo dentro de un campo, porque son
+  // con modificador y no compiten con el texto.
   useEffect(() => {
     if (!isLoggedIn) return;
     const onKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'k') {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const tecla = String(e.key).toLowerCase();
+      if (tecla === 'k') {
         e.preventDefault();
         setPaletteOpen(open => !open);
+      } else if (tecla === 'm') {
+        e.preventDefault();
+        // Si el buscador rápido está abierto, el índice lo reemplaza.
+        setPaletteOpen(false);
+        setMobileMenuOpen(open => !open);
       }
     };
     window.addEventListener('keydown', onKeyDown);
