@@ -9,6 +9,7 @@ const HistorialRoute = lazy(() => import('./features/historial/HistorialRoute'))
 const UsuariosRoute = lazy(() => import('./features/usuarios/UsuariosRoute'));
 const OrdenesRoute = lazy(() => import('./features/ordenes/OrdenesRoute'));
 const IaRoute = lazy(() => import('./features/ia/IaRoute'));
+const CrmRoute = lazy(() => import('./features/crm/CrmRoute'));
 
 const loadingFallback = (
   <div className="min-h-screen w-full flex items-center justify-center bg-slate-50">
@@ -51,6 +52,14 @@ export default function App() {
           element={(
             <ProtectedRoute>
               <IaRoute />
+            </ProtectedRoute>
+          )}
+        />
+        <Route
+          path="/crm"
+          element={(
+            <ProtectedRoute requireAdmin>
+              <CrmRoute />
             </ProtectedRoute>
           )}
         />

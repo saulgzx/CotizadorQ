@@ -39,6 +39,7 @@ export const VIEW_TO_ROUTE = {
   cotizador: '/cotizador',
   historial: '/historial',
   ia: '/ia',
+  crm: '/crm',
   usuarios: '/admin/usuarios',
   ordenes: '/admin/ordenes',
   login: '/login'
@@ -49,9 +50,10 @@ export const ROUTE_TO_VIEW = {
   '/cotizador': 'cotizador',
   '/historial': 'historial',
   '/ia': 'ia',
+  '/crm': 'crm',
   '/admin/usuarios': 'usuarios',
   '/admin/ordenes': 'ordenes',
   '/login': 'cotizador'
 };
 
-export const ADMIN_VIEWS = new Set(['admin', 'usuarios', 'ordenes', 'compras']);
+export const ADMIN_VIEWS = new Set(['admin', 'usuarios', 'ordenes', 'compras', 'crm']);
