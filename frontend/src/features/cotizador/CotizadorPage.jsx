@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
@@ -59,6 +59,7 @@ import {
 } from './cotizadorHelpers';
 import { CotizadorContext } from './cotizadorContext';
 import useTheme from '../theme/useTheme';
+import { BarraSuperior, Cortina, Indice, direccionDeVista } from '../ui/Navegacion';
 import ThemeToggle from '../theme/ThemeToggle';
 import { notify, Toaster } from '../ui/toast';
 import MargenChip from './MargenChip';
@@ -397,22 +398,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem('sidebarCollapsed') === '1';
-    } catch {
-      return false;
-    }
-  });
-  const toggleSidebar = () => setSidebarCollapsed(prev => {
-    const next = !prev;
-    try {
-      localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
-    } catch {
-      // localStorage no disponible
-    }
-    return next;
-  });
+  const cerrarIndice = useCallback(() => setMobileMenuOpen(false), []);
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -4979,95 +4965,73 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // LOGIN
   if (!isLoggedIn) {
-    const puntosLogin = [
-      ['calc', 'Cotiza AXIS y QNAP con precio, margen y plazo en la misma línea.'],
-      ['box', 'Stock disponible y ETA leídos del maestro en cada búsqueda.'],
-      ['clock', 'Historial con versiones, estados y PDF listo para enviar.']
-    ];
-    const campoLogin = "h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-400";
+    const campoLogin = "h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 text-[15px] text-slate-900";
     return (
-      <div className="min-h-screen app-bg">
-        <div className="absolute top-4 right-4 z-20">
+      <div className="min-h-screen app-bg flex flex-col">
+        <header className="flex items-center justify-between px-6 sm:px-10 h-16">
+          <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
-        </div>
-        <div className="min-h-screen flex items-center justify-center px-4 py-10">
-          <div className="view-enter w-full max-w-4xl grid md:grid-cols-[1.05fr_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-float">
-            <div className="hidden md:flex flex-col justify-between gap-10 p-10 bg-[#0F1216] text-white">
-              <div className="space-y-5">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-9 w-auto invert" />
-                <p className="text-2xl leading-8 font-bold tracking-tight text-white">
-                  Cotizaciones de Axis y QNAP, listas para enviar.
-                </p>
-              </div>
-              <ul className="space-y-4">
-                {puntosLogin.map(([icono, texto]) => (
-                  <li key={icono} className="flex items-start gap-3 text-sm leading-5 text-white/75">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-white">
-                      <NavIcon name={icono} className="h-4 w-4" />
-                    </span>
-                    <span className="pt-1.5">{texto}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-white/50">Intcomex Chile · Product Management</p>
+        </header>
+        <main className="flex-1 flex items-center justify-center px-6 pb-24">
+          <form
+            className="stagger-children w-full max-w-[340px] flex flex-col gap-7"
+            onSubmit={e => { e.preventDefault(); handleLogin(); }}
+          >
+            <div className="space-y-2">
+              <div className="mq-sobre">Acceso</div>
+              <h1 className="text-[32px] leading-9 font-semibold tracking-tight text-slate-900">Ingresar</h1>
+              <p className="text-sm leading-5 text-slate-500">Usa el usuario y la contraseña que te entregó Intcomex.</p>
             </div>
-
-            <form
-              className="flex flex-col justify-center gap-6 p-6 sm:p-10"
-              onSubmit={e => { e.preventDefault(); handleLogin(); }}
-            >
-              <div className="space-y-1">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-8 w-auto mb-5 md:hidden dark:invert" />
-                <h1 className="text-2xl leading-8 font-bold tracking-tight text-slate-900">Ingresar</h1>
-                <p className="text-sm text-slate-500">Usa el usuario y la contraseña que te entregó Intcomex.</p>
-              </div>
-              <div className="space-y-4">
-                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-usuario">
-                  Usuario
+            <div className="space-y-4">
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-usuario">
+                Usuario
+                <input
+                  id="login-usuario"
+                  type="text"
+                  autoComplete="username"
+                  value={usuario}
+                  onChange={e => setUsuario(e.target.value)}
+                  className={campoLogin}
+                  placeholder="nombre.apellido"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-password">
+                Contraseña
+                <span className="relative">
                   <input
-                    id="login-usuario"
-                    type="text"
-                    autoComplete="username"
-                    value={usuario}
-                    onChange={e => setUsuario(e.target.value)}
-                    className={campoLogin}
-                    placeholder="nombre.apellido"
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className={`${campoLogin} pr-20`}
+                    placeholder="••••••••"
                   />
-                </label>
-                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-password">
-                  Contraseña
-                  <span className="relative">
-                    <input
-                      id="login-password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      className={`${campoLogin} pr-20`}
-                      placeholder="••••••••"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-pressed={showPassword}
-                      className="mq-btn mq-btn-xs mq-btn-fantasma absolute right-1.5 top-1/2 -translate-y-1/2"
-                    >
-                      {showPassword ? 'Ocultar' : 'Mostrar'}
-                    </button>
-                  </span>
-                </label>
-                {loginError && (
-                  <p role="alert" className="rounded-[10px] border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
-                    {loginError}
-                  </p>
-                )}
-              </div>
-              <button type="submit" className="mq-btn mq-btn-lg mq-btn-primario w-full">
-                Ingresar
-              </button>
-            </form>
-          </div>
-        </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-pressed={showPassword}
+                    className="mq-btn mq-btn-xs mq-btn-fantasma absolute right-1.5 top-1/2 -translate-y-1/2"
+                  >
+                    {showPassword ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </span>
+              </label>
+              {loginError && (
+                <p role="alert" className="animate-fade-in-up rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+                  {loginError}
+                </p>
+              )}
+            </div>
+            <button type="submit" className="mq-btn mq-btn-lg mq-btn-primario w-full">
+              Ingresar
+            </button>
+          </form>
+        </main>
+        <footer className="px-6 sm:px-10 h-14 flex items-center justify-between border-t border-slate-200">
+          <span className="mq-sobre">Intcomex Chile · Product Management</span>
+          <span className="mq-sobre hidden sm:inline">Axis · QNAP</span>
+        </footer>
       </div>
     );
   }
@@ -5222,9 +5186,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     .map(([clave, titulo]) => ({ clave, titulo, items: navItems.filter(item => item.grupo === clave) }))
     .filter(g => g.items.length > 0);
   // Con un solo grupo (clientes) no se muestran encabezados.
-  const mostrarTitulosNav = gruposNav.length > 1;
   const vistaActual = navItems.find(item => item.key === currentView);
-  const claseNavItem = (activo, colapsado) => `relative w-full flex items-center gap-3 rounded-lg text-sm transition ${colapsado ? 'justify-center px-0 h-10' : 'px-3 h-9 text-left'} ${activo ? 'bg-slate-100 text-slate-900 font-semibold before:absolute before:-left-3 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-[var(--mq-ink)]' : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`;
+  // Hacia qué lado entra la vista: depende de si se avanza o retrocede en el menú.
+  const direccionVista = direccionDeVista(navItems.map(item => item.key), currentView);
   const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
   const bottomNavItems = BOTTOM_NAV_PRIORITY
     .map(key => navItems.find(item => item.key === key))
@@ -5233,7 +5197,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
-    <div className="min-h-screen app-bg lg:flex">
+    <div className="min-h-screen app-bg">
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
@@ -5245,120 +5209,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <span className="text-sm font-semibold">¿Necesitas Ayuda?</span>
         </a>
       )}
-      <aside
-        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-slate-200 bg-white transition-[width] duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-60'}`}
-        aria-label="Barra lateral de navegación"
-      >
-        <div className={`flex items-center gap-3 h-16 ${sidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
-          {sidebarCollapsed ? (
-            <img src="/brand/myquote-app-icon-dark.svg" alt="MyQuote" className="w-10 h-10 shrink-0" />
-          ) : (
-            <div className="min-w-0 flex-1">
-              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
-            </div>
-          )}
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 pb-3 space-y-5" aria-label="Secciones">
-          {gruposNav.map(grupo => (
-          <div key={grupo.clave} className="space-y-0.5">
-          {mostrarTitulosNav && (sidebarCollapsed
-            ? <div className="mx-2 mb-2 border-t border-slate-200" aria-hidden="true" />
-            : <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>)}
-          {grupo.items.map(item => (
-            <button
-              key={item.key}
-              onClick={() => setCurrentView(item.key)}
-              title={sidebarCollapsed ? item.label : undefined}
-              aria-current={currentView === item.key ? 'page' : undefined}
-              className={claseNavItem(currentView === item.key, sidebarCollapsed)}
-            >
-              <span className="relative shrink-0">
-                <NavIcon name={item.icon} className="w-[18px] h-[18px]" />
-                {sidebarCollapsed && item.badge ? (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-slate-900 text-white text-[9px] flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </span>
-              {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
-              {!sidebarCollapsed && item.badge ? (
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                  {item.badge}
-                </span>
-              ) : null}
-            </button>
-          ))}
-          </div>
-          ))}
-        </nav>
-        <div className="p-3 border-t border-slate-200 space-y-1">
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title={sidebarCollapsed ? 'Buscar (Ctrl+K)' : undefined}
-            className={claseNavItem(false, sidebarCollapsed)}
-          >
-            <NavIcon name="search" className="w-[18px] h-[18px] shrink-0" />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 truncate">Buscar</span>
-                <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">Ctrl K</kbd>
-              </>
-            )}
-          </button>
-          <div className={`flex items-center py-1 ${sidebarCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
-            {!sidebarCollapsed && <span className="text-xs text-slate-500">Tema</span>}
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          </div>
-          <div className={`flex items-center gap-3 py-2 ${sidebarCollapsed ? 'justify-center' : 'px-3'}`}>
-            {/* El logo de la empresa del usuario (si tiene) vive aquí; arriba va la marca MyQuote. */}
-            {user?.logo_url ? (
-              <img src={user.logo_url} alt={user?.empresa || 'Empresa'} className="w-8 h-8 rounded-lg object-contain bg-white shadow-sm shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-semibold uppercase shrink-0">
-                {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                <div className="text-xs text-slate-500 truncate">{user?.empresa || ''}</div>
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <button
-                onClick={handleLogout}
-                aria-label="Cerrar sesión"
-                title="Cerrar sesión"
-                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0"
-              >
-                <NavIcon name="logout" className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          {sidebarCollapsed && (
-            <button
-              onClick={handleLogout}
-              aria-label="Cerrar sesión"
-              title="Cerrar sesión"
-              className="w-full flex justify-center py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-            >
-              <NavIcon name="logout" />
-            </button>
-          )}
-          <button
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
-            className="w-full flex items-center justify-center gap-2 h-8 rounded-lg text-slate-500 hover:bg-slate-100 text-xs"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} aria-hidden="true">
-              <path d="m15 6-6 6 6 6" />
-            </svg>
-            {!sidebarCollapsed && 'Colapsar'}
-          </button>
-        </div>
-      </aside>
+      <BarraSuperior
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onIndice={() => setMobileMenuOpen(true)}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Indice
+        abierto={mobileMenuOpen}
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onCerrar={cerrarIndice}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Cortina vista={currentView} />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="lg:hidden bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40">
+        <header className="lg:hidden bg-[var(--mq-ground)] border-b border-slate-200 sticky top-0 z-40">
           <div className="px-4 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <img src="/brand/myquote-symbol-web.svg" alt="MyQuote" className="h-7 w-7 shrink-0 dark:invert" />
@@ -5370,72 +5246,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 type="button"
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label="Abrir menú"
-                className="grid h-10 w-10 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
+                className="mq-btn-icono !h-10 !w-10"
               >
                 <NavIcon name="menu" className="w-6 h-6" />
               </button>
             </div>
           </div>
         </header>
-
-        {mobileMenuOpen && (
-          <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menú de navegación">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setMobileMenuOpen(false)} />
-            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-float flex flex-col">
-              <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-semibold uppercase shrink-0">
-                    {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'MyQuote'}</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMobileMenuOpen(false)}
-                  aria-label="Cerrar menú"
-                  className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0"
-                >
-                  <NavIcon name="close" className="w-5 h-5" />
-                </button>
-              </div>
-              <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Secciones">
-                {gruposNav.map(grupo => (
-                <div key={grupo.clave} className="space-y-0.5">
-                {mostrarTitulosNav && <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>}
-                {grupo.items.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => { setCurrentView(item.key); setMobileMenuOpen(false); }}
-                    aria-current={currentView === item.key ? 'page' : undefined}
-                    className={`${claseNavItem(currentView === item.key, false)} h-11`}
-                  >
-                    <NavIcon name={item.icon} />
-                    <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge ? (
-                      <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-                </div>
-                ))}
-              </nav>
-              <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                >
-                  <NavIcon name="logout" />
-                  Cerrar sesión
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <CommandPalette
           open={paletteOpen}
@@ -5515,7 +5332,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {/* w-[92%] junto a w-full aplicaba dos anchos en conflicto sobre el mismo
             elemento y cual ganaba dependia del orden del CSS compilado. Se usa
             max-w, que expresa lo mismo sin competir con w-full. */}
-        <main className={`${isClient ? 'max-w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
+        <main
+          className={`mq-vista ${isClient ? 'max-w-[92%]' : 'max-w-[84rem]'} mx-auto w-full px-3 sm:px-6 pt-4 sm:pt-7 pb-28 lg:pb-10`}
+          style={direccionVista ? { '--mq-dx': `${direccionVista * 44}px`, '--mq-dy': '0px' } : undefined}
+        >
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
@@ -5699,7 +5519,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre de empresa"
                       value={empresaForm.nombre}
                       onChange={e => setEmpresaForm(f => ({ ...f, nombre: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -5707,7 +5527,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <select
                           value={empresaForm.role}
                           onChange={e => setEmpresaForm(f => ({ ...f, role: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         >
                           <option value="client">Cliente</option>
                           <option value="admin">Administrador</option>
@@ -5719,7 +5539,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           type="number"
                           value={empresaForm.gp_qnap}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_qnap: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -5728,14 +5548,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           type="number"
                           value={empresaForm.gp_axis}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_axis: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         />
                       </label>
                     </div>
                     <select
                       value={empresaForm.partner_category}
                       onChange={e => setEmpresaForm(f => ({ ...f, partner_category: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     >
                       <option>Partner Autorizado</option>
                       <option>Partner Silver</option>
@@ -5942,7 +5762,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Buscar…"
                       value={globalSearch}
                       onChange={e => setGlobalSearch(e.target.value)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                   </div>
                 )}
@@ -6059,7 +5879,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Usuario"
                       value={nuevoUsuario.usuario}
                       onChange={e => setNuevoUsuario(u => ({ ...u, usuario: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       name="nuevo_nombre"
@@ -6067,7 +5887,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre"
                       value={nuevoUsuario.nombre}
                       onChange={e => setNuevoUsuario(u => ({ ...u, nombre: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       name="nuevo_password"
@@ -6076,7 +5896,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       autoComplete="new-password"
                       value={nuevoUsuario.password}
                       onChange={e => setNuevoUsuario(u => ({ ...u, password: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <button
                       type="submit"
@@ -6361,13 +6181,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
                   <h3 className="text-base font-semibold text-slate-900 mb-3">Nuevo producto</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
                   </div>
                   <div className="flex gap-2 mt-3">
                     <button onClick={handleAddProduct} disabled={saving} className="mq-btn mq-btn-primario">
@@ -6388,7 +6208,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.INBOUND_FREIGHT : (Number.isFinite(calcParams.INBOUND_FREIGHT) ? calcParams.INBOUND_FREIGHT : '')}
                     onChange={e => updateCalcParam('INBOUND_FREIGHT', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -6398,7 +6218,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.IC : (Number.isFinite(calcParams.IC) ? calcParams.IC : '')}
                     onChange={e => updateCalcParam('IC', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -6408,7 +6228,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.1"
                     value={adminOrigin === 'AXIS' ? (AXIS_CONSTANTS.INT * 100) : (Number.isFinite(calcParams.INT) ? (calcParams.INT * 100) : '')}
                     onChange={e => updateCalcParam('INT', e.target.value, true)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
               </div>
@@ -6423,10 +6243,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     placeholder="Buscar…"
                     value={globalSearch}
                     onChange={e => setGlobalSearch(e.target.value)}
-                    className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                    className="h-9 w-56 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                   />
                 ) : (
-                  <input type="text" aria-label="Buscar productos" placeholder="Buscar…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                  <input type="text" aria-label="Buscar productos" placeholder="Buscar…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-56 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
                 )}
               </div>
               {selectedIds.size > 1 && (
@@ -6669,14 +6489,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     placeholder="Buscar…"
                     value={globalSearch}
                     onChange={e => setGlobalSearch(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm md:col-span-2"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm md:col-span-2"
                   />
                 )}
                 <input
                   type="date"
                   value={historialFilters.fecha}
                   onChange={e => setHistorialFilters(f => ({ ...f, fecha: e.target.value }))}
-                  className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                  className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                 />
                 {!isAdmin && (
                   <>
@@ -6685,28 +6505,28 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Buscar cliente..."
                       value={historialFilters.cliente}
                       onChange={e => setHistorialFilters(f => ({ ...f, cliente: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar PID..."
                       value={historialFilters.pid}
                       onChange={e => setHistorialFilters(f => ({ ...f, pid: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar proyecto..."
                       value={historialFilters.proyecto}
                       onChange={e => setHistorialFilters(f => ({ ...f, proyecto: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Buscar producto..."
                       value={historialFilters.producto}
                       onChange={e => setHistorialFilters(f => ({ ...f, producto: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                   </>
                 )}
@@ -7067,7 +6887,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={(e) => setGlobalSearch(e.target.value)}
                       placeholder="Buscar…"
                       aria-label="Buscar"
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   ) : (
                     <input
@@ -7075,13 +6895,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={(e) => setOsoFilter(e.target.value)}
                       placeholder="Buscar BO o cliente"
                       aria-label="Buscar órdenes"
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   )}
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7091,7 +6911,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7102,7 +6922,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7142,7 +6962,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
@@ -7158,7 +6978,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
                     <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
@@ -7341,12 +7161,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     onChange={(e) => setGlobalSearch(e.target.value)}
                     placeholder="Buscar…"
                     aria-label="Buscar"
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                   />
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7356,7 +7176,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7367,7 +7187,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7407,7 +7227,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
@@ -7423,7 +7243,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
                     <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
@@ -8316,7 +8136,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
             <section className="glass-card rounded-2xl shadow-card border border-white/70">
               {/* Barra de herramientas: fija arriba al bajar por el carrito (escritorio). */}
-              <div className="lg:sticky lg:top-0 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
+              <div className="lg:sticky lg:top-14 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1 min-w-0">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
@@ -8594,7 +8414,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={user?.nombre || user?.usuario || ''}
                     readOnly
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8602,7 +8422,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={user?.empresa || ''}
                     readOnly
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8612,7 +8432,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={ownPartnerCategory}
                         onChange={e => setOwnPartnerCategory(e.target.value)}
-                        className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white flex-1"
+                        className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white flex-1"
                       >
                         <option>Partner Autorizado</option>
                         <option>Partner Silver</option>
@@ -8631,7 +8451,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <input
                       value={user?.partner_category || 'Partner Autorizado'}
                       readOnly
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                      className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                     />
                   )}
                 </label>
@@ -8650,7 +8470,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     autoComplete="current-password"
                     value={accountPasswordCurrent}
                     onChange={e => setAccountPasswordCurrent(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8659,7 +8479,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     type="password"
                     value={accountPassword}
                     onChange={e => setAccountPassword(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8668,7 +8488,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     type="password"
                     value={accountPasswordConfirm}
                     onChange={e => setAccountPasswordConfirm(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <div>

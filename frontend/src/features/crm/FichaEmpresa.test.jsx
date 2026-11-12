@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import FichaEmpresa from './FichaEmpresa';
 import CrmView from './CrmView';
-import { crmApi } from './crmApi';
+import { crmApi, seguimientoApi } from './crmApi';
 import { EMBUDO, FICHA, OPORTUNIDADES, renderConQuery } from './fixturesCrm';
 
 vi.mock('./crmApi', () => ({
@@ -17,6 +17,12 @@ vi.mock('./crmApi', () => ({
     listarOportunidades: vi.fn(),
     duplicadosEmpresas: vi.fn(),
     embudo: vi.fn()
+  },
+  seguimientoApi: {
+    lista: vi.fn(),
+    valor: vi.fn(),
+    pausar: vi.fn(),
+    reanudar: vi.fn()
   }
 }));
 
@@ -90,10 +96,19 @@ describe('CrmView atajos', () => {
     crmApi.listarOportunidades.mockResolvedValue({ items: OPORTUNIDADES });
     crmApi.listarEmpresas.mockResolvedValue({ items: [], total: 0 });
     crmApi.duplicadosEmpresas.mockResolvedValue({ grupos: [] });
+    seguimientoApi.lista.mockResolvedValue({ activo: false, total: 0, items: [] });
+  });
+
+  test('abre en el Resumen con el embudo y el seguimiento automático', async () => {
+    renderConQuery(<CrmView />);
+    expect(screen.getByRole('tab', { name: 'Resumen' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: 'Embudo de ventas' })).toBeInTheDocument();
+    expect(await screen.findByText('Apagado en el servidor')).toBeInTheDocument();
   });
 
   test('"/" enfoca la búsqueda y "N" abre el diálogo, pero no mientras se escribe', async () => {
     renderConQuery(<CrmView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Embudo' }));
     await screen.findByText('Proyecto BID Norte');
     const busqueda = screen.getByLabelText('Buscar oportunidades');
 
@@ -111,7 +126,6 @@ describe('CrmView atajos', () => {
 
   test('en la pestaña Empresas "N" crea una empresa', async () => {
     renderConQuery(<CrmView />);
-    await screen.findByText('Proyecto BID Norte');
     fireEvent.click(screen.getByRole('tab', { name: 'Empresas' }));
     await screen.findByLabelText('Buscar empresas');
     fireEvent.keyDown(document.body, { key: 'N' });

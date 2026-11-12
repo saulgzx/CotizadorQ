@@ -1,6 +1,8 @@
 import React, { useCallback, useRef, useState } from 'react';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
 import EmbudoTab from './EmbudoTab';
+import ResumenTab from './ResumenTab';
+import SeguimientoTab from './SeguimientoTab';
 import EmpresasTab from './EmpresasTab';
 import FichaEmpresa from './FichaEmpresa';
 import FusionDuplicados from './FusionDuplicados';
@@ -8,12 +10,14 @@ import { EmpresaDialogo, OportunidadDialogo } from './DialogosCrm';
 import useAtajosCrm from './useAtajosCrm';
 
 const TABS = [
+  { clave: 'resumen', nombre: 'Resumen' },
   { clave: 'embudo', nombre: 'Embudo' },
-  { clave: 'empresas', nombre: 'Empresas' }
+  { clave: 'empresas', nombre: 'Empresas' },
+  { clave: 'seguimiento', nombre: 'Seguimiento automático' }
 ];
 
 export default function CrmView({ onAbrirCotizacion }) {
-  const [tab, setTab] = useState('embudo');
+  const [tab, setTab] = useState('resumen');
   const [empresaId, setEmpresaId] = useState(null);
   const [fusion, setFusion] = useState(false);
   const [dialogo, setDialogo] = useState(null);
@@ -35,7 +39,7 @@ export default function CrmView({ onAbrirCotizacion }) {
   };
 
   const crear = () => {
-    if (tab === 'embudo') setDialogo('oportunidad');
+    if (tab !== 'empresas') setDialogo('oportunidad');
     else if (empresaId && crearFichaRef.current) crearFichaRef.current();
     else if (!fusion) setDialogo('empresa');
   };
@@ -52,7 +56,7 @@ export default function CrmView({ onAbrirCotizacion }) {
         <button type='button' className='mq-btn mq-btn-sm mq-btn-primario' onClick={() => setDialogo('oportunidad')}>Nueva oportunidad</button>
       </EncabezadoPagina>
 
-      <div role='tablist' aria-label='Secciones del CRM' className='inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-900'>
+      <div role='tablist' aria-label='Secciones del CRM' className='mq-pestanas'>
         {TABS.map((t) => (
           <button
             key={t.clave}
@@ -62,18 +66,16 @@ export default function CrmView({ onAbrirCotizacion }) {
             aria-selected={tab === t.clave}
             aria-controls='crm-panel'
             onClick={() => cambiarTab(t.clave)}
-            className={`rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ${
-              tab === t.clave
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-            }`}
+            className='mq-pestana'
           >
             {t.nombre}
           </button>
         ))}
       </div>
 
-      <div id='crm-panel' role='tabpanel' aria-labelledby={`crm-tab-${tab}`}>
+      <div id='crm-panel' role='tabpanel' aria-labelledby={`crm-tab-${tab}`} key={tab} className='mq-panel-entra'>
+        {tab === 'resumen' && <ResumenTab onAbrirEmpresa={abrirEmpresa} onIrA={cambiarTab} />}
+        {tab === 'seguimiento' && <SeguimientoTab onAbrirCotizacion={onAbrirCotizacion} />}
         {tab === 'embudo' && <EmbudoTab inputBusquedaRef={busquedaRef} onAbrirEmpresa={abrirEmpresa} />}
         {tab === 'empresas' && empresaId && (
           <FichaEmpresa

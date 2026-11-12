@@ -89,6 +89,8 @@ las fechas cortas son medianoche de Chile).
 ## Endpoints admin (`authenticateToken` + `requireAdmin`)
 
 - `GET /api/seguimiento/hoy`
+- `GET /api/seguimiento/lista` → `{ activo, total, items }`: todas las oportunidades en seguimiento con su
+  estado, paso y próximo paso (sin ids de correo). Alimenta la pestaña "Seguimiento automático" del CRM.
 - `GET /api/seguimiento/valor?desde=&hasta=`
 - `GET /api/seguimiento/oportunidad/:id` → `{ seguimiento, siguiente, eventos }`
 - `POST /api/seguimiento/oportunidad/:id/pausar` y `/reanudar` (404 si no está en seguimiento, 409 si

@@ -38,7 +38,7 @@ const leerSesion = (usuario) => {
 };
 
 const claseCampo =
-  'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
+  'w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
 
 const copiarConFormato = async (markdown) => {
   const html = markdownAHtml(markdown);

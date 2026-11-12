@@ -11,6 +11,8 @@ export const queryKeys = {
     oportunidades: ['crm', 'oportunidades'],
     empresas: (params) => ['crm', 'empresas', params],
     empresa: (id) => ['crm', 'empresa', id],
-    duplicados: ['crm', 'duplicados']
+    duplicados: ['crm', 'duplicados'],
+    seguimiento: ['crm', 'seguimiento'],
+    seguimientoValor: ['crm', 'seguimiento', 'valor']
   }
 };
