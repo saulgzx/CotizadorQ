@@ -38,6 +38,13 @@ const MAX_MENSAJES = 40;
 const MAX_CHARS_MENSAJE = 30000;
 const MAX_CONTINUACIONES = 6;
 const JOB_TTL_MS = 30 * 60 * 1000;
+// Pantallazo que viaja al agente (solo modo agente): Claude Code lo lee del disco con Read.
+const MIMES_PANTALLAZO = ['image/png', 'image/jpeg', 'image/webp'];
+const CAMPOS_PANTALLAZO = ['axis', 'intcomex'];
+const MAX_BYTES_PANTALLAZO = 6 * 1024 * 1024;
+const MAX_LINEAS_PANTALLAZO = 300;
+// Nombre fijo con que el agente deja la imagen en su carpeta de trabajo (cwd de Claude Code).
+const ARCHIVO_PANTALLAZO = './pantallazo.png';
 
 const leerConfig = (env = process.env) => ({
   // Sin comillas ni espacios: es comun pegarla asi en Railway.
@@ -151,8 +158,61 @@ const FORMATO_WHATSAPP = [
   'Sé breve: es para leer en el teléfono. Este es el único canal sin tabla: la regla de «tabla siempre encuadrada» de la skill no aplica acá.'
 ].join('\n');
 
+// Que es la imagen y que monto se saca de ella, segun el campo que se esta llenando.
+const TIPOS_PANTALLAZO = {
+  intcomex: {
+    que: 'la orden de compra (OC) que el cliente le envió a Intcomex',
+    monto: 'el precio de venta unitario de cada línea (lo que el cliente paga por unidad)',
+    documento: 'una orden de compra'
+  },
+  axis: {
+    que: 'una planilla de costos de Axis',
+    monto: 'el costo unitario de cada línea (lo que Axis le cobra a Intcomex por unidad)',
+    documento: 'una planilla de costos'
+  }
+};
+
+/**
+ * Prompt de extraccion: Claude Code lee la imagen que el agente dejo en su carpeta
+ * y devuelve los montos por linea. Es lectura, no cotizacion: no lleva skill.
+ */
+const construirPromptPantallazo = ({ pantallazo }) => {
+  const tipo = TIPOS_PANTALLAZO[pantallazo.campo];
+  const lineas = (pantallazo.lineas || []).map(
+    (l, i) =>
+      `${i + 1}. SKU: ${l.sku || '(sin SKU)'} | MPN: ${l.mpn || '(sin MPN)'} | Descripción: ${l.desc || '(sin descripción)'}`
+  );
+  return [
+    '<instrucciones_myquote>',
+    'Esta es una tarea de lectura de una imagen para MyQuote (Intcomex Chile). No es una cotización: no uses ninguna skill de preventa.',
+    `Lee con la herramienta Read la imagen del archivo ${ARCHIVO_PANTALLAZO} (ruta relativa a la carpeta en la que estás).`,
+    `La imagen es ${tipo.que}. Extrae ${tipo.monto}.`,
+    'Solo lee la imagen: no uses las herramientas del conector MyQuote, no busques en la web (ni WebSearch ni WebFetch), no ejecutes comandos ni modifiques archivos.',
+    '',
+    'Reglas:',
+    '- Si un valor no se lee con certeza, déjalo vacío ("") en vez de adivinar.',
+    '- No inventes SKU ni MPN que no estén en la imagen: si la imagen no muestra uno, déjalo vacío. No los copies de la lista de la orden.',
+    '- No calcules ni conviertas montos: nada de sumar, multiplicar por la cantidad, cambiar de moneda ni agregar o quitar IVA.',
+    '- "monto" va tal cual aparece en la imagen, con sus mismos separadores y símbolos, sin reformatear.',
+    `- Si la imagen no es ${tipo.documento}, o no trae montos por línea, devuelve un array vacío: []`,
+    '- Un objeto por cada línea de producto que aparezca en la imagen, en el mismo orden.',
+    '',
+    'Responde ÚNICAMENTE con un bloque de código ```json que contenga un array con esta forma, sin texto antes ni después:',
+    '```json',
+    '[ { "sku": "", "mpn": "", "descripcion": "", "monto": "" } ]',
+    '```',
+    '</instrucciones_myquote>',
+    '',
+    'Líneas de la orden (para que sepas qué productos se buscan; lo que no esté en la lista pero sí en la imagen también se informa):',
+    '<lineas_orden>',
+    lineas.length ? lineas.join('\n') : '(la orden no trae líneas)',
+    '</lineas_orden>'
+  ].join('\n');
+};
+
 /** Texto completo que el agente le pasa a Claude Code. */
-const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
+const construirPromptAgente = ({ marca, mensajes, canal = 'web', pantallazo = null }) => {
+  if (pantallazo) return construirPromptPantallazo({ pantallazo });
   const m = MARCAS[marca];
   // Marca conocida: la skill y sus referencias viajan en el prompt y Claude Code no gasta turnos en Skill + Read.
   const skill = m
@@ -189,14 +249,71 @@ const construirPromptAgente = ({ marca, mensajes, canal = 'web' }) => {
 const errorValidacion = (mensaje) =>
   Object.assign(new Error(mensaje), { status: 400 });
 
+const enMB = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
+
+// Texto de una linea de la orden: va dentro del prompt, asi que sin saltos de linea y acotado.
+const recortar = (valor, max) =>
+  (typeof valor === 'string' || typeof valor === 'number' ? String(valor) : '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+
+/** Pantallazo opcional: imagen en base64 mas las lineas de la orden que se buscan en ella. */
+const validarPantallazo = (p) => {
+  if (!p || typeof p !== 'object' || Array.isArray(p))
+    throw errorValidacion('Pantallazo mal formado');
+  if (!MIMES_PANTALLAZO.includes(p.mime))
+    throw errorValidacion('Solo se aceptan imágenes PNG, JPG o WEBP');
+  if (!CAMPOS_PANTALLAZO.includes(p.campo))
+    throw errorValidacion('Campo del pantallazo invalido: usa axis o intcomex');
+  const datos = p.datos;
+  if (typeof datos !== 'string' || !datos)
+    throw errorValidacion('La imagen esta vacia');
+  // El peso se saca del largo, antes de mirar el contenido: no se recorre algo gigante.
+  const relleno = datos.endsWith('==') ? 2 : datos.endsWith('=') ? 1 : 0;
+  const bytes = Math.floor((datos.length * 3) / 4) - relleno;
+  if (bytes > MAX_BYTES_PANTALLAZO)
+    throw errorValidacion(
+      `La imagen pesa ${enMB(bytes)} MB y el máximo es ${enMB(MAX_BYTES_PANTALLAZO)} MB`
+    );
+  if (datos.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(datos))
+    throw errorValidacion(
+      'La imagen no viene en base64 valido (sin el prefijo data:)'
+    );
+  const lineas = p.lineas ?? [];
+  if (!Array.isArray(lineas))
+    throw errorValidacion('Las lineas del pantallazo deben ser una lista');
+  if (lineas.length > MAX_LINEAS_PANTALLAZO)
+    throw errorValidacion(
+      `Demasiadas lineas en el pantallazo: maximo ${MAX_LINEAS_PANTALLAZO}`
+    );
+  return {
+    datos,
+    mime: p.mime,
+    campo: p.campo,
+    lineas: lineas.map((l) => ({
+      sku: recortar(l?.sku, 60),
+      mpn: recortar(l?.mpn, 80),
+      desc: recortar(l?.desc, 200)
+    }))
+  };
+};
+
 /**
  * La conversacion la guarda el navegador. Las respuestas previas de la IA
  * vuelven tal cual (bloques incluidos); lo nuevo del usuario es siempre texto.
+ * Con `pantallazo` la consulta es de lectura de imagen: marca y mensajes pasan a ser opcionales.
  */
 const validarEntrada = (body) => {
+  const conPantallazo = body?.pantallazo !== undefined && body?.pantallazo !== null;
+  const pantallazo = conPantallazo ? validarPantallazo(body.pantallazo) : null;
   const marca = String(body?.marca || '').toUpperCase();
-  if (!MARCAS[marca]) throw errorValidacion('Marca invalida: usa AXIS o QNAP');
+  // Con pantallazo la marca puede faltar; si viene, tiene que ser valida.
+  if (marca ? !MARCAS[marca] : !pantallazo)
+    throw errorValidacion('Marca invalida: usa AXIS o QNAP');
   const mensajes = body?.mensajes;
+  if (pantallazo && (mensajes == null || (Array.isArray(mensajes) && !mensajes.length)))
+    return { marca: marca || null, mensajes: [], pantallazo };
   if (!Array.isArray(mensajes) || mensajes.length === 0)
     throw errorValidacion('La conversacion esta vacia');
   if (mensajes.length > MAX_MENSAJES)
@@ -217,10 +334,12 @@ const validarEntrada = (body) => {
   });
   if (mensajes[mensajes.length - 1].role !== 'user')
     throw errorValidacion('Falta el mensaje del usuario');
-  return {
-    marca,
+  const entrada = {
+    marca: marca || null,
     mensajes: mensajes.map((m) => ({ role: m.role, content: m.content }))
   };
+  if (pantallazo) entrada.pantallazo = pantallazo;
+  return entrada;
 };
 
 // --- Pedido a la API ----------------------------------------------------------
@@ -411,6 +530,8 @@ const crearGestorConsultas = ({
 
   const finalizar = (c, cambios) => {
     Object.assign(c, cambios, { actualizada: ahora() });
+    // La imagen solo sirve mientras el agente puede tomar la consulta: no se guarda despues.
+    c.imagen = null;
     const idx = cola.indexOf(c);
     if (idx >= 0) cola.splice(idx, 1);
     if (c.alTerminar) {
@@ -529,7 +650,13 @@ const crearGestorConsultas = ({
     c.actualizada = ahora();
     if (c.pasos.length === 1 && c.pasos[0].startsWith('En cola')) c.pasos = [];
     c.pasos.push('El servidor IA tomó la consulta');
-    return { id: c.id, prompt: c.prompt, canal: c.canal, marca: c.marca };
+    return {
+      id: c.id,
+      prompt: c.prompt,
+      canal: c.canal,
+      marca: c.marca,
+      imagen: c.imagen || null
+    };
   };
 
   const siguienteLibre = () =>
@@ -571,6 +698,13 @@ const crearGestorConsultas = ({
 
     iniciar({ usuarioId, entrada, canal = 'web', alTerminar = null }) {
       revisarVencidas();
+      if (entrada.pantallazo && modo(config) !== 'agente')
+        throw Object.assign(
+          new Error(
+            'Leer un pantallazo solo funciona con el servidor IA de casa (modo agente)'
+          ),
+          { status: 409 }
+        );
       const enCurso = [...consultas.values()].filter(
         (c) => c.usuarioId === usuarioId && c.estado === 'en_curso'
       );
@@ -600,8 +734,12 @@ const crearGestorConsultas = ({
         c.prompt = construirPromptAgente({
           marca: entrada.marca,
           mensajes: entrada.mensajes,
-          canal
+          canal,
+          pantallazo: entrada.pantallazo || null
         });
+        c.imagen = entrada.pantallazo
+          ? { datos: entrada.pantallazo.datos, mime: entrada.pantallazo.mime }
+          : null;
         c.pasos.push('En cola: esperando al servidor IA de casa');
         cola.push(c);
         despertarAgente();

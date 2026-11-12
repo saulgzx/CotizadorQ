@@ -8,7 +8,7 @@
 // Uso: node agente.mjs   (configuracion en agente-ia/.env, ver .env.example)
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -278,9 +278,39 @@ const crearApi = (config, fetchImpl = fetch, version = null) => {
 
 // --- Resolver una consulta ------------------------------------------------------
 
+// Nombre fijo de la imagen de una consulta, sea cual sea su formato: a Claude Code le
+// importa el contenido, no la extension, y el prompt del backend la nombra asi.
+export const ARCHIVO_IMAGEN = 'pantallazo.png';
+
+/** Borra la imagen de la consulta. No falla si no existe: se llama desde varios lados. */
+const borrarImagen = (config, log = () => {}) => {
+  try {
+    rmSync(path.join(config.carpetaTrabajo, ARCHIVO_IMAGEN), { force: true });
+  } catch (error) {
+    log(`No se pudo borrar la imagen de la consulta: ${error.message}`);
+  }
+};
+
 export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = console.log, ahora = () => Date.now() }) =>
   new Promise((resolve) => {
     mkdirSync(config.carpetaTrabajo, { recursive: true });
+    // Nada de una consulta anterior (por ejemplo, si el agente se cayo a medias).
+    borrarImagen(config, log);
+    if (trabajo.imagen) {
+      try {
+        if (typeof trabajo.imagen.datos !== 'string' || !trabajo.imagen.datos) throw new Error('la imagen llegó vacía');
+        writeFileSync(path.join(config.carpetaTrabajo, ARCHIVO_IMAGEN), Buffer.from(trabajo.imagen.datos, 'base64'));
+      } catch (e) {
+        // Sin la imagen en disco no tiene sentido lanzar Claude Code: diria que no la encuentra.
+        borrarImagen(config, log);
+        const error = `El servidor IA no pudo guardar la imagen para leerla: ${e.message}`;
+        api
+          .fin(trabajo.id, { error })
+          .catch((err) => log(`No se pudo entregar el resultado: ${err.message}`))
+          .then(() => resolve({ texto: '', error }));
+        return;
+      }
+    }
     const metricas = crearMetricas(ahora());
     const hijo = spawnImpl(config.claude, argumentosClaude(config), {
       cwd: config.carpetaTrabajo,
@@ -317,6 +347,7 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     const latido = setInterval(() => enviarAvance(true), 30000);
     const limite = setTimeout(() => {
       estado.error = `Claude Code no terminó en ${Math.round(config.timeoutMs / 60000)} minutos`;
+      borrarImagen(config, log);
       hijo.kill();
     }, config.timeoutMs);
 
@@ -341,10 +372,12 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     });
     hijo.on('error', (error) => {
       estado.error = error.code === 'ENOENT' ? `No se encontró "${config.claude}". ¿Está instalado Claude Code?` : error.message;
+      borrarImagen(config, log);
     });
     hijo.on('close', async (codigo) => {
       clearInterval(latido);
       clearTimeout(limite);
+      borrarImagen(config, log);
       if (buffer.trim()) procesarEvento(estado, buffer, ahora());
       if (cancelada) return resolve({ cancelada: true });
       await enviarAvance(true);

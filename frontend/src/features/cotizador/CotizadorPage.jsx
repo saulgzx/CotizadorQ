@@ -61,6 +61,8 @@ import useTheme from '../theme/useTheme';
 import { BarraSuperior, Cortina, Indice, direccionDeVista } from '../ui/Navegacion';
 import ThemeToggle from '../theme/ThemeToggle';
 import { notify, Toaster } from '../ui/toast';
+import PantallazoMontos from './PantallazoMontos';
+import { leerPantallazo } from './leerPantallazo';
 import MargenChip from './MargenChip';
 import { estadoMargen, formatoPct, useConfigMargen } from './margen';
 import { pareceLista } from './listaPegada';
@@ -840,6 +842,50 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const raw = getIntcomexMontoValue(bo, line);
     const parsed = parseFloat(raw);
     return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  // --- Pantallazo de montos -------------------------------------------------
+  // La imagen la lee la miniPC (cola del asistente IA). Acá solo se prellenan los
+  // borradores: nada se guarda hasta que Alexis revise y apriete Guardar.
+
+  const leerPantallazoDeOrden = (order, campo) => (file) =>
+    leerPantallazo({
+      file,
+      campo,
+      marca: ['AXIS', 'QNAP'].includes(String(order?.brand || '').toUpperCase())
+        ? String(order.brand).toUpperCase()
+        : 'AXIS',
+      lineas: order?.lines || []
+    });
+
+  const aplicarPantallazo = (order, campo) => (resultado) => {
+    const asignaciones = resultado?.asignaciones || {};
+    const claves = Object.keys(asignaciones);
+    const plural = (n, una, varias) => `${n} ${n === 1 ? una : varias}`;
+
+    if (claves.length) {
+      const setDraft = campo === 'axis' ? setAxisDraft : setIntcomexDraft;
+      setDraft(prev => ({
+        ...prev,
+        [order.bo]: {
+          ...(prev[order.bo] || {}),
+          ...Object.fromEntries(claves.map(k => [k, String(asignaciones[k])]))
+        }
+      }));
+    }
+
+    // Se informa TODO lo que no se llenó: lo peligroso de un autocompletado es
+    // creer que llenó más de lo que llenó.
+    const avisos = [plural(claves.length, 'línea completada', 'líneas completadas')];
+    if (resultado?.ambiguas?.length)
+      avisos.push(`${plural(resultado.ambiguas.length, 'ambigua', 'ambiguas')} sin llenar`);
+    if (resultado?.lineasSinDato?.length)
+      avisos.push(`${plural(resultado.lineasSinDato.length, 'línea', 'líneas')} sin dato`);
+    if (resultado?.sinCalce?.length)
+      avisos.push(`${plural(resultado.sinCalce.length, 'fila', 'filas')} sin calce`);
+    notify(`${avisos.join(' · ')}. Revisa antes de guardar.`, {
+      tipo: claves.length ? 'ok' : 'error'
+    });
   };
 
   const updateAxisDraft = (bo, lineKey, value) => {
@@ -4872,6 +4918,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
             <div className="text-xs text-slate-500 mb-2">
               Planned Ship Date: {order.plannedShipDate || 'N/A'}
+            </div>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+              <PantallazoMontos
+                campo='intcomex'
+                onLeer={leerPantallazoDeOrden(order, 'intcomex')}
+                onListo={aplicarPantallazo(order, 'intcomex')}
+                deshabilitado={!!boSaving[order.bo]}
+              />
+              <PantallazoMontos
+                campo='axis'
+                onLeer={leerPantallazoDeOrden(order, 'axis')}
+                onListo={aplicarPantallazo(order, 'axis')}
+                deshabilitado={!!boSaving[order.bo]}
+              />
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">

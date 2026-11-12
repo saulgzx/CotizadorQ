@@ -639,10 +639,10 @@ export const iaAPI = {
     if (!response.ok) throw await leerError(response, 'Error consultando el asistente IA');
     return response.json();
   },
-  iniciar: async ({ marca, mensajes }) => {
+  iniciar: async ({ marca, mensajes, pantallazo }) => {
     const response = await fetchWithAuth('/api/ia/consultas', {
       method: 'POST',
-      body: JSON.stringify({ marca, mensajes })
+      body: JSON.stringify({ marca, mensajes, ...(pantallazo ? { pantallazo } : {}) })
     });
     if (!response.ok) throw await leerError(response, 'No se pudo iniciar la consulta');
     return response.json();
