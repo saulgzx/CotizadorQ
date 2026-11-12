@@ -13,6 +13,40 @@ pega.
 Quien usa esta skill es Alexis González, Product Manager Value en Intcomex Chile.
 Él es el comercial: **esta skill sí emite precios**, tomados del conector MyQuote.
 
+Nunca envíes nada en su nombre: todo queda como borrador para que él lo revise y lo
+mande.
+
+## Si no lo piden, no va
+
+Es la regla que más se rompe y la que más trabajo le da a Alexis. El correo responde
+**exactamente** lo que el cliente preguntó, y nada más.
+
+- **Sin párrafo técnico.** No hay un párrafo bajo la tabla recitando specs, bahías,
+  RAID, capacidad o casos de uso. La tabla habla sola.
+- **Garantía, fichas técnicas y links solo si los piden explícitamente.** Si el correo
+  entrante no los pide, no van — ni "como referencia", ni al cierre.
+- **Sin preguntas al cliente dentro del correo de cotización.** Las preguntas abiertas
+  van al bloque de control interno; él las maneja aparte.
+- **Una sola opción por requerimiento**: la que tiene stock. Nada de sumar un modelo
+  de gama superior que no pidieron. Si hay dos opciones legítimas, van las dos en la
+  tabla, sin párrafo comparativo.
+- **Excepción:** los accesorios obligatorios para que la solución funcione (kit de
+  rieles, alimentación, licencias de canal) sí van aunque no los pidan — o se dice en
+  **una línea** por qué no van.
+
+Bajo la tabla solo caben, como máximo, tres cosas: la línea de alternativa por stock,
+la línea del accesorio que no se cotiza, y la @mención al PM de otra línea. Todo lo
+demás que quieras decir va al bloque B.
+
+## Garantía — nunca se asume
+
+- No va en el correo salvo que la pregunten.
+- Cuando la preguntan, se valida en la fuente oficial del fabricante para **cada
+  modelo exacto**. Prohibido inferirla de otro modelo o de la familia: varían entre
+  modelos y un error de este tipo ya cambió el cumplimiento de una licitación.
+- Si no se puede verificar, no la escribas: déjala en el bloque B como pregunta para
+  Alexis.
+
 ## Fuentes — y solo estas
 
 | Dato | Fuente | Nunca |
@@ -53,6 +87,10 @@ Quirk del catálogo: muchos ítems traen `sku: "To Create"`, que significa que a
 está codificado en Intcomex. Se escribe tal cual en la columna SKU (así lo hace él
 en sus correos reales) y se consulta por MPN.
 
+Un HTTP 500 puntual de MyQuote no significa credenciales caídas: reintenta antes de
+concluir nada. No uses las herramientas de escritura (`generar_cotizacion`,
+`cotizar_y_emitir`, `emitir_pdf`) salvo que Alexis lo pida explícitamente.
+
 ## Flujo
 
 ### 1. Clasificar el requerimiento
@@ -82,6 +120,10 @@ Es la regla que más valor aporta y no se salta nunca:
    por qué cubre el mismo requerimiento — y deja también el pedido original, para que
    el cliente elija.
 3. Si no hay equivalente con stock, va el original con su plazo real de importación.
+
+La prioridad ordena, no esconde: un producto sin stock o con SKU `"To Create"` se
+cotiza igual si el cliente lo pidió. Lo que nunca se hace es agregar una fila de gama
+superior que nadie pidió.
 
 En el correo, el estado de disponibilidad viaja en la columna **Entrega**, con la
 frase literal que devuelve `consultar_producto` (`"3 unidades disponible en entrega
@@ -122,8 +164,12 @@ Un correo de cliente casi nunca pide solo QNAP. Vienen discos, cintas LTO, UPS, 
 switches de otra marca. Nada de eso se cotiza acá y nada de eso se explica en el correo.
 
 - Coticen solo las líneas QNAP que existan en MyQuote.
-- Lo demás se delega en el mismo mail con una mención al product manager de esa línea
-  (ver `references/formato-respuesta.md`), copiando el requerimiento textual del cliente.
+- Lo demás se delega en el mismo mail con una @mención al product manager de esa línea
+  (ver `references/formato-respuesta.md`), copiando el requerimiento textual del cliente:
+  - **Discos Seagate, SSD y RAM** → `@Fernando Rojas Escalona` (frojas@intcomex.com).
+  - **Discos WD** → `@Cristian Muñoz` (cmunoz@intcomex.com).
+  - Cintas LTO, UPS, PDU y otras líneas: misma fórmula, con el PM que corresponda.
+  - **Synology no se delega nunca**: no hay PM de esa marca en Intcomex.
 - En el bloque de control interno deja constancia de qué quedó fuera y por qué —
   incluyendo las búsquedas que hiciste en MyQuote y volvieron vacías.
 
@@ -139,17 +185,20 @@ aritmética.
 Sigue `references/formato-respuesta.md` al pie de la letra. El formato está tomado de
 los correos que Alexis realmente envía; no lo mejores ni lo "modernices".
 
-El error más repetido es escribir de más. El correo es apertura + tabla + un párrafo
-técnico + (si aplica) la mención al PM de otra línea + cierre. Cada párrafo extra que
-agregues explicando contexto, comparando modelos o advirtiendo sobre lo que el cliente
-pidió mal, él lo borra antes de enviar. Ese contenido va al bloque B.
+El error más repetido es escribir de más. El correo es apertura + tabla + (si aplica)
+la línea de alternativa por stock o del accesorio que no va + (si aplica) la @mención
+al PM de otra línea + cierre. **No lleva párrafo técnico.** Cada párrafo extra que
+agregues explicando contexto, recitando specs, comparando modelos o advirtiendo sobre
+lo que el cliente pidió mal, él lo borra antes de enviar. Ese contenido va al bloque B.
 
 ## Salida
 
 Entrega siempre estas dos piezas, en este orden y claramente separadas:
 
 **A — Preview para pegar.** Solo el cuerpo del correo. Sin firma (Outlook la agrega
-sola), sin comentarios, sin marcadores. Debe poder copiarse entero sin editar.
+sola), sin comentarios, sin marcadores. Debe poder copiarse entero sin editar, y la
+cotización siempre llega como tabla encuadrada, nunca como texto corrido — el formato
+exacto según el canal está en `references/formato-respuesta.md`.
 
 **B — Control interno (no se pega).** Bloque corto con:
 
@@ -173,5 +222,10 @@ todavía.
 - Inventar una especificación técnica en vez de consultarla en qnap.com/es-la.
 - Explicar en el correo lo que no es línea QNAP en vez de delegarlo con una mención.
 - Meter preguntas de dimensionamiento al cliente dentro del cuerpo del correo.
-- Agregar párrafos de contexto, comparativas o cálculos bajo la tabla.
+- Agregar párrafos de contexto, comparativas, specs o cálculos bajo la tabla.
+- Meter garantía, fichas técnicas o links que nadie pidió.
+- Afirmar una garantía sin validarla en la fuente oficial para ese modelo exacto.
+- Agregar un modelo de gama superior que el cliente no pidió.
+- Dejar la @mención de delegación con un placeholder cuando el PM se sabe.
 - Meter comentarios internos, ✅/⚠️ o notas de supuestos dentro del preview.
+- Enviar un correo o emitir una cotización: todo queda como borrador para Alexis.

@@ -44,6 +44,8 @@ export const crmApi = {
   // Oportunidades
   listarOportunidades: (params) => pedir(`/oportunidades${consulta(params)}`),
   embudo: () => pedir('/embudo'),
+  // Refleja las órdenes vigentes como oportunidades ganadas. Idempotente.
+  sincronizarOrdenes: () => pedir('/oportunidades/sincronizar-ordenes', { method: 'POST' }),
   crearOportunidad: (datos) => pedir('/oportunidades', { method: 'POST', body: datos }),
   actualizarOportunidad: (id, datos) => pedir(`/oportunidades/${id_(id)}`, { method: 'PATCH', body: datos }),
   vincularCotizacion: (id, cotizacionId) =>

@@ -45,3 +45,36 @@ export function useCambiarEtapa() {
     }
   });
 }
+
+/**
+ * Refleja las órdenes vigentes (pestaña OSO) como oportunidades ganadas.
+ * Es idempotente en el backend, así que se puede apretar sin miedo a duplicar.
+ */
+export function useSincronizarOrdenes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => crmApi.sincronizarOrdenes(),
+    onSuccess: (r) => {
+      const nuevas = (r?.creadas || 0) + (r?.enlazadas || 0) + (r?.ganadas || 0);
+      const partes = [];
+      if (r?.creadas) partes.push(`${r.creadas} nueva${r.creadas === 1 ? '' : 's'}`);
+      if (r?.enlazadas) partes.push(`${r.enlazadas} enlazada${r.enlazadas === 1 ? '' : 's'}`);
+      if (r?.ganadas) partes.push(`${r.ganadas} ganada${r.ganadas === 1 ? '' : 's'}`);
+      if (r?.sinCliente) partes.push(`${r.sinCliente} sin cliente`);
+      if (r?.errores) partes.push(`${r.errores} con error`);
+      notify(
+        nuevas || partes.length
+          ? `${r.ordenes} órdenes revisadas: ${partes.join(', ')}`
+          : `${r?.ordenes || 0} órdenes revisadas, el embudo ya estaba al día`,
+        { tipo: r?.errores ? 'error' : 'ok' }
+      );
+    },
+    onError: (error) => {
+      notify(`No se pudieron sincronizar las órdenes: ${mensajeError(error)}`, { tipo: 'error' });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.crm.todo });
+      qc.invalidateQueries({ queryKey: queryKeys.cotizaciones });
+    }
+  });
+}

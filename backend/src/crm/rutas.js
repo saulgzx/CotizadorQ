@@ -6,6 +6,7 @@ const express = require('express');
 const { z } = require('zod');
 const repositorio = require('./repositorio');
 const reglas = require('./reglas');
+const { sincronizarOrdenes } = require('./ordenes');
 const {
   ETAPAS,
   MARCAS,
@@ -211,7 +212,12 @@ const conflicto = (mensaje, extra) => conEstado(409, mensaje, extra);
 
 // ---------------------------------------------------------------- router
 
-const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
+const crearRutasCrm = ({
+  pool,
+  repo = repositorio,
+  log = loggerApp,
+  sincronizar = sincronizarOrdenes
+} = {}) => {
   const router = express.Router();
 
   const manejar = (fn) => async (req, res) => {
@@ -477,6 +483,15 @@ const crearRutasCrm = ({ pool, repo = repositorio, log = loggerApp } = {}) => {
     '/embudo',
     manejar(async (req, res) => {
       res.json(reglas.armarEmbudo(await repo.totalesEmbudo(pool)));
+    })
+  );
+
+  // Refleja las ordenes vigentes (bo_meta) como oportunidades ganadas. Idempotente:
+  // se puede llamar las veces que haga falta. Devuelve el resumen de lo que hizo.
+  router.post(
+    '/oportunidades/sincronizar-ordenes',
+    manejar(async (req, res) => {
+      res.json(await sincronizar(pool, { repo, log }));
     })
   );
 

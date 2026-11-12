@@ -14,6 +14,7 @@ const {
   derivarEstadoSinFallar
 } = require('./enlace');
 const { crearRutasCrm } = require('./rutas');
+const { sincronizarOrdenes } = require('./ordenes');
 const normalizar = require('./normalizar');
 const repositorio = require('./repositorio');
 
@@ -26,6 +27,7 @@ module.exports = {
   cambiarEtapaDeCotizacion,
   derivarEstadoSinFallar,
   crearRutasCrm,
+  sincronizarOrdenes,
   marcaDesdeOrigenes: normalizar.marcaDesdeOrigenes,
   // Equivalencias estado <-> etapa (unico lugar: normalizar.js).
   ETAPAS: normalizar.ETAPAS,

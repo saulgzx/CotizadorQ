@@ -8,6 +8,7 @@ const Tecla = ({ children }) => (
 
 export const ATAJOS = [
   { grupo: 'En toda la app', teclas: [['Ctrl', 'K']], texto: 'Buscar vistas y productos' },
+  { grupo: 'En toda la app', teclas: [['Ctrl', 'M']], texto: 'Abrir y cerrar el índice de navegación' },
   { grupo: 'En toda la app', teclas: [['Alt', '1…6']], texto: 'Ir a Dashboard, Cotizador, Cotizaciones, Stock, Órdenes, CRM' },
   { grupo: 'En toda la app', teclas: [['?']], texto: 'Mostrar esta ayuda' },
   { grupo: 'Cotizador', teclas: [['/']], texto: 'Buscar producto para agregar' },

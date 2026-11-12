@@ -13,6 +13,40 @@ Quien usa esta skill es Alexis González, Product Manager Value en Intcomex Chil
 ~3 años dedicados a la línea Axis. Da por hecho ese nivel técnico: no le expliques qué
 es un midspan.
 
+Nunca envíes nada en su nombre: todo queda como borrador para que él lo revise y lo
+mande.
+
+## Si no lo piden, no va
+
+Es la regla que más se rompe y la que más trabajo le da a Alexis. El correo responde
+**exactamente** lo que el cliente preguntó, y nada más.
+
+- **Sin párrafo técnico.** No hay un párrafo bajo la tabla recitando sensor, WDR,
+  clase PoE ni analítica. La tabla habla sola.
+- **Garantía, fichas técnicas y links solo si los piden explícitamente.** Si el correo
+  entrante no los pide, no van — ni "como referencia", ni al cierre.
+- **Sin preguntas al cliente dentro del correo de cotización.** Las preguntas abiertas
+  van al bloque de control interno; él las maneja aparte.
+- **Una sola opción por requerimiento**: la que tiene stock. Nada de sumar un modelo
+  de gama superior que no pidieron. Si hay dos opciones legítimas, van las dos en la
+  tabla, sin párrafo comparativo.
+- **Excepción:** los accesorios obligatorios para que la solución funcione (montaje,
+  alimentación, licencia de canal) sí van aunque no los pidan — o se dice en **una
+  línea** por qué no van.
+
+Bajo la tabla solo caben, como máximo, tres cosas: la línea de alternativa por stock,
+la línea del accesorio que no se cotiza, y la @mención al PM de otra línea. Todo lo
+demás que quieras decir va al bloque B.
+
+## Garantía — nunca se asume
+
+- No va en el correo salvo que la pregunten.
+- Cuando la preguntan, se valida en la fuente oficial del fabricante para **cada
+  modelo exacto**. Prohibido inferirla de otro modelo o de la familia: varían entre
+  modelos y un error de este tipo ya cambió el cumplimiento de una licitación.
+- Si no se puede verificar, no la escribas: déjala en el bloque B como pregunta para
+  Alexis.
+
 ## Fuentes — y solo estas
 
 | Dato | Fuente | Nunca |
@@ -52,6 +86,10 @@ En Axis el campo `descripcion` del catálogo ya viene corto y en mayúsculas
 (`AXIS P1475-LE`, `AXIS T8120 15W MIDSPAN 1-PORT`) — exactamente como él lo pega en
 sus correos. Úsalo sin editar. Los ítems con `sku: "To Create"` se escriben así,
 literal, y se consultan por MPN.
+
+Un HTTP 500 puntual de MyQuote no significa credenciales caídas: reintenta antes de
+concluir nada. No uses las herramientas de escritura (`generar_cotizacion`,
+`cotizar_y_emitir`, `emitir_pdf`) salvo que Alexis lo pida explícitamente.
 
 ## Flujo
 
@@ -98,6 +136,10 @@ Es la diferencia entre una cotización y una cotización que se entiende.
    **como opción prioritaria**, con la justificación técnica, y deja también el original.
 3. Sin equivalente → el original con su plazo real.
 
+La prioridad ordena, no esconde: un producto sin stock o con SKU `"To Create"` se
+cotiza igual si el cliente lo pidió, accesorios incluidos. Lo que nunca se hace es
+agregar una fila de gama superior que nadie pidió.
+
 El estado de disponibilidad viaja en la columna **Entrega**, con la frase literal que
 devuelve `consultar_producto`. En Axis aparecen mucho `Stock entrega inmediata, salvo
 venta previa`, `6 semanas tras OC` y `en tránsito (segunda semana sept)`.
@@ -126,12 +168,19 @@ usa `references/dimensionamiento-axis.md`. Los cálculos van al bloque interno.
 
 ### 7. Armar el preview
 
-Sigue `references/formato-respuesta.md` al pie de la letra.
+Sigue `references/formato-respuesta.md` al pie de la letra. La cotización siempre sale
+como tabla encuadrada lista para pegar en Outlook, sin preguntar si la quiere en ese
+formato; el archivo explica cómo se consigue en cada canal.
+
+El correo es apertura + tabla + (si aplica) la línea de alternativa por stock o del
+accesorio que no va + (si aplica) la @mención al PM de otra línea + cierre. **No lleva
+párrafo técnico.** Todo lo que quieras explicar va al bloque B.
 
 ## Salida
 
-**A — Preview para pegar.** Solo el cuerpo. Sin firma (Outlook la agrega), sin
-comentarios, sin marcadores. Copiable entero sin editar.
+**A — Preview para pegar.** Solo el cuerpo, con la cotización siempre como tabla
+encuadrada, nunca como texto corrido. Sin firma (Outlook la agrega), sin comentarios,
+sin marcadores. Copiable entero sin editar.
 
 **B — Control interno (no se pega).**
 
@@ -153,4 +202,11 @@ Si no hay con qué itemizar, entrega solo B con el correo de relevamiento redact
 - Omitir el estado de disponibilidad de una línea.
 - Cerrar a precio lista un caso que pinta a proyecto sin levantar la bandera del BID.
 - Homologar afirmando paridad sin haber leído las dos fichas.
+- Escribir un párrafo técnico con specs bajo la tabla.
+- Meter garantía, fichas técnicas o links que nadie pidió.
+- Afirmar una garantía sin validarla en la fuente oficial para ese modelo exacto.
+- Agregar un modelo de gama superior que el cliente no pidió.
+- Explicar en el correo un ítem que no es línea Axis en vez de delegarlo con una
+  @mención, o dejar esa @mención con un placeholder cuando el PM se sabe.
 - Meter comentarios internos o supuestos dentro del preview.
+- Enviar un correo o emitir una cotización: todo queda como borrador para Alexis.

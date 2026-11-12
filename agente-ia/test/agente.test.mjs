@@ -2,8 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
+  ARCHIVO_IMAGEN,
   argumentosClaude,
   cerrarMetricas,
   crearMetricas,
@@ -130,4 +133,94 @@ test('una herramienta sin respuesta se cierra al terminar y num_turns manda', ()
   assert.equal(met.turnos, 5);
   assert.equal(met.api_ms, 900);
   assert.deepEqual(met.herramientas, [{ nombre: 'WebFetch', ms: 90, sin_respuesta: true }]);
+});
+
+// --- Consultas con imagen (pantallazo) -------------------------------------------
+
+// PNG de 1x1: lo que importa es que los bytes lleguen intactos al disco.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+// Corre una consulta en una carpeta propia y anota que habia en disco al lanzar Claude Code.
+const correrConImagen = async (trabajo, { preparar } = {}) => {
+  const carpeta = mkdtempSync(path.join(os.tmpdir(), 'agente-ia-img-'));
+  const archivo = path.join(carpeta, ARCHIVO_IMAGEN);
+  if (preparar) preparar(archivo);
+  const api = apiFalsa([trabajo]);
+  const alLanzar = { veces: 0, existia: null, bytes: null };
+  try {
+    const r = await principal({
+      config: { ...conClaudeFalso(config), carpetaTrabajo: carpeta },
+      api,
+      log: () => {},
+      unaVez: true,
+      spawnImpl: (cmd, args, opts) => {
+        alLanzar.veces += 1;
+        alLanzar.existia = existsSync(archivo);
+        if (alLanzar.existia) alLanzar.bytes = readFileSync(archivo);
+        alLanzar.cwd = opts.cwd;
+        return spawn(cmd, [path.join(AQUI, 'claude-falso.mjs'), ...args], opts);
+      }
+    });
+    return { r, api, alLanzar, carpeta, quedo: existsSync(archivo) };
+  } finally {
+    rmSync(carpeta, { recursive: true, force: true });
+  }
+};
+
+test('un trabajo con imagen la deja en la carpeta de trabajo antes de lanzar Claude Code', async () => {
+  const { r, alLanzar, carpeta } = await correrConImagen({
+    id: 'img1',
+    canal: 'web',
+    marca: null,
+    prompt: 'lee ./pantallazo.png',
+    imagen: { datos: PNG_B64, mime: 'image/jpeg' }
+  });
+  assert.equal(r.error, null);
+  assert.equal(alLanzar.veces, 1);
+  assert.equal(alLanzar.existia, true, 'la imagen tiene que estar antes de lanzar el proceso');
+  assert.equal(alLanzar.cwd, carpeta, 'Claude Code corre en la carpeta donde quedó la imagen');
+  // Nombre fijo aunque el mime sea otro, y los bytes tal cual venian.
+  assert.equal(ARCHIVO_IMAGEN, 'pantallazo.png');
+  assert.deepEqual(alLanzar.bytes, Buffer.from(PNG_B64, 'base64'));
+});
+
+test('la imagen se borra cuando la consulta termina bien', async () => {
+  const { r, api, quedo } = await correrConImagen({ id: 'img2', canal: 'web', marca: null, prompt: 'lee ./pantallazo.png', imagen: { datos: PNG_B64, mime: 'image/png' } });
+  assert.equal(r.error, null);
+  assert.match(api.llamadas.fin[0].texto, /^Respuesta final/);
+  assert.equal(quedo, false);
+});
+
+test('la imagen se borra también si Claude Code falla', async () => {
+  const { r, alLanzar, quedo } = await correrConImagen({ id: 'img3', canal: 'web', marca: null, prompt: 'FALLAR', imagen: { datos: PNG_B64, mime: 'image/png' } });
+  assert.equal(r.error, 'límite de uso alcanzado');
+  assert.equal(alLanzar.existia, true);
+  assert.equal(quedo, false);
+});
+
+test('un trabajo sin imagen no crea ningún archivo', async () => {
+  const { r, alLanzar, quedo } = await correrConImagen({ id: 'img4', canal: 'web', marca: 'AXIS', prompt: 'cotizar P1475-LE' });
+  assert.equal(r.error, null);
+  assert.equal(alLanzar.existia, false);
+  assert.equal(quedo, false);
+});
+
+test('un trabajo sin imagen limpia la que haya quedado de una consulta anterior', async () => {
+  const { alLanzar } = await correrConImagen(
+    { id: 'img5', canal: 'web', marca: 'AXIS', prompt: 'cotizar P1475-LE', imagen: null },
+    { preparar: (archivo) => writeFileSync(archivo, 'vieja') }
+  );
+  assert.equal(alLanzar.existia, false);
+});
+
+test('si no se puede guardar la imagen, la consulta termina con error y no se lanza Claude Code', async () => {
+  // Una carpeta con el nombre del archivo: escribir encima falla.
+  const { r, api, alLanzar } = await correrConImagen(
+    { id: 'img6', canal: 'web', marca: null, prompt: 'lee ./pantallazo.png', imagen: { datos: PNG_B64, mime: 'image/png' } },
+    { preparar: (archivo) => mkdirSync(archivo) }
+  );
+  assert.equal(alLanzar.veces, 0);
+  assert.match(r.error, /no pudo guardar la imagen/);
+  assert.equal(api.llamadas.fin.length, 1);
+  assert.match(api.llamadas.fin[0].error, /no pudo guardar la imagen/);
 });

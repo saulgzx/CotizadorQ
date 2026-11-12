@@ -29,7 +29,8 @@ Montos en USD con 2 decimales (number). Fechas ISO 8601. Errores: `{ error: stri
   (comparado en minúsculas).
 - `crm_oportunidades`: id, empresa_id (FK), contacto_id (FK nullable, set null), titulo, etapa
   (`nueva` | `cotizada` | `negociacion` | `ganada` | `perdida`), marca (`AXIS` | `QNAP` | `MIXTA` | null),
-  es_proyecto (bool), monto_manual (nullable), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
+  es_proyecto (bool), monto_manual (nullable), bo (nullable, único parcial: el BO de la orden OSO que
+  ganó esta oportunidad), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
   etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
   created_at, updated_at.
 - `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id` y `archivada_en`.
@@ -351,3 +352,39 @@ CRM_TEST_DATABASE_URL=postgres://usuario@localhost:5432/bd_de_prueba npx jest cr
 Crea un schema `crm_test_<aleatorio>` con tablas mínimas del cotizador, prueba esquema, migración,
 enlace, cambio de etapa y derivación del estado, rutas, fusión y archivado, y lo borra al terminar. No toca
 `public`.
+
+## Órdenes como oportunidades ganadas
+
+Código: `backend/src/crm/ordenes.js`. Endpoint: `POST /api/crm/oportunidades/sincronizar-ordenes`
+(admin, como todo el CRM). En el frontend lo dispara el botón «Traer órdenes» del embudo.
+
+Las órdenes **no son cotizaciones**: viven en la pestaña OSO de Google Sheets y
+`GET /api/oso/orders` ya las persiste en `bo_meta` (cliente, PO, borrado lógico) y en
+`bo_line_meta` (monto por línea). La sincronización lee de esas dos tablas, no de la planilla:
+así no depende de Sheets ni duplica el parseo de 200 líneas del endpoint.
+
+Por cada BO vigente (`bo_meta.deleted IS NOT TRUE`):
+
+1. Si ese BO ya tiene oportunidad (columna `bo`, única), se asegura de que esté en `ganada` y no
+   crea nada. Esto hace la operación **idempotente**: se puede repetir sin duplicar.
+2. Si no, resuelve la empresa por nombre normalizado (`normalizar.js`, el mismo que usa el enlace
+   de cotizaciones) y la crea si no existe. Una orden sin nombre de cliente no crea nada: se
+   cuenta en `sinCliente`.
+3. Con la empresa resuelta:
+   - si tiene **exactamente una** oportunidad abierta sin BO, la orden es su cierre: se le engancha
+     el BO y se gana. Evita dejar el mismo negocio duplicado en el embudo (la cotización por un
+     lado, la orden por otro).
+   - si tiene cero o varias, no hay forma de saber cuál cerró: se crea una oportunidad nueva para
+     ese BO, titulada `Orden <BO> · OC <customer_po>`.
+
+El monto es la suma de `bo_line_meta.monto_intcomex` de sus líneas; 0 se guarda como `null`, no
+como 0, para no pisar el monto derivado de la cotización.
+
+Ganar la oportunidad deriva `cotizaciones.estado = 'aprobada'` en todas sus cotizaciones, como
+cualquier otro cambio de etapa (ver "Estado y etapa").
+
+Cada orden corre en su propia transacción: una que falle se cuenta en `errores` y no arrastra al
+resto. La respuesta es el resumen `{ ordenes, creadas, enlazadas, ganadas, sinCambio, sinCliente,
+errores, ms }`.
+
+Tests: `backend/tests/crm.ordenes.test.js` (repositorio en memoria, sin PostgreSQL).

@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { crmApi } from './crmApi';
 import { queryKeys } from '../../app/queryKeys';
-import { useCambiarEtapa } from './hooks';
+import { useCambiarEtapa, useSincronizarOrdenes } from './hooks';
 import { PerdidaDialogo } from './DialogosCrm';
 import { claseInput } from './Dialogo';
 import { ETAPAS, MARCAS, diasTexto, nombreEtapa, usd } from './formato';
@@ -156,6 +156,7 @@ export default function EmbudoTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCot
   const [texto, setTexto] = useState('');
   const [marca, setMarca] = useState('');
   const [mover, dialogo] = useMoverOportunidad();
+  const sincronizar = useSincronizarOrdenes();
   const [sobre, setSobre] = useState(null);
   const [tablero, setTablero] = useState(null);
   const alto = useAltoDisponible(tablero);
@@ -223,6 +224,15 @@ export default function EmbudoTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCot
           <option value=''>Todas las marcas</option>
           {MARCAS.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
+        <button
+          type='button'
+          onClick={() => sincronizar.mutate()}
+          disabled={sincronizar.isPending}
+          className='mq-btn mq-btn-sm mq-btn-secundario ml-auto'
+          title='Trae las órdenes vigentes de OSO al embudo como oportunidades ganadas. Se puede repetir sin duplicar.'
+        >
+          {sincronizar.isPending ? 'Sincronizando…' : 'Traer órdenes'}
+        </button>
       </div>
 
       {lista.isLoading ? (
