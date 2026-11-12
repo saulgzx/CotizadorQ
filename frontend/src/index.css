@@ -320,7 +320,7 @@
 
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes fade-in {
@@ -330,7 +330,7 @@
 
 @keyframes scale-in {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes shimmer {
@@ -893,7 +893,8 @@ button.mq-indice-item:hover { padding-left: 0.75rem; }
 /* La vista entra deslizándose desde el lado del menú hacia el que se navega. */
 @keyframes vista-entra {
   from { opacity: 0; transform: translate3d(var(--mq-dx, 0), var(--mq-dy, 18px), 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
+  /* `none` al terminar: una transformación permanente atraparía a los modales fijos. */
+  to { opacity: 1; transform: none; }
 }
 .mq-vista > * {
   animation: vista-entra 560ms var(--mq-ease) both;

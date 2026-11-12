@@ -60,7 +60,7 @@ export default function Dialogo({ titulo, onCerrar, children, ancho = 'max-w-md'
 
   return (
     <div
-      className='fixed inset-0 z-[60] flex items-start justify-center overflow-auto bg-slate-950/40 p-4 pt-[8vh] backdrop-blur-[2px]'
+      className='fixed inset-0 z-[60] !m-0 flex items-start justify-center overflow-auto bg-slate-950/40 p-4 pt-[8vh] backdrop-blur-[2px] animate-fade-in'
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCerrar();
       }}

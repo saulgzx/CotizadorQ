@@ -39,7 +39,9 @@ export function BarraSuperior({ grupos, actual, onIr, onIndice, onBuscar, theme,
   const navRef = useRef(null);
   const [barra, setBarra] = useState(memoria.barra);
   const [animar, setAnimar] = useState(false);
-  const [principal, ...resto] = grupos;
+  // Un grupo con una sola sección no necesita menú: va como pestaña directa.
+  const pestanas = [...(grupos[0]?.items || []), ...grupos.slice(1).filter((g) => g.items.length === 1).flatMap((g) => g.items)];
+  const resto = grupos.slice(1).filter((g) => g.items.length > 1);
 
   useLayoutEffect(() => {
     const medir = () => {
@@ -66,7 +68,7 @@ export function BarraSuperior({ grupos, actual, onIr, onIndice, onBuscar, theme,
         <Flecha />
       </button>
       <nav ref={navRef} className='mq-top-nav' aria-label='Secciones'>
-        {(principal?.items || []).map(item => (
+        {pestanas.map(item => (
           <button
             key={item.key}
             type='button'

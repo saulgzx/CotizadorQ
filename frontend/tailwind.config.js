@@ -40,7 +40,7 @@ export default {
       keyframes: {
         'fade-in-up': {
           '0%': { opacity: '0', transform: 'translateY(6px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
+          '100%': { opacity: '1', transform: 'none' },
         },
         'fade-in': {
           '0%': { opacity: '0' },
@@ -48,7 +48,7 @@ export default {
         },
         'scale-in': {
           '0%': { opacity: '0', transform: 'translateY(8px) scale(0.985)' },
-          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+          '100%': { opacity: '1', transform: 'none' },
         },
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
