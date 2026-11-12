@@ -5,9 +5,13 @@ cotizaciones: las existentes por migración y las nuevas por enlace automático.
 
 - Código: `backend/src/crm/` (`normalizar.js`, `reglas.js`, `repositorio.js`, `enlace.js`,
   `esquema.js`, `rutas.js`, `index.js`). En `legacyRoutes.js` solo hay enganches: montaje del
-  router, enlace en `POST /api/cotizaciones`, cierre de la oportunidad en
-  `PATCH /api/cotizaciones/:id/estado` (y en `PUT /api/cotizaciones/:id` si trae `estado`), e
-  `iniciarCrm(pool)` en el arranque.
+  router, enlace en `POST /api/cotizaciones`, cambio de etapa en
+  `PATCH /api/cotizaciones/:id/estado` (y en `PUT /api/cotizaciones/:id` si trae `estado`), archivado
+  (`/api/cotizaciones/archivar`, `/archivar/previa`, `/restaurar`), columnas `etapa`/`motivo_perdida`
+  en el listado y el detalle de cotizaciones, e `iniciarCrm(pool)` en el arranque.
+- **La etapa de la oportunidad es la única fuente de verdad del estado comercial.**
+  `cotizaciones.estado` se conserva como valor DERIVADO de esa etapa, por compatibilidad (compras,
+  dashboard, MCP, agente). Ver "Estado y etapa" más abajo.
 - Tests: `backend/tests/crm.*.test.js`. `crm.postgres.test.js` prueba el SQL contra un
   PostgreSQL real y solo corre con `CRM_TEST_DATABASE_URL` (ver al final).
 
@@ -26,19 +30,46 @@ Montos en USD con 2 decimales (number). Fechas ISO 8601. Errores: `{ error: stri
 - `crm_oportunidades`: id, empresa_id (FK), contacto_id (FK nullable, set null), titulo, etapa
   (`nueva` | `cotizada` | `negociacion` | `ganada` | `perdida`), marca (`AXIS` | `QNAP` | `MIXTA` | null),
   es_proyecto (bool), monto_manual (nullable), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
-  etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), created_at, updated_at.
-- `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id`.
+  etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
+  created_at, updated_at.
+- `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id` y `archivada_en`.
 
-Monto de una oportunidad: `monto_manual` si existe; si no, el `total` de la cotización vinculada más reciente; si no
-hay, 0.
+Monto de una oportunidad: `monto_manual` si existe; si no, el `total` de la cotización vinculada más reciente
+(prefiriendo las no archivadas); si no hay, 0.
 
 Normalización de nombre de empresa: minúsculas, sin tildes, sin puntuación, espacios colapsados y sin sufijos
 legales al final (`s a`, `sa`, `spa`, `ltda`, `limitada`, `eirl`, `s a c`, `inc`, `llc`, `cia`). Ejemplo:
 "SONDA S.A." y "Sonda SA" → `sonda`.
 
-Mapeo de estado de cotización a etapa (solo para la migración inicial y para el enlace automático):
-`revision`/`pendiente` → `cotizada`, `enviada` → `cotizada`, `aprobada` → `ganada`, `rechazada` → `perdida`
-(motivo_perdida = "Rechazada (migrado)").
+## Estado y etapa (equivalencias)
+
+Un solo lugar: `backend/src/crm/normalizar.js` (`ETAPA_POR_ESTADO`, `ESTADO_POR_ETAPA`,
+`etapaDesdeEstado`, `estadoDesdeEtapa` y sus versiones SQL `etapaDesdeEstadoSql` /
+`estadoDesdeEtapaSql`). Las 5 etapas (`nueva`, `cotizada`, `negociacion` abiertas; `ganada`,
+`perdida` cerradas) se usan en todas partes.
+
+| estado → etapa | | etapa → estado | |
+|---|---|---|---|
+| `revision`, `pendiente`, null u otro | `nueva` | `nueva` | `revision` |
+| `enviada` | `cotizada` | `cotizada` | `enviada` |
+| `aprobada` | `ganada` | `negociacion` | `enviada` |
+| `rechazada` | `perdida` | `ganada` | `aprobada` |
+| | | `perdida` | `rechazada` |
+
+- Una cotización nueva (estado `revision`) crea su oportunidad en etapa **`nueva`** (antes `cotizada`).
+  La migración inicial usa la misma tabla (`rechazada` → motivo "Rechazada (migrado)").
+- **Sincronización etapa → estado.** Siempre que cambia la etapa de una oportunidad se ejecuta
+  `repositorio.derivarEstadoCotizaciones(db, oportunidadId)`:
+  `UPDATE cotizaciones SET estado = <derivado de la etapa actual> WHERE oportunidad_id = $1`. Lo llaman:
+  `PATCH /api/crm/oportunidades/:id` (si cambia la etapa, en su transacción),
+  `POST /api/crm/oportunidades/:id/cotizaciones` y el enlace a una oportunidad existente (la
+  cotización entra con el estado de la etapa), `PATCH /api/cotizaciones/:id/estado` y `PUT
+  /api/cotizaciones/:id` con `estado` (en su transacción), y el seguimiento automático
+  (`crmAdaptador.cambiarEtapa`, sin transacción: best-effort con `enlace.derivarEstadoSinFallar`, un fallo
+  se registra como `crm_estado_error` y no deshace el cambio de etapa).
+- Datos anteriores a este cambio no se reescriben: oportunidades migradas como `cotizada` desde
+  cotizaciones en `revision` siguen así hasta su próximo cambio de etapa (el listado muestra la
+  `etapa` de la oportunidad, que es la que manda).
 
 ## Endpoints
 
@@ -51,8 +82,9 @@ Mapeo de estado de cotización a etapa (solo para la migración inicial y para e
 - `GET /api/crm/empresas/:id` →
   `{ empresa, contactos: [...], oportunidades: [OportunidadResumen], cotizaciones: [{ id, numero, total, estado,
   created_at, contacto_id, oportunidad_id }], resumen: { cotizaciones, monto_cotizado, ganadas, perdidas,
-  monto_ganado, tasa_cierre } }`
-  `tasa_cierre` = ganadas / (ganadas + perdidas), o null si no hay cerradas.
+  monto_ganado, tasa_cierre }, archivadas: { oportunidades, cotizaciones } }`
+  `tasa_cierre` = ganadas / (ganadas + perdidas), o null si no hay cerradas. Oportunidades y cotizaciones
+  **archivadas no salen** (ni cuentan en `resumen`); `archivadas` trae cuántas hay.
 - `PATCH /api/crm/empresas/:id` `{ nombre?, rut?, sitio?, notas?, archivada? }` → empresa. 409 si el nuevo nombre
   choca con otra.
 - `GET /api/crm/empresas/duplicados` → `{ grupos: [{ empresas: [{ id, nombre, cotizaciones }], motivo }] }`
@@ -68,8 +100,12 @@ Mapeo de estado de cotización a etapa (solo para la migración inicial y para e
 
 ### Oportunidades
 - `OportunidadResumen` = `{ id, titulo, etapa, empresa_id, empresa_nombre, contacto_id, contacto_nombre, marca,
-  es_proyecto, monto, fecha_cierre_estimada, motivo_perdida, cotizaciones, dias_en_etapa, created_at, updated_at }`
-- `GET /api/crm/oportunidades?etapa=&empresa_id=&q=&abiertas=1` → `{ items: [OportunidadResumen] }`
+  es_proyecto, monto, fecha_cierre_estimada, motivo_perdida, cotizaciones, cotizacion_id, cotizacion_numero,
+  dias_en_etapa, cerrada_en, archivada_en, created_at, updated_at }`. `cotizacion_id`/`cotizacion_numero`: la
+  cotización vinculada más reciente **no archivada** (null si no hay), para que el tablero enlace a ella.
+- `GET /api/crm/oportunidades?etapa=&empresa_id=&q=&abiertas=1` → `{ items: [OportunidadResumen] }`. Excluye
+  las archivadas. `GET /api/crm/embudo` y los agregados de `GET /api/crm/empresas` (oportunidades abiertas,
+  monto abierto) también.
 - `GET /api/crm/embudo` → `{ etapas: [{ etapa, cantidad, monto }], abiertas: { cantidad, monto },
   ganadas_mes: { cantidad, monto }, perdidas_mes: { cantidad, monto } }` (las 5 etapas siempre presentes, en orden).
 - `POST /api/crm/oportunidades` `{ empresa_id, titulo, contacto_id?, etapa?, marca?, es_proyecto?, monto_manual?,
@@ -77,14 +113,88 @@ Mapeo de estado de cotización a etapa (solo para la migración inicial y para e
 - `PATCH /api/crm/oportunidades/:id` `{ titulo?, etapa?, contacto_id?, marca?, es_proyecto?, monto_manual?,
   fecha_cierre_estimada?, motivo_perdida? }` → OportunidadResumen.
   Pasar a `perdida` exige `motivo_perdida` (400 si falta). Pasar a `ganada`/`perdida` fija `cerrada_en`; volver a
-  una etapa abierta lo limpia. Cambiar de etapa actualiza `etapa_desde`.
+  una etapa abierta lo limpia. Cambiar de etapa actualiza `etapa_desde` y deriva el `estado` de todas sus
+  cotizaciones (misma transacción).
 - `POST /api/crm/oportunidades/:id/cotizaciones` `{ cotizacion_id }` → vincula la cotización (y le fija empresa_id
-  de la oportunidad). → OportunidadResumen.
+  de la oportunidad; su `estado` se deriva de la etapa). → OportunidadResumen.
+
+### Cotizaciones (endpoints del cotizador que tocan el CRM)
+- `PATCH /api/cotizaciones/:id/estado` (`authenticateToken` + dueño o admin, como antes). Dos formas de cuerpo:
+  - nueva: `{ etapa: 'nueva'|'cotizada'|'negociacion'|'ganada'|'perdida', motivo_perdida?: string }`. `perdida`
+    sin motivo (o solo espacios) → 400 `{ error: 'Indica el motivo de la pérdida' }`. Etapa desconocida → 400
+    `{ error: 'Etapa invalida' }`. El motivo se recorta (espacios colapsados, máx. 500).
+  - heredada: `{ estado: 'enviada'|'revision'|'rechazada'|'aprobada'|'pendiente' }` (`pendiente` = `revision`);
+    se traduce con la tabla. `rechazada` usa el motivo "Rechazada en el cotizador" al pasar a perdida (no pisa
+    el motivo de una oportunidad que ya estaba perdida). Si la etapa actual ya deriva ese estado no se toca
+    (p. ej. `enviada` con la oportunidad en `negociacion` no la hace retroceder a `cotizada`). Otro valor o
+    cuerpo vacío → 400 `{ error: 'Estado invalido' }`.
+  - Con oportunidad: cambia su etapa con las reglas del CRM (`reglas.cambiosOportunidad`: `etapa_desde`,
+    `cerrada_en`, salir de `perdida` borra el motivo) y **puede reabrir** una cerrada (`ganada` → `nueva`,
+    `perdida` → `cotizada`...); luego deriva el estado de todas sus cotizaciones. Una transacción (si la BD
+    falla → 500 y no cambia nada). Sin oportunidad: intenta enlazarla (`enlazarCotizacionNueva`) y, si no se
+    puede, guarda solo el estado derivado.
+  - Respuesta 200: la fila de la cotización (`c.*`, como antes) más `etapa` y `motivo_perdida`.
+    404 `{ error: 'Cotización no encontrada' }`; 403 si no es dueño ni admin; 400 'Id invalido'.
+- `PUT /api/cotizaciones/:id` con `estado` (forma heredada): misma vía, dentro de la transacción de la edición.
+  Sin oportunidad, guarda el estado y después del COMMIT intenta enlazarla.
+- `GET /api/cotizaciones` y `GET /api/cotizaciones/:id`: cada fila agrega `etapa` (la de su oportunidad; sin
+  oportunidad, derivada del estado), `motivo_perdida` (de la oportunidad, o null), `archivada_en` (ya venía en
+  `c.*`) y, **solo para admin**, `empresa_crm` (nombre en `crm_empresas` o null).
+- `GET /api/cotizaciones/funnel` (admin): excluye archivadas; además de `stages` (por estado) trae
+  `etapas: [{ etapa, count, amount }]` con las 5 etapas en orden. `amount` ahora es number.
+
+### Versiones de una cotización (v1…vN)
+Cada edición que cambia algo deja una versión completa (`cotizacion_versiones`, snapshot JSONB de la
+cotización y sus líneas). Código: `legacyRoutes.js` (rutas) y `services/cotizacionVersiones.js` (comparación).
+- `PUT /api/cotizaciones/:id` (admin; mismo cuerpo de siempre, `FOR UPDATE` y 409 por `expected_version`):
+  - Si lo enviado no cambia nada respecto de lo guardado (cabecera del cliente, `estado` si viene, líneas en
+    el mismo orden con cantidades, precios, costos y demás campos normalizados como los guarda el editor):
+    no incrementa la versión ni escribe → 200 con la cotización actual, sus `items`, `resumen` y
+    `sin_cambios: true`.
+  - Si cambia: asegura la fila de la versión anterior (`ON CONFLICT DO NOTHING`; si se crea ahora: `nota`
+    null, `creado_por` = `updated_by` o `usuario`, `creado_en` = `updated_at` o `created_at`), incrementa
+    `version` y guarda la fila de la versión NUEVA con el snapshot ya actualizado, la `nota` de esta edición,
+    `creado_por` = quien edita y `creado_en` = ahora. Responde la cotización con `items`, `resumen` y
+    `sin_cambios: false`. La nota pertenece a la versión que produjo.
+- `GET /api/cotizaciones/:id/versiones` (admin) → `[{ version, total, nota, creado_por, creado_en, vigente }]`,
+  v1…vN que existan, DESC. Si la vigente no tiene fila (nunca editada, o editada antes de este cambio), se
+  sintetiza desde `cotizaciones` (`nota` null, `creado_por` = `updated_by` o `usuario`, `creado_en` =
+  `updated_at` o `created_at`). 404 si la cotización no existe; 400 id inválido.
+- `GET /api/cotizaciones/:id/versiones/:version` (admin) → `{ version, total, nota, creado_por, creado_en,
+  cotizacion, items }` (igual que antes). Para la vigente sin fila, el snapshot sale de las tablas actuales.
+  404 si no existe.
+- Datos anteriores a este cambio: cada fila vieja guardaba el snapshot de la versión k con la nota, autor y
+  fecha de la edición que produjo k+1. No se reescriben.
+- PDF: `POST /api/cotizaciones/pdf` acepta `version` en el cuerpo y el archivo se llama
+  `COT-<numero>_<fecha>_<proyecto>_v<version>.pdf` (sin `version` o inválida: `_v1`, como antes). El frontend
+  debe mandar la `version` de la cotización.
+
+### Archivado
+Archivar una cotización archiva también su oportunidad cuando ya no le queda ninguna cotización vigente. Lo
+archivado sale de listados, embudos, resumen de empresas y seguimiento, y se puede restaurar. No se borra nada.
+Todas solo admin (`authenticateToken` + `requireAdmin`: 401 sin token, 403 no admin). Validación zod
+(`middlewares/validation.js`); cuerpo inválido → 400 `{ error: 'Payload invalido', details: [...] }`.
+- `POST /api/cotizaciones/archivar` — cuerpo `{ ids: number[] }` (1..500 enteros positivos; los repetidos cuentan
+  una vez) **o** `{ antes_de: 'YYYY-MM-DD' }` (día real), exactamente uno; claves extra → 400. En una transacción:
+  marca `archivada_en = ahora` en esas cotizaciones (por ids, o todas las no archivadas con
+  `created_at < antes_de`); luego archiva las oportunidades que se quedaron sin cotizaciones vigentes (con
+  `ids`, entre las de esas cotizaciones; con `antes_de`, todas) y, con `antes_de`, también las oportunidades
+  sin cotizaciones con `created_at < antes_de`. → 200 `{ cotizaciones: n, oportunidades: m }` (cuántas
+  cambiaron; las ya archivadas no cuentan).
+- `GET /api/cotizaciones/archivar/previa?antes_de=YYYY-MM-DD` → 200 `{ cotizaciones, oportunidades }`: lo que
+  archivaría `{ antes_de }`, sin modificar nada (para el diálogo de confirmación). Sin fecha válida → 400.
+- `POST /api/cotizaciones/restaurar` — `{ ids: number[] }` (1..500) → quita `archivada_en` a esas cotizaciones y a
+  sus oportunidades. → 200 `{ cotizaciones, oportunidades }`.
+- `GET /api/cotizaciones`: para admin excluye las archivadas por defecto; con `?archivadas=1` (o `true`)
+  devuelve **solo** las archivadas (con y sin paginación). Para el resto de roles no cambia nada: ven todas las
+  suyas.
+- Las rutas se declaran antes de `/api/cotizaciones/:id`. Restaurar por ids no alcanza a una oportunidad
+  archivada sin cotizaciones (archivada por fecha); hoy solo se puede ver/restaurar desde la BD.
 
 ## Enlace automático
 Al crear una cotización (`POST /api/cotizaciones`, también desde el conector MCP), el backend busca o crea la
 empresa por nombre normalizado de `cliente.empresa` (o `cliente.nombre` si no hay empresa), busca o crea el contacto
-(por email dentro de la empresa; sin email, por nombre), y crea una oportunidad en etapa `cotizada` con título
+(por email dentro de la empresa; sin email, por nombre), y crea una oportunidad en etapa `nueva` con título
 "Cotización #<numero>" y marca según los ítems, salvo que el body traiga `oportunidad_id`. Si el CRM falla, la
 cotización se crea igual (el fallo se registra en el log).
 
@@ -103,6 +213,9 @@ cotización se crea igual (el fallo se registra en el log).
   falla, la migración no corre y `/api/crm` responde 500; el resto de la app sigue igual y el
   enlace automático solo registra el error.
 - Las columnas nuevas de `cotizaciones` son nullable y sin DEFAULT: el `ALTER` no reescribe la tabla.
+- Archivado: `crm_oportunidades.archivada_en` (+ índice parcial `crm_oportunidades_vigentes_idx (etapa) WHERE
+  archivada_en IS NULL`) aquí; `cotizaciones.archivada_en` (+ `cotizaciones_vigentes_created_idx (created_at)
+  WHERE archivada_en IS NULL`) en `ensureCotizacionEdicion` (`services/cotizacionItems.js`).
 - Índices: `crm_empresas(nombre_normalizado)` único; `crm_contactos(empresa_id, LOWER(email))` único
   parcial (`WHERE email IS NOT NULL`); `crm_contactos(empresa_id)`; `crm_oportunidades(empresa_id)`,
   `(contacto_id)` y `(etapa)`; `cotizaciones(empresa_id)`, `(contacto_id)` y `(oportunidad_id)`.
@@ -151,25 +264,26 @@ cotización se crea igual (el fallo se registra en el log).
   espacios). Con email y sin coincidencia, se reutiliza un homónimo **sin** email (y se le asigna); un
   homónimo con otro email es otra persona. Completa teléfono o email faltantes. Si el nombre es basura
   y hay email, el contacto se llama como el email.
-- Oportunidad: etapa según el estado (siempre `cotizada` para una cotización nueva), título
+- Oportunidad: etapa según el estado (`nueva` para una cotización nueva, que nace en `revision`), título
   `Cotización #<numero>` y marca según el `origen` de las líneas guardadas (AXIS, QNAP, MIXTA o null).
 - `oportunidad_id` en el body: si existe, no se crea oportunidad; la cotización toma la empresa de la
   oportunidad, el contacto se busca o crea dentro de esa empresa (sin datos, se usa el de la
   oportunidad), la oportunidad pasa de `nueva` a `cotizada`, su marca se combina (AXIS + QNAP = MIXTA)
-  y toma el contacto si no tenía. **Si no existe** (o no es un entero), se registra
+  y toma el contacto si no tenía; la cotización toma el estado derivado de la etapa. **Si no existe** (o no es un entero), se registra
   `crm_oportunidad_inexistente` y se sigue el flujo normal (oportunidad nueva) en vez de responder
   400: el requisito es que la cotización se cree siempre.
 - La respuesta de `POST /api/cotizaciones` agrega `empresa_id`, `contacto_id` y `oportunidad_id` a
   `cotizacion` (campos nuevos; los existentes no cambian).
 - Aplica a todas las cotizaciones (admin, clientes y `mcp_bot`), igual que la migración.
 
-## Cambio de estado
+## Cambio de estado (`enlace.js`)
 
-- `PATCH /api/cotizaciones/:id/estado`, y `PUT /api/cotizaciones/:id` cuando trae `estado`: si la
-  cotización tiene `oportunidad_id` y la oportunidad está abierta, `aprobada` → `ganada` y
-  `rechazada` → `perdida` con motivo "Rechazada en el cotizador"; fija `etapa_desde` y `cerrada_en`.
-  Una oportunidad ya cerrada no se toca. Best-effort: un error se registra (`crm_estado_error`) y la
-  ruta responde igual.
+- `cambiarEtapaDeCotizacion(pool, ...)` (PATCH) y `aplicarEtapaOportunidad(client, ...)` (dentro de una
+  transacción; lo usan el PATCH y el PUT). Antes era un `UPDATE` del estado más un cierre best-effort de la
+  oportunidad solo para `aprobada`/`rechazada` (`sincronizarEstadoCotizacion`, eliminado junto con
+  `repositorio.cerrarOportunidadAbierta`); ahora la etapa manda y un fallo de BD da 500 sin cambios.
+- Orden de bloqueo: oportunidad (`FOR UPDATE`) y después el `UPDATE` de sus cotizaciones, igual que el
+  `PATCH` del CRM, para no cruzar bloqueos.
 
 ## Migración inicial (`esquema.js`, `migrarCotizaciones`)
 
@@ -199,10 +313,11 @@ cotización se crea igual (el fallo se registra en el log).
 - `GET /empresas`: `archivadas=1` **incluye** las archivadas (no muestra solo esas) y los items traen
   además `archivada`. `limite` 1–200 (default 50), `offset` ≥ 0. Orden: última cotización más reciente
   primero, luego nombre.
-- `GET /oportunidades`: sin `abiertas=1` lista todas las etapas. Acepta además `limite` (1–1000,
-  default 500) y `offset`. Orden: `updated_at` descendente. Los items traen además `cerrada_en`.
+- `GET /oportunidades`: sin `abiertas=1` lista todas las etapas (nunca las archivadas). Acepta además
+  `limite` (1–1000, default 500) y `offset`. Orden: `updated_at` descendente. Los items traen además
+  `cerrada_en` y `archivada_en`. `cotizaciones` cuenta todas las vinculadas (también archivadas).
 - `GET /empresas/:id`: `contactos` incluye los archivados (al final); `cotizaciones` trae hasta las 500
-  más recientes (el `resumen` cuenta todas). `tasa_cierre` con 4 decimales.
+  más recientes no archivadas (el `resumen` cuenta todas las no archivadas). `tasa_cierre` con 4 decimales.
 - `POST /empresas`: 409 `{ error, empresa_id }` también si el nombre es alias de otra.
   `POST /contactos`: 404 si la empresa no existe; 409 `{ error, contacto_id }` por email repetido.
 - Oportunidades: `contacto_id` debe ser de la misma empresa (400). `POST` acepta además
@@ -234,4 +349,5 @@ CRM_TEST_DATABASE_URL=postgres://usuario@localhost:5432/bd_de_prueba npx jest cr
 ```
 
 Crea un schema `crm_test_<aleatorio>` con tablas mínimas del cotizador, prueba esquema, migración,
-enlace, rutas y fusión, y lo borra al terminar. No toca `public`.
+enlace, cambio de etapa y derivación del estado, rutas, fusión y archivado, y lo borra al terminar. No toca
+`public`.

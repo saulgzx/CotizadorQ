@@ -65,6 +65,9 @@ function Cifra({ etiqueta, cantidad, monto, tono }) {
   );
 }
 
+// En el tablero los montos van sin centavos para dejar ancho al texto.
+const usd0 = (n) => `$${Math.round(Number(n) || 0).toLocaleString('en-US')}`;
+
 export function TarjetaOportunidad({ op, onMover, onAbrirEmpresa, onAbrirCotizacion, arrastrable = true }) {
   const motivo = op.etapa === 'perdida' && op.motivo_perdida ? `Motivo: ${op.motivo_perdida}` : null;
   const tieneCotizacion = op.cotizacion_numero != null && op.cotizacion_id != null;
@@ -88,12 +91,14 @@ export function TarjetaOportunidad({ op, onMover, onAbrirEmpresa, onAbrirCotizac
         >
           {op.empresa_nombre}
         </button>
-        <span className='embudo-monto'>{usd(op.monto)}</span>
+        <span className='embudo-monto'>{usd0(op.monto)}</span>
       </div>
       <div className='embudo-linea embudo-linea-2'>
         <span className='embudo-titulo' title={op.titulo}>{op.titulo}</span>
-        <span className='embudo-meta'>
-          <span className='embudo-dias' title={`${diasTexto(op.dias_en_etapa)} en la etapa`}>{diasTexto(op.dias_en_etapa)}</span>
+        <span className='embudo-dias' title={`${diasTexto(op.dias_en_etapa)} en la etapa`}>{diasTexto(op.dias_en_etapa)}</span>
+      </div>
+      {(op.marca || op.es_proyecto || tieneCotizacion) && (
+        <div className='embudo-meta'>
           {op.marca && <span className='embudo-marca'>{op.marca}</span>}
           {op.es_proyecto && <span className='embudo-marca embudo-bid' title='Proyecto / BID'>BID</span>}
           {tieneCotizacion && (onAbrirCotizacion ? (
@@ -108,8 +113,8 @@ export function TarjetaOportunidad({ op, onMover, onAbrirEmpresa, onAbrirCotizac
           ) : (
             <span className='embudo-cot'>#{op.cotizacion_numero}</span>
           ))}
-        </span>
-      </div>
+        </div>
+      )}
       {motivo && <p className='embudo-motivo'>{motivo}</p>}
       <span className='embudo-mover' title='Mover a otra etapa'>
         <svg viewBox='0 0 16 16' width='12' height='12' aria-hidden='true' focusable='false'>
@@ -254,7 +259,7 @@ export default function EmbudoTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCot
                     {et.nombre}
                     <span className='embudo-cantidad'>{col.length}</span>
                   </h3>
-                  <span className='embudo-total'>{usd(total)}</span>
+                  <span className='embudo-total'>{usd0(total)}</span>
                 </header>
                 <div className='embudo-lista'>
                   {col.map((op) => (

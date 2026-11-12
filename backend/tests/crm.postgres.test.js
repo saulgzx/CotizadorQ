@@ -51,7 +51,8 @@ describeBD('CRM con PostgreSQL real', () => {
         numero INTEGER DEFAULT nextval('cotizacion_numero_seq'),
         cliente_nombre VARCHAR(100), cliente_empresa VARCHAR(100), cliente_email VARCHAR(100),
         cliente_telefono VARCHAR(50), total DECIMAL(12,2), estado VARCHAR(20) DEFAULT 'revision',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        archivada_en TIMESTAMP
       );
       CREATE TABLE cotizacion_items (
         id SERIAL PRIMARY KEY,
@@ -113,13 +114,14 @@ describeBD('CRM con PostgreSQL real', () => {
               o.cerrada_en = c.created_at AS cerrada_ok, o.cerrada_en IS NULL AS abierta
          FROM crm_oportunidades o JOIN cotizaciones c ON c.oportunidad_id = o.id ORDER BY c.id`
     );
+    // revision/pendiente => nueva; enviada => cotizada (tabla de equivalencias).
     expect(ops.map((o) => [o.etapa, o.marca, o.motivo_perdida])).toEqual([
       ['ganada', 'AXIS', null],
       ['perdida', 'QNAP', 'Rechazada (migrado)'],
       ['cotizada', 'MIXTA', null],
-      ['cotizada', null, null],
-      ['cotizada', null, null],
-      ['cotizada', null, null]
+      ['nueva', null, null],
+      ['nueva', null, null],
+      ['nueva', null, null]
     ]);
     expect(ops.every((o) => o.desde_ok)).toBe(true);
     expect(ops.slice(0, 2).every((o) => o.cerrada_ok)).toBe(true);
@@ -141,7 +143,7 @@ describeBD('CRM con PostgreSQL real', () => {
       const [ana] = await q(`SELECT id FROM crm_contactos WHERE email = 'ana@sonda.cl'`);
       expect(v1).toMatchObject({ empresa_id: sonda.id, contacto_id: ana.id, oportunidad_creada: true });
       const [op] = await q('SELECT etapa, marca, titulo FROM crm_oportunidades WHERE id = $1', [v1.oportunidad_id]);
-      expect(op).toEqual({ etapa: 'cotizada', marca: 'QNAP', titulo: `Cotización #${nueva.numero}` });
+      expect(op).toEqual({ etapa: 'nueva', marca: 'QNAP', titulo: `Cotización #${nueva.numero}` });
 
       // Segunda vez: ya esta enlazada, no hace nada.
       expect(await enlace.enlazarCotizacionNueva(client, { cotizacionId: nueva.id, log: silencio })).toBeNull();
@@ -162,16 +164,36 @@ describeBD('CRM con PostgreSQL real', () => {
     }
   });
 
-  test('cambio de estado: aprobada cierra como ganada; no reabre una ya cerrada', async () => {
+  test('cambio de etapa desde la cotizacion: cierra, reabre y deriva el estado de todas sus cotizaciones', async () => {
     const cot = await insertarCotizacion({ empresa: 'Estado SpA', nombre: 'X Y', total: 5 });
     const client = await pool.connect();
     const v = await enlace.enlazarCotizacionNueva(client, { cotizacionId: cot.id, log: silencio });
+    const otra = await insertarCotizacion({ empresa: 'Estado SpA', nombre: 'X Y', total: 6 });
+    await enlace.enlazarCotizacionNueva(client, { cotizacionId: otra.id, oportunidadId: v.oportunidad_id, log: silencio });
     client.release();
-    const cerrada = await enlace.sincronizarEstadoCotizacion(pool, { oportunidadId: v.oportunidad_id, estado: 'rechazada', log: silencio });
-    expect(cerrada).toEqual({ id: v.oportunidad_id, etapa: 'perdida' });
-    const [op] = await q('SELECT motivo_perdida, cerrada_en IS NOT NULL AS cerrada FROM crm_oportunidades WHERE id = $1', [v.oportunidad_id]);
-    expect(op).toEqual({ motivo_perdida: 'Rechazada en el cotizador', cerrada: true });
-    expect(await enlace.sincronizarEstadoCotizacion(pool, { oportunidadId: v.oportunidad_id, estado: 'aprobada', log: silencio })).toBeNull();
+    const estados = async () => (await q('SELECT estado FROM cotizaciones WHERE oportunidad_id = $1 ORDER BY id', [v.oportunidad_id])).map((r) => r.estado);
+    // Al entrar la segunda a la oportunidad (nueva -> cotizada) ambas quedan 'enviada'.
+    expect(await estados()).toEqual(['enviada', 'enviada']);
+
+    const perdida = await enlace.cambiarEtapaDeCotizacion(pool, {
+      cotizacionId: cot.id, etapa: 'perdida', estadoHeredado: 'rechazada', motivoPorDefecto: 'Rechazada en el cotizador', log: silencio
+    });
+    expect(perdida).toMatchObject({ id: cot.id, estado: 'rechazada', etapa: 'perdida', motivo_perdida: 'Rechazada en el cotizador' });
+    expect(await estados()).toEqual(['rechazada', 'rechazada']);
+    const [op] = await q('SELECT cerrada_en IS NOT NULL AS cerrada FROM crm_oportunidades WHERE id = $1', [v.oportunidad_id]);
+    expect(op.cerrada).toBe(true);
+
+    const reabierta = await enlace.cambiarEtapaDeCotizacion(pool, { cotizacionId: otra.id, etapa: 'negociacion', log: silencio });
+    expect(reabierta).toMatchObject({ estado: 'enviada', etapa: 'negociacion', motivo_perdida: null });
+    expect(await estados()).toEqual(['enviada', 'enviada']);
+    const [op2] = await q('SELECT cerrada_en, motivo_perdida FROM crm_oportunidades WHERE id = $1', [v.oportunidad_id]);
+    expect(op2).toEqual({ cerrada_en: null, motivo_perdida: null });
+
+    // PATCH del CRM: tambien deriva.
+    await request(app).patch(`/api/crm/oportunidades/${v.oportunidad_id}`).send({ etapa: 'ganada' });
+    expect(await estados()).toEqual(['aprobada', 'aprobada']);
+    await request(app).patch(`/api/crm/oportunidades/${v.oportunidad_id}`).send({ etapa: 'perdida', motivo_perdida: 'Precio' });
+    expect(await estados()).toEqual(['rechazada', 'rechazada']);
   });
 
   test('rutas: empresas, busqueda, detalle, 409 por nombre y alias', async () => {
@@ -302,5 +324,59 @@ describeBD('CRM con PostgreSQL real', () => {
 
     expect((await request(app).post(`/api/crm/empresas/${a.body.id}/fusionar`).send({ origen_id: a.body.id })).status).toBe(400);
     expect((await request(app).post(`/api/crm/empresas/${a.body.id}/fusionar`).send({ origen_id: b.body.id })).status).toBe(404);
+  });
+
+  test('archivado: previa, por fecha, por ids, exclusiones y restaurar', async () => {
+    const repo = require('../src/crm/repositorio');
+    const seguimientoCrm = require('../src/seguimiento/crmAdaptador');
+    const enlazar = async (cot, oportunidadId) => {
+      const c = await pool.connect();
+      try {
+        return await enlace.enlazarCotizacionNueva(c, { cotizacionId: cot.id, oportunidadId, log: silencio });
+      } finally {
+        c.release();
+      }
+    };
+    const a = await insertarCotizacion({ empresa: 'Archivo SA', nombre: 'Ana', total: 10, creada: '2025-06-01 10:00:00' });
+    const b = await insertarCotizacion({ empresa: 'Archivo SA', nombre: 'Ana', total: 20, creada: '2025-07-01 10:00:00' });
+    const c = await insertarCotizacion({ empresa: 'Archivo SA', nombre: 'Ana', total: 30, creada: '2026-03-01 10:00:00' });
+    const va = await enlazar(a);
+    await enlazar(b, va.oportunidad_id);
+    const vc = await enlazar(c);
+    const vacia = await repo.insertarOportunidad(pool, { empresa_id: va.empresa_id, titulo: 'Vacia', created_at: '2025-01-01 00:00:00' });
+    const ids = async (url) => (await request(app).get(url)).body.items.map((o) => o.id);
+
+    expect(await repo.previaArchivado(pool, { antesDe: '2026-01-01' })).toEqual({ cotizaciones: 2, oportunidades: 2 });
+    const porFecha = await repo.conTransaccion(pool, (cl) => repo.archivarCotizaciones(cl, { antesDe: '2026-01-01' }));
+    expect(porFecha).toEqual({ cotizaciones: 2, oportunidades: 2 });
+    expect(await repo.previaArchivado(pool, { antesDe: '2026-01-01' })).toEqual({ cotizaciones: 0, oportunidades: 0 });
+
+    const visibles = await ids(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`);
+    expect(visibles).toEqual([vc.oportunidad_id]);
+    const ficha = (await request(app).get(`/api/crm/empresas/${va.empresa_id}`)).body;
+    expect(ficha.archivadas).toEqual({ oportunidades: 2, cotizaciones: 2 });
+    expect(ficha.cotizaciones.map((x) => x.id)).toEqual([c.id]);
+    expect(ficha.resumen).toMatchObject({ cotizaciones: 1, monto_cotizado: 30 });
+    const [lista] = (await request(app).get('/api/crm/empresas?q=archivo')).body.items;
+    expect(lista).toMatchObject({ oportunidades_abiertas: 1, monto_abierto: 30 });
+    const [vigente] = (await request(app).get(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`)).body.items;
+    expect(vigente).toMatchObject({ cotizacion_id: c.id, cotizacion_numero: c.numero, archivada_en: null });
+    const masGrandes = await seguimientoCrm.abiertasMasGrandes(pool, 100);
+    expect(masGrandes.map((o) => o.id)).not.toContain(va.oportunidad_id);
+    expect(masGrandes.map((o) => o.id)).not.toContain(vacia.id);
+
+    const totalVivas = await q('SELECT COUNT(*)::int AS n FROM crm_oportunidades WHERE archivada_en IS NULL');
+    const embudo = (await request(app).get('/api/crm/embudo')).body;
+    expect(embudo.etapas.reduce((s2, e) => s2 + e.cantidad, 0)).toBe(totalVivas[0].n);
+
+    const porIds = await repo.conTransaccion(pool, (cl) => repo.archivarCotizaciones(cl, { ids: [c.id, a.id] }));
+    expect(porIds).toEqual({ cotizaciones: 1, oportunidades: 1 }); // a ya estaba archivada
+    expect(await ids(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`)).toEqual([]);
+
+    const restaurado = await repo.conTransaccion(pool, (cl) => repo.restaurarCotizaciones(cl, { ids: [a.id] }));
+    expect(restaurado).toEqual({ cotizaciones: 1, oportunidades: 1 });
+    expect(await ids(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`)).toEqual([va.oportunidad_id]);
+    const [opA] = (await request(app).get(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`)).body.items;
+    expect(opA.cotizacion_id).toBe(a.id); // b sigue archivada
   });
 });

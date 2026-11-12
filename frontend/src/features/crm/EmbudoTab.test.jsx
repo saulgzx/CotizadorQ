@@ -37,7 +37,7 @@ describe('EmbudoTab', () => {
 
     const cotizada = within(columna('Cotizada'));
     expect(cotizada.getByText('Sonda S.A.')).toBeInTheDocument();
-    expect(cotizada.getAllByText('$1,500.50').length).toBe(2); // total de columna y de tarjeta
+    expect(cotizada.getAllByText('$1,501').length).toBe(2); // total de columna y de tarjeta
     expect(cotizada.getByText('AXIS')).toBeInTheDocument();
     expect(cotizada.getByText('3 días')).toBeInTheDocument();
 
@@ -58,7 +58,7 @@ describe('EmbudoTab', () => {
     const cotizada = columna('Cotizada');
     const cabecera = cotizada.querySelector('header');
     expect(within(cabecera).getByRole('heading', { name: /Cotizada/ })).toHaveTextContent('Cotizada1');
-    expect(within(cabecera).getByText('$1,500.50')).toBeInTheDocument();
+    expect(within(cabecera).getByText('$1,501')).toBeInTheDocument();
     expect(cotizada.querySelector('.embudo-lista')).toContainElement(within(cotizada).getByRole('article'));
   });
 

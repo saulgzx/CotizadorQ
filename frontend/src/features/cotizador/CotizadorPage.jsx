@@ -109,11 +109,19 @@ const FILTROS_HISTORIAL_VACIOS = { fecha: '', cliente: '', pid: '', proyecto: ''
 const CRM_TABS = new Set(['resumen', 'embudo', 'cotizaciones', 'empresas', 'seguimiento']);
 
 // /crm?tab=cotizaciones&cotizacion=ID: la página se vuelve a montar al cambiar de
-// ruta, así que la pestaña y la cotización a abrir viajan en la URL.
+// ruta, así que la pestaña y la cotización a abrir viajan en la URL. Si otra
+// navegación pisa la URL durante ese cambio, el destino pedido se recuerda unos
+// segundos a nivel de módulo para no caer en la pestaña por defecto.
+let destinoCrmPendiente = null;
+const recordarDestinoCrm = (tab, cotizacion = null) => {
+  destinoCrmPendiente = { tab, cotizacion, en: Date.now() };
+};
 const leerParamsCrm = (search) => {
   const params = new URLSearchParams(search || '');
   const tab = params.get('tab');
   const cotizacion = Number(params.get('cotizacion'));
+  const pendiente = destinoCrmPendiente && Date.now() - destinoCrmPendiente.en < 4000 ? destinoCrmPendiente : null;
+  if (!CRM_TABS.has(tab) && pendiente) return { tab: pendiente.tab, cotizacion: pendiente.cotizacion };
   return {
     tab: CRM_TABS.has(tab) ? tab : 'resumen',
     cotizacion: Number.isFinite(cotizacion) && cotizacion > 0 ? cotizacion : null
@@ -451,6 +459,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [archivadasLoading, setArchivadasLoading] = useState(false);
   const [archivadasError, setArchivadasError] = useState('');
   const [archivadasRecarga, setArchivadasRecarga] = useState(0);
+  // Al restaurar, las activas se vuelven a pedir (la invalidación sola no relanza la carga).
+  const [activasRecarga, setActivasRecarga] = useState(0);
   const [archivarFechaAbierto, setArchivarFechaAbierto] = useState(false);
   const [versionesDe, setVersionesDe] = useState(null);
   const [perdidaDe, setPerdidaDe] = useState(null);
@@ -1990,7 +2000,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, currentView, crmTab]);
+  }, [isLoggedIn, currentView, crmTab, activasRecarga]);
 
   // Archivadas (solo admin completo): se piden aparte y solo al mirarlas.
   useEffect(() => {
@@ -2027,6 +2037,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       params.set('cotizacion', String(expandedHistorialId));
       enfocarCotizacionRef.current = expandedHistorialId;
     }
+    recordarDestinoCrm('cotizaciones', expandedHistorialId || null);
     setCrmTab('cotizaciones');
     setCurrentView('crm');
     navigate(`/crm?${params.toString()}`, { replace: true });
@@ -3292,6 +3303,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const folio = cot?.numero ? `COT-${cot.numero}_` : '';
       const filenameBase = `${folio}${buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa, cot?.version)}`;
       const payload = buildPdfPayloadFromHistorial(cot);
+      // El servidor nombra el archivo con la version real de la cotizacion.
+      payload.version = cot?.version || 1;
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
       notify(error.message || 'Error exportando PDF');
@@ -4168,6 +4181,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setSelectedHistorialIds(new Set());
       invalidarCotizacionesYCrm();
       setArchivadasRecarga(n => n + 1);
+      setActivasRecarga(n => n + 1);
       notify(`Se restauraron ${textoConteoArchivo(resultado)}.`, { tipo: 'ok' });
     } catch (error) {
       notify(error.message || 'No se pudo restaurar', { tipo: 'error' });
