@@ -441,4 +441,257 @@ describe('asistente IA', () => {
       expect(gestor.terminarAgente(id, { texto: 'x' })).toBe(false);
     });
   });
+  describe('pantallazo', () => {
+    const configAgente = leerConfig({ IA_AGENTE_TOKEN: 'secreto' });
+    const PNG_B64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const lineas = [
+      { sku: 'AX123456', mpn: '02328-001', desc: 'AXIS P1475-LE' },
+      { sku: 'AX654321', mpn: '01972-004', desc: 'AXIS Q6135-LE PTZ' }
+    ];
+    const pantallazo = {
+      datos: PNG_B64,
+      mime: 'image/png',
+      campo: 'intcomex',
+      lineas
+    };
+    const conversacion = {
+      marca: 'AXIS',
+      mensajes: [{ role: 'user', content: 'Cotizar P1475-LE' }]
+    };
+
+    test('validarEntrada acepta un pantallazo valido, con o sin conversacion', () => {
+      const ok = validarEntrada({ ...conversacion, pantallazo });
+      expect(ok).toEqual({
+        marca: 'AXIS',
+        mensajes: conversacion.mensajes,
+        pantallazo
+      });
+      // Solo la imagen: marca y mensajes son opcionales.
+      expect(validarEntrada({ pantallazo })).toEqual({
+        marca: null,
+        mensajes: [],
+        pantallazo
+      });
+      // Los tres formatos y los dos campos.
+      ['image/png', 'image/jpeg', 'image/webp'].forEach((mime) =>
+        expect(
+          validarEntrada({ pantallazo: { ...pantallazo, mime } }).pantallazo.mime
+        ).toBe(mime)
+      );
+      expect(
+        validarEntrada({ pantallazo: { ...pantallazo, campo: 'axis' } })
+          .pantallazo.campo
+      ).toBe('axis');
+    });
+
+    test('las lineas se recortan, quedan en una linea y se descartan campos de mas', () => {
+      const r = validarEntrada({
+        pantallazo: {
+          ...pantallazo,
+          lineas: [
+            { sku: '  AX1  ', mpn: 123, desc: `a\nb ${'x'.repeat(500)}`, precio: 9 },
+            {},
+            null
+          ]
+        }
+      }).pantallazo.lineas;
+      expect(r[0].sku).toBe('AX1');
+      expect(r[0].mpn).toBe('123');
+      expect(r[0].desc).toHaveLength(200);
+      expect(r[0].desc.startsWith('a b x')).toBe(true);
+      expect(r[0]).not.toHaveProperty('precio');
+      expect(r[1]).toEqual({ sku: '', mpn: '', desc: '' });
+      expect(r[2]).toEqual({ sku: '', mpn: '', desc: '' });
+      // Sin lineas tambien vale.
+      const { lineas: _omitidas, ...sinLineas } = pantallazo;
+      expect(validarEntrada({ pantallazo: sinLineas }).pantallazo.lineas).toEqual([]);
+    });
+
+    test('rechaza un mime no soportado', () => {
+      ['image/gif', 'application/pdf', '', undefined].forEach((mime) =>
+        expect(() =>
+          validarEntrada({ pantallazo: { ...pantallazo, mime } })
+        ).toThrow('Solo se aceptan imágenes PNG, JPG o WEBP')
+      );
+    });
+
+    test('rechaza base64 invalido, incluido el prefijo data:', () => {
+      [
+        'esto no es base64 !!',
+        `data:image/png;base64,${PNG_B64}`,
+        'abc',
+        '',
+        12345,
+        null
+      ].forEach((datos) => {
+        let error;
+        try {
+          validarEntrada({ pantallazo: { ...pantallazo, datos } });
+        } catch (e) {
+          error = e;
+        }
+        expect(error?.status).toBe(400);
+        expect(error.message).toMatch(/base64|vacia/);
+      });
+    });
+
+    test('rechaza una imagen de mas de 6 MB y dice cuanto pesa', () => {
+      const de = (bytes) => Buffer.alloc(bytes, 1).toString('base64');
+      const justo = 6 * 1024 * 1024;
+      expect(
+        validarEntrada({ pantallazo: { ...pantallazo, datos: de(justo) } })
+          .pantallazo.datos
+      ).toHaveLength(Math.ceil(justo / 3) * 4);
+      expect(() =>
+        validarEntrada({ pantallazo: { ...pantallazo, datos: de(justo + 1) } })
+      ).toThrow(/pesa 6\.0 MB y el máximo es 6\.0 MB/);
+      expect(() =>
+        validarEntrada({
+          pantallazo: { ...pantallazo, datos: de(7.5 * 1024 * 1024) }
+        })
+      ).toThrow(/pesa 7\.5 MB y el máximo es 6\.0 MB/);
+    });
+
+    test('rechaza un campo distinto de axis o intcomex, y lineas mal formadas', () => {
+      ['cliente', 'AXIS', '', undefined].forEach((campo) =>
+        expect(() =>
+          validarEntrada({ pantallazo: { ...pantallazo, campo } })
+        ).toThrow(/axis o intcomex/)
+      );
+      expect(() =>
+        validarEntrada({ pantallazo: { ...pantallazo, lineas: 'x' } })
+      ).toThrow(/lista/);
+      expect(() =>
+        validarEntrada({
+          pantallazo: { ...pantallazo, lineas: Array(301).fill({ sku: 'a' }) }
+        })
+      ).toThrow(/maximo 300/);
+      expect(
+        validarEntrada({
+          pantallazo: { ...pantallazo, lineas: Array(300).fill({ sku: 'a' }) }
+        }).pantallazo.lineas
+      ).toHaveLength(300);
+      expect(() => validarEntrada({ pantallazo: 'imagen' })).toThrow(
+        /mal formado/
+      );
+    });
+
+    test('sin pantallazo valida igual que antes', () => {
+      expect(validarEntrada(conversacion)).toEqual({
+        marca: 'AXIS',
+        mensajes: conversacion.mensajes
+      });
+      expect(validarEntrada({ ...conversacion, pantallazo: null })).toEqual({
+        marca: 'AXIS',
+        mensajes: conversacion.mensajes
+      });
+      // La marca y la conversacion siguen siendo obligatorias.
+      expect(() => validarEntrada({ mensajes: conversacion.mensajes })).toThrow(
+        /Marca/
+      );
+      expect(() => validarEntrada({ marca: 'AXIS' })).toThrow(/vacia/);
+      // Con pantallazo, una marca que si viene tiene que ser valida.
+      expect(() => validarEntrada({ marca: 'SONY', pantallazo })).toThrow(
+        /Marca/
+      );
+    });
+
+    test('el prompt de pantallazo pide leer ./pantallazo.png y responder solo con json', () => {
+      const p = construirPromptAgente({ marca: 'AXIS', mensajes: [], pantallazo });
+      expect(p).toContain('./pantallazo.png');
+      expect(p).toContain('```json');
+      expect(p).toContain(
+        '[ { "sku": "", "mpn": "", "descripcion": "", "monto": "" } ]'
+      );
+      // Las lineas de la orden.
+      lineas.forEach((l) => {
+        expect(p).toContain(l.sku);
+        expect(p).toContain(l.mpn);
+        expect(p).toContain(l.desc);
+      });
+      // Reglas duras.
+      expect(p).toMatch(/déjalo vacío.*en vez de adivinar/);
+      expect(p).toContain('No inventes SKU ni MPN');
+      expect(p).toContain('No calcules ni conviertas montos');
+      expect(p).toContain('devuelve un array vacío');
+      expect(p).toContain('sin reformatear');
+      expect(p).toContain('no uses las herramientas del conector MyQuote');
+      expect(p).toContain('no busques en la web');
+      // Es lectura, no cotizacion: ni skill ni formato de cotizacion.
+      expect(p).not.toContain('<skill nombre=');
+      expect(p).not.toContain('LISTA COTIZADORQ');
+      expect(p).not.toContain('cotizar_rapido');
+    });
+
+    test('el prompt cambia segun el campo: OC del cliente o planilla de costos de Axis', () => {
+      const oc = construirPromptAgente({ marca: null, mensajes: [], pantallazo });
+      const costos = construirPromptAgente({
+        marca: null,
+        mensajes: [],
+        pantallazo: { ...pantallazo, campo: 'axis' }
+      });
+      expect(oc).toContain('orden de compra (OC) que el cliente');
+      expect(oc).toContain('precio de venta');
+      expect(oc).not.toContain('planilla de costos');
+      expect(costos).toContain('planilla de costos de Axis');
+      expect(costos).toContain('costo unitario');
+      expect(costos).not.toContain('precio de venta');
+      expect(costos).not.toContain('orden de compra');
+    });
+
+    test('sin pantallazo el prompt es el de siempre y sigue cargando la skill', () => {
+      const normal = construirPromptAgente(conversacion);
+      expect(construirPromptAgente({ ...conversacion, pantallazo: null })).toBe(
+        normal
+      );
+      expect(normal).toContain('<skill nombre="preventa-axis">');
+      expect(normal).toContain('LISTA COTIZADORQ');
+      expect(normal).not.toContain('pantallazo');
+      expect(normal.endsWith('Cotizar P1475-LE')).toBe(true);
+    });
+
+    test('el trabajo lleva la imagen al agente y la suelta al terminar', async () => {
+      const gestor = crearGestorConsultas({ config: configAgente });
+      const c = gestor.iniciar({
+        usuarioId: 1,
+        entrada: validarEntrada({ pantallazo })
+      });
+      // La imagen no se le devuelve al navegador.
+      expect(JSON.stringify(c)).not.toContain(PNG_B64);
+      const trabajo = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(trabajo).toEqual({
+        id: c.id,
+        prompt: expect.stringContaining('./pantallazo.png'),
+        canal: 'web',
+        marca: null,
+        imagen: { datos: PNG_B64, mime: 'image/png' }
+      });
+      // Si el agente la suelta, el siguiente intento la recibe otra vez con la imagen.
+      gestor.liberarTrabajo(trabajo.id);
+      const otraVez = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(otraVez.imagen).toEqual({ datos: PNG_B64, mime: 'image/png' });
+      gestor.cancelar({ usuarioId: 1, id: c.id });
+
+      // Una consulta normal viaja sin imagen.
+      gestor.iniciar({ usuarioId: 1, entrada: validarEntrada(conversacion) });
+      const normal = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(normal.imagen).toBeNull();
+      expect(normal.prompt).toContain('<skill nombre="preventa-axis">');
+    });
+
+    test('en modo API un pantallazo se rechaza sin llamar a la API', () => {
+      const crearCliente = jest.fn();
+      const gestor = crearGestorConsultas({ config, crearCliente });
+      let error;
+      try {
+        gestor.iniciar({ usuarioId: 1, entrada: validarEntrada({ pantallazo }) });
+      } catch (e) {
+        error = e;
+      }
+      expect(error?.status).toBe(409);
+      expect(error.message).toMatch(/servidor IA de casa/);
+      expect(crearCliente).not.toHaveBeenCalled();
+    });
+  });
 });
