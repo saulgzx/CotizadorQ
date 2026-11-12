@@ -4171,46 +4171,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return hasAxis ? 'Axis' : 'QNAP';
   };
 
-  const buildCompraMailto = (cot) => {
-    const origenLabel = getCompraOrigenLabel(cot);
-    const bo = (boByCotizacionId[cot.id] || '').trim() || cot.id || 'XXXX';
-    const subject = `Compra ${origenLabel} - BO ${bo}`;
-    const items = cot.items || [];
-    const headers = ['Marca', 'Cantidad', 'SKU', 'MPN', 'Costo XUS'];
-    const dataRows = items.map(item => ([
-      item.marca || '',
-      String(item.cantidad || item.cant || 1),
-      item.sku || '',
-      item.mpn || '',
-      formatCurrency(parseFloat(item.precio_disty || 0))
-    ]));
-    const allRows = [headers, ...dataRows];
-    const colWidths = headers.map((_, idx) =>
-      Math.max(...allRows.map(r => (r[idx] || '').toString().length))
-    );
-    const formatRow = (row) =>
-      `| ${row.map((cell, i) => (cell || '').toString().padEnd(colWidths[i], ' ')).join(' | ')} |`;
-    const sep = `| ${colWidths.map(w => '-'.repeat(w)).join(' | ')} |`;
-    const tableLines = [
-      formatRow(headers),
-      sep,
-      ...dataRows.map(formatRow)
-    ];
-    const body = [
-      'Juan',
-      'Favor tu apoyo gestionando la siguiente compra:',
-      '',
-      `Compra ${origenLabel}, aéreo consolidado, XCL – BO ${bo}`,
-      '',
-      ...tableLines,
-      '',
-      'Muchas gracias',
-      'Quedo atento',
-      'Saludos.'
-    ].join('\n');
-    return `mailto:juan.parral@intcomex.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  };
-
   const buildCompraTableHtml = (cot) => {
     const rows = (cot.items || []).map(item => {
       const marca = item.marca || '';
@@ -4834,7 +4794,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const enviarACompras = (cot) => {
-    window.location.href = buildCompraMailto(cot);
+    // Solo se muestra la info para copiar/pegar; ya no se abre el cliente de correo.
     setCompraPreviewCot(cot);
   };
 
@@ -8807,6 +8767,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
                     Copiar asunto
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText('juan.parral@intcomex.com')}
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
+                  >
+                    Copiar destinatario
                   </button>
                 </div>
               </div>
