@@ -1,0 +1,84 @@
+/* Pestaña Cotizaciones del CRM y panel de versiones. Usa los tokens --mq-* de index.css. */
+
+.mq-cot-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mq-cot-grupo {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.mq-cot-version {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mq-ink-2);
+  background: var(--mq-surface);
+  white-space: nowrap;
+}
+
+button.mq-cot-version {
+  cursor: pointer;
+  transition: border-color var(--mq-t-1) var(--mq-ease), color var(--mq-t-1) var(--mq-ease);
+}
+
+button.mq-cot-version:hover,
+button.mq-cot-version:focus-visible {
+  border-color: var(--mq-ink);
+  color: var(--mq-ink);
+}
+
+.mq-cot-archivada {
+  color: var(--mq-muted);
+}
+
+.mq-cot-motivo {
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--mq-ink-2);
+}
+
+.mq-cot-empresa {
+  display: block;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.mq-cot-nota {
+  font-size: 0.75rem;
+  color: var(--mq-muted);
+}
+
+.mq-version {
+  padding: 0.75rem;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-surface);
+}
+
+.mq-version-vigente {
+  border-color: var(--mq-line-strong);
+  background: var(--mq-surface-2);
+}
+
+.mq-versiones-cambios {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-2);
+  background: var(--mq-surface-2);
+}

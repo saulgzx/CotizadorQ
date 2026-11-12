@@ -128,7 +128,7 @@ export default function DashboardView() {
               placeholder='Buscar en todas las vistas…'
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              className='h-10 w-full rounded-[10px] border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900'
+              className='h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900'
             />
           </label>
         )}
@@ -159,7 +159,7 @@ export default function DashboardView() {
           <section className={`${tarjeta} p-4`}>
             <div className='flex flex-wrap items-baseline justify-between gap-2'>
               <h3 className='text-base font-semibold text-slate-900'>Para hacer seguimiento</h3>
-              <span className='text-xs text-slate-500'>Enviadas hace más de 7 días, sin aprobar ni rechazar</span>
+              <span className='text-xs text-slate-500'>Cotizadas hace más de 7 días, sin ganar ni perder</span>
             </div>
             <ul className='mt-3 divide-y divide-slate-100'>
               {seguimiento.slice(0, 8).map((item) => (
@@ -185,7 +185,7 @@ export default function DashboardView() {
               ))}
             </ul>
             {seguimiento.length > 8 && (
-              <p className='mt-2 text-xs text-slate-500'>Y {seguimiento.length - 8} más en el historial.</p>
+              <p className='mt-2 text-xs text-slate-500'>Y {seguimiento.length - 8} más en Cotizaciones.</p>
             )}
           </section>
         )}
@@ -268,11 +268,11 @@ export default function DashboardView() {
         <section className={`${tarjeta} p-4`}>
           <h3 className='text-base font-semibold text-slate-900'>Accesos rápidos</h3>
           <p className='mt-1 text-xs text-slate-500'>
-            Atajos: <kbd className='font-mono'>Alt+1</kbd> Dashboard · <kbd className='font-mono'>Alt+2</kbd> Cotizador · <kbd className='font-mono'>Alt+3</kbd> Historial · <kbd className='font-mono'>Alt+4</kbd> Stock · <kbd className='font-mono'>/</kbd> buscar producto · <kbd className='font-mono'>?</kbd> todos los atajos
+            Atajos: <kbd className='font-mono'>Alt+1</kbd> Dashboard · <kbd className='font-mono'>Alt+2</kbd> Cotizador · <kbd className='font-mono'>Alt+3</kbd> {isFullAdmin ? 'Cotizaciones' : 'Mis cotizaciones'} · <kbd className='font-mono'>Alt+4</kbd> Stock · <kbd className='font-mono'>/</kbd> buscar producto · <kbd className='font-mono'>?</kbd> todos los atajos
           </p>
           <div className='mt-3 flex flex-wrap gap-2'>
             <button type='button' onClick={() => setCurrentView('cotizador')} className='mq-btn mq-btn-sm mq-btn-primario'>Ir al cotizador</button>
-            <button type='button' onClick={() => setCurrentView('historial')} className='mq-btn mq-btn-sm mq-btn-secundario'>Ver historial</button>
+            <button type='button' onClick={() => setCurrentView('historial')} className='mq-btn mq-btn-sm mq-btn-secundario'>{isFullAdmin ? 'Ver cotizaciones' : 'Mis cotizaciones'}</button>
             {isAdmin && (
               <>
                 <button type='button' onClick={() => setCurrentView('admin')} className='mq-btn mq-btn-sm mq-btn-secundario'>Listas de precio</button>

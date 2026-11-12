@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node iniciar.mjs",
     "agente": "node agente.mjs",
-    "test": "node --test test/agente.test.mjs test/actualizador.test.mjs"
+    "probar-correo": "node agente.mjs --probar-correo",
+    "test": "node --test test/agente.test.mjs test/actualizador.test.mjs test/correo.test.mjs"
   }
 }

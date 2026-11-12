@@ -8,7 +8,7 @@ const clearSessionAndRedirectToLogin = () => {
 };
 
 // Función helper para hacer peticiones autenticadas
-const fetchWithAuth = async (endpoint, options = {}) => {
+export const fetchWithAuth = async (endpoint, options = {}) => {
   const token = localStorage.getItem('token');
   
   const sessionId = localStorage.getItem('sessionId');
@@ -166,10 +166,47 @@ export const productosAPI = {
 };
 
 // API de Cotizaciones
+// Respuesta JSON o error con el mensaje del servidor (y `status`).
+const leerJsonOError = async (response, porDefecto) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    // "Payload invalido" solo no dice nada: se agrega el detalle que manda el servidor.
+    const detalle = Array.isArray(data?.details) && data.details.length ? `: ${data.details.join('; ')}` : '';
+    const base = data?.error || data?.message;
+    const error = new Error(base ? `${base}${detalle}` : `${porDefecto} (${response.status})`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+};
+
+export const LOTE_IDS_COTIZACIONES = 500;
+
+// Envia ids enteros, sin repetir, en lotes de 500 y suma { cotizaciones, oportunidades }.
+const enLotesDeIds = async (ids, endpoint, porDefecto) => {
+  const limpios = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const total = { cotizaciones: 0, oportunidades: 0 };
+  for (let i = 0; i < limpios.length; i += LOTE_IDS_COTIZACIONES) {
+    const response = await fetchWithAuth(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ ids: limpios.slice(i, i + LOTE_IDS_COTIZACIONES) }),
+    });
+    const parte = await leerJsonOError(response, porDefecto);
+    total.cotizaciones += Number(parte?.cotizaciones) || 0;
+    total.oportunidades += Number(parte?.oportunidades) || 0;
+  }
+  return total;
+};
+
 export const cotizacionesAPI = {
-  getAll: async ({ includeItems } = {}) => {
-    const query = includeItems ? '?includeItems=1' : '';
-    const response = await fetchWithAuth(`/api/cotizaciones${query}`);
+  // Por defecto el backend excluye las archivadas; con `archivadas` trae SOLO las archivadas.
+  getAll: async ({ includeItems, archivadas } = {}) => {
+    const params = new URLSearchParams();
+    if (includeItems) params.set('includeItems', '1');
+    if (archivadas) params.set('archivadas', '1');
+    const query = params.toString();
+    const response = await fetchWithAuth(`/api/cotizaciones${query ? `?${query}` : ''}`);
     if (!response.ok) throw new Error('Error obteniendo cotizaciones');
     return response.json();
   },
@@ -226,10 +263,11 @@ export const cotizacionesAPI = {
       return null;
     }
   },
-  updateEstado: async (id, estado) => {
+  // Cambia la etapa (nueva, cotizada, negociacion, ganada, perdida). "perdida" exige motivo.
+  updateEstado: async (id, { etapa, motivo_perdida: motivo } = {}) => {
     const response = await fetchWithAuth(`/api/cotizaciones/${encodeURIComponent(id)}/estado`, {
       method: 'PATCH',
-      body: JSON.stringify({ estado }),
+      body: JSON.stringify({ etapa, ...(etapa === 'perdida' ? { motivo_perdida: motivo } : {}) }),
     });
     if (!response.ok) {
       const text = await response.text();
@@ -242,7 +280,7 @@ export const cotizacionesAPI = {
           detail = text;
         }
       }
-      throw new Error(`Error actualizando estado (${response.status})${detail ? `: ${detail}` : ''}`);
+      throw new Error(detail || `Error actualizando la etapa (${response.status})`);
     }
     return response.json();
   },
@@ -284,17 +322,24 @@ export const cotizacionesAPI = {
     if (!response.ok) throw new Error('Error obteniendo la versión');
     return response.json();
   },
-  getFunnel: async ({ days = 30, empresa = '', from = '', to = '' } = {}) => {
-    const params = new URLSearchParams();
-    if (days) params.set('days', String(days));
-    if (empresa) params.set('empresa', empresa);
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    const query = params.toString();
-    const response = await fetchWithAuth(`/api/cotizaciones/funnel${query ? `?${query}` : ''}`);
-    if (!response.ok) throw new Error('Error obteniendo funnel');
-    return response.json();
+  // Archiva (no borra) por ids o todo lo anterior a una fecha (YYYY-MM-DD).
+  // Por ids se envia en lotes: el servidor acepta hasta 500 por llamada y "seleccionar
+  // todo" puede traer miles. Se suman los conteos de cada lote.
+  archivar: async ({ ids, antesDe } = {}) => {
+    if (Array.isArray(ids)) return enLotesDeIds(ids, '/api/cotizaciones/archivar', 'Error archivando cotizaciones');
+    const response = await fetchWithAuth('/api/cotizaciones/archivar', {
+      method: 'POST',
+      body: JSON.stringify({ antes_de: antesDe }),
+    });
+    return leerJsonOError(response, 'Error archivando cotizaciones');
   },
+  previaArchivar: async (antesDe) => {
+    const response = await fetchWithAuth(
+      `/api/cotizaciones/archivar/previa?antes_de=${encodeURIComponent(antesDe)}`
+    );
+    return leerJsonOError(response, 'Error consultando qué se archivaría');
+  },
+  restaurar: async (ids) => enLotesDeIds(ids, '/api/cotizaciones/restaurar', 'Error restaurando cotizaciones'),
   downloadPdf: async (payload, filenameBase = 'cotizacion') => {
     const response = await fetchWithAuth('/api/cotizaciones/pdf', {
       method: 'POST',

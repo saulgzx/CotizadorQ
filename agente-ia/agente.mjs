@@ -11,6 +11,15 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  MCP_CORREO_DEFECTO,
+  PROMPT_PROBAR_CORREO,
+  TIPOS_TAREA,
+  argumentosClaudeCorreo,
+  construirPromptTarea,
+  extraerItems,
+  validarResultado
+} from './correo.mjs';
 import { CODIGO_ACTUALIZADO, comprobarActualizacion, crearGit, instalarDependencias, versionActual } from './actualizador.mjs';
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +45,11 @@ export const leerConfig = (env) => ({
   mcp: env.MCP_NOMBRE || 'myquote',
   timeoutMs: (Number(env.TIMEOUT_MIN) > 0 ? Number(env.TIMEOUT_MIN) : 10) * 60 * 1000,
   carpetaTrabajo: env.CARPETA_TRABAJO || path.join(AQUI, 'trabajo'),
+  // Seguimiento por correo (tareas de Outlook). SEGUIMIENTO_CORREO=0 lo apaga.
+  mcpCorreo: env.MCP_CORREO || MCP_CORREO_DEFECTO,
+  seguimiento: !/^(0|false|no|off)$/i.test(String(env.SEGUIMIENTO_CORREO ?? '1').trim()),
+  // Menor que los 15 min tras los que el backend reencola una tarea tomada.
+  timeoutTareaMs: (Number(env.TIMEOUT_TAREA_MIN) > 0 ? Number(env.TIMEOUT_TAREA_MIN) : 12) * 60 * 1000,
   autoActualizar: !/^(0|false|no|off)$/i.test(String(env.AUTO_ACTUALIZAR ?? '1').trim()),
   autoActualizarMs: (Number(env.AUTO_ACTUALIZAR_MIN) > 0 ? Number(env.AUTO_ACTUALIZAR_MIN) : 10) * 60 * 1000
 });
@@ -239,6 +253,19 @@ const crearApi = (config, fetchImpl = fetch, version = null) => {
       if (!res.ok) throw new Error(`MyQuote respondió ${res.status}`);
       return res.json();
     },
+    // Tareas de correo del seguimiento. 404 = backend sin esa ruta (version vieja).
+    async tomarTarea() {
+      const res = await pedir('/api/seguimiento/agente/tarea?espera=1', {}, 40000);
+      if (res.status === 204) return null;
+      if (res.status === 404) throw Object.assign(new Error('el backend no tiene la ruta de tareas'), { noSoportada: true });
+      if (res.status === 401) throw Object.assign(new Error('IA_AGENTE_TOKEN rechazado por MyQuote'), { fatal: true });
+      if (!res.ok) throw new Error(`MyQuote respondió ${res.status}`);
+      return res.json();
+    },
+    async resultadoTarea(id, cuerpo) {
+      const res = await pedir(`/api/seguimiento/agente/tarea/${encodeURIComponent(id)}/resultado`, { method: 'POST', body: JSON.stringify(cuerpo) });
+      if (!res.ok) throw new Error(`MyQuote respondió ${res.status}`);
+    },
     async avance(id, cuerpo) {
       const res = await pedir(`/api/ia/agente/trabajo/${id}/avance`, { method: 'POST', body: JSON.stringify(cuerpo) });
       return res.status !== 410; // false: la consulta se cancelo
@@ -339,7 +366,170 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     hijo.stdin.end(trabajo.prompt);
   });
 
+// --- Tareas de correo -----------------------------------------------------------
+
+/**
+ * Lanza Claude Code una vez con `prompt` y espera a que termine. No imprime ni guarda
+ * contenido: `onEvento(ev)` recibe cada evento ya parseado para quien lo necesite.
+ */
+export const correrClaude = ({ config, args, prompt, timeoutMs, spawnImpl = spawn, ahora = () => Date.now(), onEvento = null }) =>
+  new Promise((resolve) => {
+    mkdirSync(config.carpetaTrabajo, { recursive: true });
+    const metricas = crearMetricas(ahora());
+    const estado = { texto: '', final: null, error: null, terminado: false, metricas };
+    let errStd = '';
+    let buffer = '';
+    const hijo = spawnImpl(config.claude, args, {
+      cwd: config.carpetaTrabajo,
+      shell: process.platform === 'win32' && !/\.exe$/i.test(config.claude),
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    const limite = setTimeout(() => {
+      estado.error = `Claude Code no terminó en ${Math.max(1, Math.round(timeoutMs / 60000))} minutos`;
+      hijo.kill();
+    }, timeoutMs);
+    const linea = (l) => {
+      if (!l.trim()) return;
+      procesarEvento(estado, l, ahora());
+      if (onEvento) {
+        try {
+          onEvento(JSON.parse(l));
+        } catch {
+          /* linea que no es JSON */
+        }
+      }
+    };
+    hijo.stdout.setEncoding('utf8');
+    hijo.stdout.on('data', (trozo) => {
+      buffer += trozo;
+      const lineas = buffer.split('\n');
+      buffer = lineas.pop();
+      lineas.forEach(linea);
+    });
+    hijo.stderr.setEncoding('utf8');
+    hijo.stderr.on('data', (t) => {
+      errStd = (errStd + t).slice(-2000);
+    });
+    hijo.on('error', (error) => {
+      estado.error = error.code === 'ENOENT' ? `No se encontró "${config.claude}". ¿Está instalado Claude Code?` : error.message;
+    });
+    hijo.on('close', (codigo) => {
+      clearTimeout(limite);
+      linea(buffer);
+      resolve({ estado, codigo, errStd, metricas: cerrarMetricas(metricas, ahora()) });
+    });
+    hijo.stdin.on('error', () => {});
+    hijo.stdin.end(prompt);
+  });
+
+// En el log de las tareas de correo solo van nombres de herramienta, nunca sus argumentos.
+const logHerramientas = (log) => (ev) => {
+  if (ev.type !== 'assistant') return;
+  for (const b of ev.message?.content || []) if (b.type === 'tool_use') log(`  · ${nombreCorto(b.name)}`);
+};
+
+/** Ejecuta una tarea de correo y devuelve su resultado al backend. */
+export const ejecutarTarea = async ({ config, tarea, api, spawnImpl = spawn, log = console.log, ahora = () => Date.now() }) => {
+  const corto = String(tarea.id).slice(0, 8);
+  const n = Array.isArray(tarea.items) ? tarea.items.length : 0;
+  log(`Tarea ${corto} (${tarea.tipo}, ${n} ítems)`);
+  let cuerpo;
+  let metricas = null;
+  if (!TIPOS_TAREA.includes(tarea.tipo) || !Array.isArray(tarea.items)) {
+    cuerpo = { ok: false, items: [], error: `Tarea no soportada por este agente: ${String(tarea.tipo).slice(0, 40)}` };
+  } else {
+    const r = await correrClaude({
+      config,
+      args: argumentosClaudeCorreo(config, tarea.tipo),
+      prompt: construirPromptTarea(tarea),
+      timeoutMs: config.timeoutTareaMs,
+      spawnImpl,
+      ahora,
+      onEvento: logHerramientas(log)
+    });
+    metricas = r.metricas;
+    log(resumenMetricas(metricas));
+    let error = r.estado.error;
+    let items = [];
+    if (!error) {
+      const texto = r.estado.final || r.estado.texto || '';
+      if (!texto.trim()) error = `Claude Code terminó sin respuesta (código ${r.codigo}). ${r.errStd.trim().slice(-300)}`;
+      else {
+        const valido = validarResultado(tarea.tipo, tarea.items, extraerItems(r.estado.final) ?? extraerItems(r.estado.texto));
+        if (valido.ok) items = valido.items;
+        else error = valido.error;
+      }
+    }
+    cuerpo = error ? { ok: false, items: [], error, metricas } : { ok: true, items, metricas };
+  }
+  try {
+    await api.resultadoTarea(tarea.id, cuerpo);
+  } catch (e) {
+    log(`No se pudo entregar el resultado de la tarea ${corto}: ${e.message}`);
+  }
+  log(cuerpo.ok ? `  lista (${cuerpo.items.length} ítems)` : `  error: ${cuerpo.error}`);
+  return cuerpo;
+};
+
+// --- Diagnostico del conector de correo ----------------------------------------------
+
+/** `node agente.mjs --probar-correo`: una sola consulta de solo lectura a Enviados. */
+export const probarCorreo = async ({ config, spawnImpl = spawn, log = console.log, ahora = () => Date.now() }) => {
+  const esperadas = [`mcp__${config.mcpCorreo}__outlook_email_search`];
+  let init = null;
+  log(`Probando el conector de correo (MCP_CORREO=${config.mcpCorreo})…`);
+  const r = await correrClaude({
+    config,
+    args: argumentosClaudeCorreo(config, null),
+    prompt: PROMPT_PROBAR_CORREO,
+    timeoutMs: Math.min(config.timeoutMs, 5 * 60 * 1000),
+    spawnImpl,
+    ahora,
+    onEvento: (ev) => {
+      if (ev.type === 'system' && ev.subtype === 'init') init = ev;
+      logHerramientas(log)(ev);
+    }
+  });
+  const herramientas = Array.isArray(init?.tools) ? init.tools.map(String) : [];
+  const outlook = herramientas.filter((t) => /outlook/i.test(t));
+  const servidores = Array.isArray(init?.mcp_servers) ? init.mcp_servers : [];
+  const prefijos = [...new Set(outlook.map((t) => /^mcp__(.+?)__outlook_/.exec(t)?.[1]).filter(Boolean))];
+  const encontrada = esperadas.every((t) => herramientas.includes(t));
+  const texto = (r.estado.final || r.estado.texto || '').trim();
+
+  log('');
+  log('--- Diagnóstico del conector de correo ---');
+  log(init ? `Herramientas disponibles según Claude Code: ${herramientas.length}` : 'Claude Code no reportó el evento init (no se conocen las herramientas disponibles).');
+  if (servidores.length) log(`Servidores MCP: ${servidores.map((s) => `${s.name} (${s.status})`).join(', ')}`);
+  log(
+    outlook.length
+      ? `Herramientas de Outlook encontradas (${outlook.length}):\n${outlook.map((t) => `  - ${t}`).join('\n')}`
+      : 'Herramientas de Outlook encontradas: ninguna'
+  );
+  let ok = true;
+  if (init && !encontrada) {
+    ok = false;
+    log(`PROBLEMA: falta ${esperadas.join(', ')}.`);
+    if (prefijos.length) log(`  Prueba con MCP_CORREO=${prefijos.join(' o MCP_CORREO=')} en agente-ia/.env`);
+    else log('  No hay ningún conector de Outlook en este equipo: agrégalo en Claude Code (conector Microsoft 365) e inicia sesión.');
+  }
+  if (r.estado.error) {
+    ok = false;
+    log(`Error de Claude Code: ${r.estado.error}`);
+  } else if (!texto) {
+    ok = false;
+    log('Claude Code terminó sin respuesta.');
+  } else {
+    log(`Resultado (3 correos más recientes de Enviados):\n${texto}`);
+  }
+  log(resumenMetricas(r.metricas));
+  log(ok ? 'RESULTADO: el conector de correo funciona.' : 'RESULTADO: revisar los problemas indicados arriba.');
+  return { ok, outlook, texto, error: r.estado.error };
+};
+
 // --- Bucle principal ------------------------------------------------------------
+
+const REINTENTO_TAREAS_MS = 10 * 60 * 1000;
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -356,10 +546,13 @@ export const principal = async ({
   if (!config.apiUrl || !config.token) {
     throw new Error('Falta MYQUOTE_API_URL o IA_AGENTE_TOKEN en agente-ia/.env');
   }
-  log(`Agente IA conectado a ${config.apiUrl}. Esperando consultas…`);
+  const conTareas = config.seguimiento !== false && typeof api.tomarTarea === 'function';
+  log(`Agente IA conectado a ${config.apiUrl}. Esperando consultas${conTareas ? ' y tareas de correo' : ''}…`);
   if (version) log(`Versión ${version}`);
   let pausa = 2000;
   let ultimaRevision = ahora(); // la primera revision ocurre a los N minutos (acabamos de arrancar)
+  // Ruta de tareas: un 404 (backend viejo) la apaga y se reintenta cada 10 minutos sin llenar el log.
+  const tareas = { proximo: 0, sinSoporte: false, ultimoError: 0 };
   for (;;) {
     // Ocioso: entre consulta y consulta, nunca mientras Claude Code trabaja.
     if (actualizador && ahora() - ultimaRevision >= config.autoActualizarMs) {
@@ -371,6 +564,7 @@ export const principal = async ({
         log(`Auto-actualización: error inesperado (${error.message})`);
       }
     }
+    // 1. Las consultas del usuario son interactivas: siempre primero.
     try {
       const trabajo = await api.tomar();
       pausa = 2000;
@@ -379,12 +573,39 @@ export const principal = async ({
         const r = await resolver({ config, trabajo, api, log, spawnImpl });
         log(r.cancelada ? '  cancelada' : r.error ? `  error: ${r.error}` : `  lista (${r.texto.length} caracteres)`);
         if (unaVez) return r;
+        continue; // tras una consulta, volver a mirar consultas antes que tareas
       }
     } catch (error) {
       if (error.fatal) throw error;
       log(`Sin conexión con MyQuote (${error.message}). Reintento en ${Math.round(pausa / 1000)} s`);
       await esperar(pausa);
       pausa = Math.min(pausa * 2, 60000);
+      continue;
+    }
+    // 2. Sin consultas: una tarea de correo (una cosa a la vez).
+    if (!conTareas || ahora() < tareas.proximo) continue;
+    try {
+      const tarea = await api.tomarTarea();
+      if (tareas.sinSoporte) {
+        tareas.sinSoporte = false;
+        log('Tareas de seguimiento por correo disponibles en el backend.');
+      }
+      if (tarea) {
+        const r = await ejecutarTarea({ config, tarea, api, spawnImpl, log, ahora });
+        if (unaVez) return r;
+      }
+    } catch (error) {
+      if (error.fatal) throw error;
+      if (error.noSoportada) {
+        tareas.proximo = ahora() + REINTENTO_TAREAS_MS;
+        if (!tareas.sinSoporte) {
+          tareas.sinSoporte = true;
+          log('El backend no tiene todavía las tareas de seguimiento por correo (404): solo consultas. Reintento cada 10 minutos.');
+        }
+      } else if (ahora() - tareas.ultimoError >= 60000) {
+        tareas.ultimoError = ahora();
+        log(`Tareas de correo: error (${error.message})`);
+      }
     }
   }
 };
@@ -392,22 +613,31 @@ export const principal = async ({
 const esPrincipal = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (esPrincipal) {
   const config = leerConfig({ ...leerEnvArchivo(path.join(AQUI, '.env')), ...process.env });
-  const git = crearGit(AQUI);
-  let npmPendiente = false;
-  const actualizador = config.autoActualizar
-    ? async () => {
-        const r = await comprobarActualizacion({ git, instalar: () => instalarDependencias(AQUI), npmPendiente });
-        npmPendiente = r.estado === 'npm-fallo';
-        return r;
-      }
-    : null;
-  versionActual(git)
-    .then((version) => principal({ config, version, actualizador }))
-    .then((r) => {
-      if (r?.actualizado) process.exit(CODIGO_ACTUALIZADO);
-    })
-    .catch((error) => {
-      console.error(error.message);
-      process.exit(1);
-    });
+  if (process.argv.includes('--probar-correo')) {
+    probarCorreo({ config })
+      .then((r) => process.exit(r.ok ? 0 : 1))
+      .catch((error) => {
+        console.error(error.message);
+        process.exit(1);
+      });
+  } else {
+    const git = crearGit(AQUI);
+    let npmPendiente = false;
+    const actualizador = config.autoActualizar
+      ? async () => {
+          const r = await comprobarActualizacion({ git, instalar: () => instalarDependencias(AQUI), npmPendiente });
+          npmPendiente = r.estado === 'npm-fallo';
+          return r;
+        }
+      : null;
+    versionActual(git)
+      .then((version) => principal({ config, version, actualizador }))
+      .then((r) => {
+        if (r?.actualizado) process.exit(CODIGO_ACTUALIZADO);
+      })
+      .catch((error) => {
+        console.error(error.message);
+        process.exit(1);
+      });
+  }
 }

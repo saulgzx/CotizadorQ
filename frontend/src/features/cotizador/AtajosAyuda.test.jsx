@@ -16,7 +16,7 @@ describe('AtajosAyuda', () => {
     expect(screen.getByRole('heading', { name: 'Atajos de teclado' })).toBeInTheDocument();
     expect(screen.getByText('En toda la app')).toBeInTheDocument();
     expect(screen.getByText('Cotizador')).toBeInTheDocument();
-    expect(screen.getByText('Historial')).toBeInTheDocument();
+    expect(screen.getByText('Cotizaciones')).toBeInTheDocument();
     expect(screen.getByText('Buscar vistas y productos')).toBeInTheDocument();
   });
 

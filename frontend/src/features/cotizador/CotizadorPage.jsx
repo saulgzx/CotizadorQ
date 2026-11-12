@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
@@ -20,7 +20,6 @@ import {
   SESSION_HEARTBEAT_MS,
   MONTH_LABEL_FORMATTER,
   DEFAULT_AXIS_PARTNER,
-  COTIZACION_ESTADOS,
   COTIZADOR_STOCK_ADMIN_ROLE,
   COLUMN_MAP,
   VIEW_TO_ROUTE,
@@ -59,6 +58,7 @@ import {
 } from './cotizadorHelpers';
 import { CotizadorContext } from './cotizadorContext';
 import useTheme from '../theme/useTheme';
+import { BarraSuperior, Cortina, Indice, direccionDeVista } from '../ui/Navegacion';
 import ThemeToggle from '../theme/ThemeToggle';
 import { notify, Toaster } from '../ui/toast';
 import MargenChip from './MargenChip';
@@ -70,10 +70,24 @@ import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
+import { precioSistemaDe, useMargenSistema } from './precioSistema';
+import { productoFueraDeLista } from './fueraDeLista';
 import Resaltado from '../ui/Resaltado';
 import Icono from '../ui/Icono';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
-import { EstadoVacio, FilasEsqueleto, ListaEsqueleto, TarjetasEsqueleto } from '../ui/Esqueleto';
+import { EstadoVacio, FilasEsqueleto, ListaEsqueleto } from '../ui/Esqueleto';
+import PanelVersiones from './editor/PanelVersiones';
+import {
+  ArchivarAnterioresDialogo,
+  ConmutadorArchivo,
+  EtapaCotizacion,
+  EtiquetaVersion,
+  FiltroEtapas,
+  SelectorEtapa
+} from '../crm/CotizacionesPiezas';
+import { PerdidaDialogo } from '../crm/DialogosCrm';
+import { contarPorEtapa, etapaDeCotizacion, textoConteoArchivo } from '../crm/etapasCotizacion';
+import { nombreEtapa } from '../crm/formato';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
 
@@ -93,10 +107,34 @@ const margenCotizacion = (cot) => {
   return { venta, margen, gpPct: (margen / venta) * 100, origenes: items.map(i => i.origen || 'QNAP'), parcial: conCosto < items.length };
 };
 
+const FILTROS_HISTORIAL_VACIOS = { fecha: '', cliente: '', pid: '', proyecto: '', producto: '', etapas: [] };
+const CRM_TABS = new Set(['resumen', 'embudo', 'cotizaciones', 'empresas', 'seguimiento']);
+
+// /crm?tab=cotizaciones&cotizacion=ID: la página se vuelve a montar al cambiar de
+// ruta, así que la pestaña y la cotización a abrir viajan en la URL. Si otra
+// navegación pisa la URL durante ese cambio, el destino pedido se recuerda unos
+// segundos a nivel de módulo para no caer en la pestaña por defecto.
+let destinoCrmPendiente = null;
+const recordarDestinoCrm = (tab, cotizacion = null) => {
+  destinoCrmPendiente = { tab, cotizacion, en: Date.now() };
+};
+const leerParamsCrm = (search) => {
+  const params = new URLSearchParams(search || '');
+  const tab = params.get('tab');
+  const cotizacion = Number(params.get('cotizacion'));
+  const pendiente = destinoCrmPendiente && Date.now() - destinoCrmPendiente.en < 4000 ? destinoCrmPendiente : null;
+  if (!CRM_TABS.has(tab) && pendiente) return { tab: pendiente.tab, cotizacion: pendiente.cotizacion };
+  return {
+    tab: CRM_TABS.has(tab) ? tab : 'resumen',
+    cotizacion: Number.isFinite(cotizacion) && cotizacion > 0 ? cotizacion : null
+  };
+};
+
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ConnectionsMap = lazy(() => import('./views/ConnectionsMap'));
 const CotizacionEditor = lazy(() => import('./editor/CotizacionEditor'));
 const AsistenteIAView = lazy(() => import('../ia/AsistenteIAView'));
+const CrmView = lazy(() => import('../crm/CrmView'));
 
 const NAV_ICON_PATHS = {
   home: 'M3 10.5 12 3l9 7.5M5.25 9.75V21h4.5v-6h4.5v6h4.5V9.75',
@@ -289,6 +327,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canViewDashboard = !isVentasUser && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewCotizador = !isComprasOnlyUser;
   const canViewStock = !isComprasOnlyUser;
+  // Precio de sistema del stock (costo real / (1 - margen), sin rebate): solo admin.
+  const { config: margenSistema, cambiar: cambiarMargenSistema, restablecer: restablecerMargenSistema } = useMargenSistema();
   const canViewHistorial = !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
   // Asistente IA: solo personal interno (usa la sesion de IA y las skills de cada usuario).
@@ -307,6 +347,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     dashboard: '',
     admin: '',
     historial: '',
+    crm: '',
     usuarios: '',
     ordenes: '',
     compras: ''
@@ -396,22 +437,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem('sidebarCollapsed') === '1';
-    } catch {
-      return false;
-    }
-  });
-  const toggleSidebar = () => setSidebarCollapsed(prev => {
-    const next = !prev;
-    try {
-      localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
-    } catch {
-      // localStorage no disponible
-    }
-    return next;
-  });
+  const cerrarIndice = useCallback(() => setMobileMenuOpen(false), []);
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -429,13 +455,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [axisDraft, setAxisDraft] = useState({});
   const [intcomexDraft, setIntcomexDraft] = useState({});
   const [purchaseDraft, setPurchaseDraft] = useState({});
-  const [funnelDays, setFunnelDays] = useState(30);
-  const [funnelEmpresa, setFunnelEmpresa] = useState('');
-  const [funnelFrom, setFunnelFrom] = useState('');
-  const [funnelTo, setFunnelTo] = useState('');
-  const [funnelData, setFunnelData] = useState(null);
-  const [funnelLoading, setFunnelLoading] = useState(false);
-  const [funnelError, setFunnelError] = useState('');
+  // CRM: pestaña activa (Cotizaciones = la lista de cotizaciones del admin completo).
+  const [crmTab, setCrmTab] = useState(() => leerParamsCrm(location.search).tab);
+  // Cotizaciones del admin: activas o archivadas (estas se cargan aparte).
+  const [historialVista, setHistorialVista] = useState('activas');
+  const [historialArchivadas, setHistorialArchivadas] = useState([]);
+  const [archivadasLoading, setArchivadasLoading] = useState(false);
+  const [archivadasError, setArchivadasError] = useState('');
+  const [archivadasRecarga, setArchivadasRecarga] = useState(0);
+  // Al restaurar, las activas se vuelven a pedir (la invalidación sola no relanza la carga).
+  const [activasRecarga, setActivasRecarga] = useState(0);
+  const [archivarFechaAbierto, setArchivarFechaAbierto] = useState(false);
+  const [versionesDe, setVersionesDe] = useState(null);
+  const [perdidaDe, setPerdidaDe] = useState(null);
+  const historialBase = isFullAdmin && historialVista === 'archivadas' ? historialArchivadas : historial;
   const [selectedHistorialIds, setSelectedHistorialIds] = useState(() => new Set());
   const [boByCotizacionId, setBoByCotizacionId] = useState({});
   const [compraPreviewCot, setCompraPreviewCot] = useState(null);
@@ -452,7 +485,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [userActivityError, setUserActivityError] = useState('');
   const [sessionAutoRefresh, setSessionAutoRefresh] = useState(true);
   const [expandedUsuarioId, setExpandedUsuarioId] = useState(null);
-  const [expandedHistorialId, setExpandedHistorialId] = useState(null);
+  const [expandedHistorialId, setExpandedHistorialId] = useState(() => leerParamsCrm(location.search).cotizacion);
+  // Cotización que hay que mostrar (página correcta y a la vista) cuando llegue la lista.
+  const enfocarCotizacionRef = useRef(leerParamsCrm(location.search).cotizacion);
   const [dismissedRegistroById, setDismissedRegistroById] = useState({});
   const [empresaForm, setEmpresaForm] = useState({
     nombre: '',
@@ -1430,14 +1465,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [ownPartnerCategory, setOwnPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
   const [updatingCotizacionPartner, setUpdatingCotizacionPartner] = useState(false);
-  const [historialFilters, setHistorialFilters] = useState({
-    fecha: '',
-    cliente: '',
-    pid: '',
-    proyecto: '',
-    producto: '',
-    estados: []
-  });
+  const [historialFilters, setHistorialFilters] = useState(FILTROS_HISTORIAL_VACIOS);
   const [calcParams, setCalcParams] = useState({
     INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT,
     IC: CONSTANTS.IC,
@@ -1477,14 +1505,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   }, [usuarios]);
 
-  const historialEmpresas = useMemo(() => {
-    const set = new Set();
-    historial.forEach(cot => {
-      const name = (cot?.cliente_empresa || '').trim();
-      if (name) set.add(name);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [historial]);
 
   const sessionsByUser = useMemo(() => {
     const grouped = activeSessions.reduce((acc, s) => {
@@ -1601,12 +1621,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return noAccents.replace(/[^a-zA-Z0-9]+/g, '');
   };
 
-  const buildExportFilename = (dateValue, projectName, integratorName) => {
+  const buildExportFilename = (dateValue, projectName, integratorName, version = 1) => {
     const dateKey = getDateKeyCompact(dateValue) || getDateKeyCompact(new Date());
     const project = sanitizeFilenamePart(projectName);
     const integrator = sanitizeFilenamePart(integratorName);
     const namePart = project || integrator || 'cotizacion';
-    return `${dateKey || 'export'}_${namePart}_v1`;
+    return `${dateKey || 'export'}_${namePart}_v${Math.max(1, Math.trunc(Number(version)) || 1)}`;
   };
 
   const downloadPdfFromElement = async (element, filenameBase) => {
@@ -1858,12 +1878,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const handleLogin = async () => {
+  // Recibe lo que hay escrito en los campos al enviar: un gestor de contraseñas
+  // puede rellenarlos sin avisar a React y el estado quedaría vacío.
+  const handleLogin = async (usuarioCampo = usuario, passwordCampo = password) => {
+    const usuarioFinal = String(usuarioCampo || '').trim();
+    const passwordFinal = String(passwordCampo || '');
+    if (!usuarioFinal || !passwordFinal) {
+      setLoginError('Escribe tu usuario y tu contraseña.');
+      return;
+    }
     try {
       setLoginError('');
+      setUsuario(usuarioFinal);
+      setPassword(passwordFinal);
       getOrCreateSessionId();
       getOrCreateDeviceId();
-      const data = await authAPI.login(usuario, password);
+      const data = await authAPI.login(usuarioFinal, passwordFinal);
       registerSessionForUser(data.user);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
@@ -1881,7 +1911,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       loadProductos(data.user?.role);
       loadStock();
     } catch (error) {
-      setLoginError(error.message || 'Error de autenticacin');
+      const mensaje = error.message || 'Error de autenticación';
+      setLoginError(/payload invalido/i.test(mensaje)
+        ? 'Usuario o contraseña con formato no válido: el usuario tiene al menos 3 caracteres y la contraseña al menos 8.'
+        : mensaje);
     }
   };
 
@@ -1945,8 +1978,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, user]);
 
   useEffect(() => {
-    // El dashboard también lo usa (margen del mes, seguimiento).
-    if (!isLoggedIn || (currentView !== 'historial' && currentView !== 'dashboard')) return;
+    // El dashboard también lo usa (margen del mes, seguimiento) y el CRM (pestaña Cotizaciones, insignia).
+    if (!isLoggedIn || (currentView !== 'historial' && currentView !== 'dashboard' && currentView !== 'crm')) return;
     let cancelled = false;
     const loadHistorial = async () => {
       // Con datos ya cargados no se vuelve a mostrar "Cargando": se refresca en segundo plano.
@@ -1956,12 +1989,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         const data = await queryClient.fetchQuery({
           queryKey: [...queryKeys.cotizaciones, 'includeItems'],
           queryFn: () => cotizacionesAPI.getAll({ includeItems: true }),
-          // Cambiar entre Dashboard e Historial no vuelve a descargar todo durante 30 s.
+          // Cambiar entre vistas no vuelve a descargar todo durante 30 s; un cambio
+          // (aquí o en el embudo) invalida la consulta y la próxima pasada la trae fresca.
           staleTime: 30 * 1000
         });
         if (!cancelled) setHistorial(data);
       } catch (error) {
-        if (!cancelled) setHistorialError('Error obteniendo historial');
+        if (!cancelled) setHistorialError('Error obteniendo cotizaciones');
       } finally {
         if (!cancelled) setHistorialLoading(false);
       }
@@ -1970,7 +2004,55 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, currentView]);
+  }, [isLoggedIn, currentView, crmTab, activasRecarga]);
+
+  // Archivadas (solo admin completo): se piden aparte y solo al mirarlas.
+  useEffect(() => {
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'crm' || crmTab !== 'cotizaciones' || historialVista !== 'archivadas') return;
+    let cancelled = false;
+    const cargar = async () => {
+      setArchivadasLoading(true);
+      setArchivadasError('');
+      try {
+        const data = await queryClient.fetchQuery({
+          queryKey: [...queryKeys.cotizaciones, 'includeItems', 'archivadas'],
+          queryFn: () => cotizacionesAPI.getAll({ includeItems: true, archivadas: true }),
+          staleTime: 30 * 1000
+        });
+        if (!cancelled) setHistorialArchivadas(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setArchivadasError('Error obteniendo cotizaciones archivadas');
+      } finally {
+        if (!cancelled) setArchivadasLoading(false);
+      }
+    };
+    cargar();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, isFullAdmin, currentView, crmTab, historialVista, archivadasRecarga]);
+
+  // Admin completo: el historial vive en CRM › Cotizaciones. /historial, Alt+3 y
+  // cualquier "ir al historial" terminan allí, con la cotización pedida abierta.
+  useEffect(() => {
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'historial') return;
+    const params = new URLSearchParams({ tab: 'cotizaciones' });
+    if (expandedHistorialId) {
+      params.set('cotizacion', String(expandedHistorialId));
+      enfocarCotizacionRef.current = expandedHistorialId;
+    }
+    recordarDestinoCrm('cotizaciones', expandedHistorialId || null);
+    setCrmTab('cotizaciones');
+    setCurrentView('crm');
+    navigate(`/crm?${params.toString()}`, { replace: true });
+  }, [isLoggedIn, isFullAdmin, currentView, expandedHistorialId, navigate]);
+
+  // La pestaña del CRM queda en la URL (/crm?tab=…) para volver a ella al recargar.
+  useEffect(() => {
+    if (!isLoggedIn || !isFullAdmin || currentView !== 'crm' || location.pathname !== '/crm') return;
+    const deseado = crmTab === 'resumen' ? '' : `?tab=${crmTab}`;
+    if (location.search !== deseado) navigate(`/crm${deseado}`, { replace: true });
+  }, [isLoggedIn, isFullAdmin, currentView, crmTab, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn || currentView !== 'stock') return;
@@ -1987,11 +2069,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     loadOsoOrders();
   }, [isLoggedIn, isFullAdmin, canViewCompras, currentView]);
 
-
-  useEffect(() => {
-    if (!isLoggedIn || !isFullAdmin || currentView !== 'historial') return;
-    loadFunnel();
-  }, [isLoggedIn, isFullAdmin, currentView, funnelDays, funnelEmpresa, funnelFrom, funnelTo]);
 
   useEffect(() => {
     if (!isLoggedIn || !isFullAdmin || currentView !== 'usuarios') return;
@@ -2028,7 +2105,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
     }
-    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes']);
+    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes', 'crm']);
     if (blockedForClient.has(currentView) || (currentView === 'ia' && !canViewIA)) {
       setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
       return;
@@ -2091,6 +2168,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
     if (!VIEW_TO_ROUTE[currentView]) return;
+    // El admin completo no tiene vista Historial: la redirige el efecto de CRM › Cotizaciones.
+    if (isFullAdmin && currentView === 'historial') return;
     if (isCotizadorStockAdmin && currentView !== 'cotizador' && currentView !== 'stock' && currentView !== 'cliente') return;
     if (!isFullAdmin && ADMIN_VIEWS.has(currentView)) {
       if (currentView === 'compras' && canViewCompras) {
@@ -2115,7 +2194,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
         '3': canViewHistorial ? 'historial' : null,
         '4': canViewStock ? 'stock' : null,
-        '5': isFullAdmin ? 'ordenes' : null
+        '5': isFullAdmin ? 'ordenes' : null,
+        '6': isFullAdmin ? 'crm' : null
       };
       const target = keyMap[event.key];
       if (!target) return;
@@ -2880,17 +2960,19 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setAtajosAbiertos(v => !v);
       return;
     }
-    if (e.key === '/' && canViewCotizador) {
+    if (e.key === '/' && canViewCotizador && currentView !== 'crm') {
       e.preventDefault();
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       setTimeout(() => catalogInputRef.current?.focus(), 50);
       return;
     }
-    if (currentView === 'historial' && expandedHistorialId) {
-      const cot = historial.find(c => c.id === expandedHistorialId);
+    const enListaCotizaciones = currentView === 'historial' || (currentView === 'crm' && crmTab === 'cotizaciones');
+    if (enListaCotizaciones && expandedHistorialId) {
+      if (document.querySelector('[role="dialog"]')) return;
+      const cot = historialBase.find(c => c.id === expandedHistorialId);
       if (!cot) return;
       const tecla = String(e.key).toLowerCase();
-      if (tecla === 'e' && isFullAdmin) {
+      if (tecla === 'e' && isFullAdmin && historialVista !== 'archivadas') {
         e.preventDefault();
         setEditorCotizacionId(cot.id);
       } else if (tecla === 'p') {
@@ -2961,19 +3043,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       setDeleteBoError(error.message || 'Error eliminando BO');
     } finally {
       setDeleteBoLoading(false);
-    }
-  };
-
-  const loadFunnel = async ({ days = funnelDays, empresa = funnelEmpresa, from = funnelFrom, to = funnelTo } = {}) => {
-    try {
-      setFunnelLoading(true);
-      setFunnelError('');
-      const data = await cotizacionesAPI.getFunnel({ days, empresa, from, to });
-      setFunnelData(data);
-    } catch (error) {
-      setFunnelError(error.message || 'Error cargando funnel');
-    } finally {
-      setFunnelLoading(false);
     }
   };
 
@@ -3236,8 +3305,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     try {
       setSaving(true);
       const folio = cot?.numero ? `COT-${cot.numero}_` : '';
-      const filenameBase = `${folio}${buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa)}`;
+      const filenameBase = `${folio}${buildExportFilename(cot?.created_at || new Date(), cot?.cliente_telefono, cot?.cliente_empresa, cot?.version)}`;
       const payload = buildPdfPayloadFromHistorial(cot);
+      // El servidor nombra el archivo con la version real de la cotizacion.
+      payload.version = cot?.version || 1;
       await cotizacionesAPI.downloadPdf(payload, filenameBase);
     } catch (error) {
       notify(error.message || 'Error exportando PDF');
@@ -3248,7 +3319,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const exportHistorialExcel = async (cot) => {
     const fechaKey = getDateKey(cot.created_at || new Date());
-    const filenameBase = buildExportFilename(cot.created_at || new Date(), cot.cliente_telefono, cot.cliente_empresa);
+    const filenameBase = buildExportFilename(cot.created_at || new Date(), cot.cliente_telefono, cot.cliente_empresa, cot.version);
     const headerRows = [
       ['Nombre', cot.cliente_nombre || 'N/A', 'Empresa', cot.cliente_empresa || 'N/A'],
       ['PID', cot.cliente_email || 'N/A', 'Proyecto', cot.cliente_telefono || 'N/A'],
@@ -3282,10 +3353,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       item.sku || '',
       item.mpn || '',
       formatStockQuantity(item.quantity) || '',
+      ...(isFullAdmin ? [precioSistemaDe(item, margenSistema) ?? ''] : []),
       item.origin || '',
       item.imageUrl || ''
     ]));
-    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Disponible', 'Origen', 'Imagen'];
+    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Disponible', ...(isFullAdmin ? ['Precio sistema (USD)'] : []), 'Origen', 'Imagen'];
     const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -3433,7 +3505,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const pidTerm = isAdmin ? '' : historialFilters.pid.trim().toLowerCase();
     const proyectoTerm = isAdmin ? '' : historialFilters.proyecto.trim().toLowerCase();
     const productoTerm = isAdmin ? '' : historialFilters.producto.trim().toLowerCase();
-    const estadosSeleccionados = historialFilters.estados || [];
+    const etapasSeleccionadas = historialFilters.etapas || [];
     const currentUserId = user?.id ?? user?.user_id ?? user?.usuario_id ?? null;
     const currentUserName = (user?.usuario || user?.username || user?.user || '').toString().toLowerCase();
     const isOwnCotizacion = (cot) => {
@@ -3462,12 +3534,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (currentUserName && nameCandidates.some(v => (v || '').toString().toLowerCase() === currentUserName)) return true;
       return false;
     };
-    return historial.filter(cot => {
+    return historialBase.filter(cot => {
       if (!isOwnCotizacion(cot)) return false;
-      if (estadosSeleccionados.length > 0) {
-        const estado = normalizeEstado(cot.estado);
-        if (!estadosSeleccionados.includes(estado)) return false;
-      }
+      if (etapasSeleccionadas.length > 0 && !etapasSeleccionadas.includes(etapaDeCotizacion(cot))) return false;
       if (fecha && getDateKey(cot.created_at) !== fecha) return false;
       if (clienteTerm) {
         const hayCliente = [
@@ -3505,7 +3574,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }
       return true;
     });
-  }, [historial, historialFilters, isAdmin, user, globalQuery]);
+  }, [historialBase, historialFilters, isAdmin, user, globalQuery]);
 
   const historialCounts = useMemo(() => {
     const clienteQuotes = historial.filter(cot => isClienteQuote(cot)).length;
@@ -3531,8 +3600,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }));
   }, [historial]);
 
+  // Abre una cotización en la lista: CRM › Cotizaciones (admin completo) o Mis cotizaciones.
   const abrirCotizacionEnHistorial = (id) => {
-    setExpandedHistorialId(id);
+    const numero = Number(id) || null;
+    if (isFullAdmin && historialVista !== 'activas') cambiarVistaHistorial('activas');
+    setExpandedHistorialId(numero);
+    enfocarCotizacionRef.current = numero;
+    if (isFullAdmin) {
+      setCrmTab('cotizaciones');
+      // Ya dentro del CRM basta con cambiar de pestaña.
+      if (currentView === 'crm') return;
+    }
     setCurrentView('historial');
   };
 
@@ -3566,8 +3644,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return [
       { label: 'Cotizado este mes', value: formatCurrency(montoMes), hint: `${delMes.length} cotizaci${delMes.length === 1 ? 'ón' : 'ones'}` },
       { label: 'Margen del mes', value: formatCurrency(margenMes), hint: gpMes === null ? 'Sin líneas con costo' : `GP ${formatoPct(gpMes)} sobre lo cotizado con costo` },
-      { label: 'Tasa de aprobación', value: cerradas.length ? `${Math.round((aprobadas / cerradas.length) * 100)}%` : '—', hint: `${aprobadas} de ${cerradas.length} cerradas en 90 días` },
-      { label: 'Sin respuesta', value: seguimiento.length, hint: `Enviadas hace más de ${DIAS_SEGUIMIENTO} días`, onClick: seguimiento.length ? () => setCurrentView('historial') : undefined }
+      { label: 'Tasa de cierre', value: cerradas.length ? `${Math.round((aprobadas / cerradas.length) * 100)}%` : '—', hint: `${aprobadas} ganadas de ${cerradas.length} cerradas en 90 días` },
+      { label: 'Sin respuesta', value: seguimiento.length, hint: `Cotizadas hace más de ${DIAS_SEGUIMIENTO} días`, onClick: seguimiento.length ? () => setCurrentView('historial') : undefined }
     ];
   }, [isFullAdmin, historial, productos.length, osoOrders.length, usuarios.length, seguimiento]);
 
@@ -3676,48 +3754,33 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
   }, [osoOrders, boMeta, boDraft, axisDraft, intcomexDraft, dashboardInvoiceMonth]);
 
-  const funnelStages = useMemo(() => {
-    const stageMap = new Map();
-    (funnelData?.stages || []).forEach(stage => {
-      stageMap.set((stage.estado || '').toLowerCase(), stage);
-    });
-    const buildStage = (key, label, tone) => {
-      const row = stageMap.get(key) || {};
-      return {
-        key,
-        label,
-        tone,
-        count: Number(row.count || 0),
-        amount: Number(row.amount || 0)
-      };
-    };
-    return [
-      buildStage('enviada', 'Enviadas', 'text-blue-700 bg-blue-50'),
-      buildStage('revision', 'En revisión', 'text-amber-700 bg-amber-50'),
-      buildStage('aprobada', 'Aprobadas', 'text-emerald-700 bg-emerald-50'),
-      buildStage('rechazada', 'Rechazadas', 'text-rose-700 bg-rose-50')
-    ];
-  }, [funnelData]);
-
-  const toggleEstadoFilter = (estado) => {
+  const toggleEtapaFilter = (etapa) => {
     setHistorialFilters(prev => {
-      const current = new Set(prev.estados || []);
-      if (current.has(estado)) current.delete(estado);
-      else current.add(estado);
-      return { ...prev, estados: Array.from(current) };
+      const current = new Set(prev.etapas || []);
+      if (current.has(etapa)) current.delete(etapa);
+      else current.add(etapa);
+      return { ...prev, etapas: Array.from(current) };
     });
+  };
+
+  const cambiarVistaHistorial = (vista) => {
+    if (vista === historialVista) return;
+    setHistorialVista(vista);
+    setSelectedHistorialIds(new Set());
+    setExpandedHistorialId(null);
+    setPageByTable(prev => ({ ...prev, historial: 1 }));
   };
 
   useEffect(() => {
     setSelectedHistorialIds(prev => {
-      const validIds = new Set(historial.map(cot => cot.id));
+      const validIds = new Set(historialBase.map(cot => cot.id));
       const next = new Set();
       prev.forEach(id => {
         if (validIds.has(id)) next.add(id);
       });
       return next;
     });
-  }, [historial]);
+  }, [historialBase]);
 
   const toggleSelectHistorial = (id) => {
     setSelectedHistorialIds(prev => {
@@ -3754,7 +3817,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const results = await Promise.allSettled(ids.map(id => cotizacionesAPI.delete(id)));
       const failed = results.filter(r => r.status === 'rejected');
       setHistorial(prev => prev.filter(cot => !ids.includes(cot.id)));
+      setHistorialArchivadas(prev => prev.filter(cot => !ids.includes(cot.id)));
       invalidarHistorial();
+      queryClient.invalidateQueries({ queryKey: queryKeys.crm.todo });
       setSelectedHistorialIds(new Set());
       if (failed.length > 0) {
         const firstError = failed[0]?.reason?.message || 'Error eliminando cotizaciones';
@@ -4076,17 +4141,89 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const updateCotizacionEstado = async (cotizacionId, estado) => {
+  // Tras cambiar etapa, archivar o restaurar: la lista, el embudo y el resumen del CRM se refrescan.
+  const invalidarCotizacionesYCrm = () => {
+    invalidarHistorial();
+    queryClient.invalidateQueries({ queryKey: queryKeys.crm.todo });
+  };
+
+  // Cambia la etapa de una cotización (y de su oportunidad). "Perdida" pide el motivo antes.
+  const cambiarEtapaCotizacion = async (cot, etapa, motivo) => {
+    if (!cot?.id || !etapa) return;
+    if (etapa === 'perdida' && !motivo) {
+      setPerdidaDe(cot);
+      return;
+    }
     try {
       setSaving(true);
-      const result = await cotizacionesAPI.updateEstado(cotizacionId, estado);
-      const newEstado = result?.estado || estado;
-      setHistorial(prev => prev.map(cot => (
-        cot.id === cotizacionId ? { ...cot, estado: newEstado } : cot
+      const result = await cotizacionesAPI.updateEstado(cot.id, { etapa, motivo_perdida: motivo });
+      setHistorial(prev => prev.map(c => (
+        c.id === cot.id
+          ? {
+            ...c,
+            etapa: result?.etapa || etapa,
+            estado: result?.estado || c.estado,
+            motivo_perdida: etapa === 'perdida' ? (result?.motivo_perdida ?? motivo) : (result?.motivo_perdida ?? null)
+          }
+          : c
       )));
-      invalidarHistorial();
+      invalidarCotizacionesYCrm();
+      notify(`Cotización ${cot.numero || `#${cot.id}`} movida a ${nombreEtapa(result?.etapa || etapa)}`, { tipo: 'ok' });
     } catch (error) {
-      notify(error.message || 'Error actualizando estado');
+      notify(error.message || 'No se pudo cambiar la etapa', { tipo: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restaurarCotizaciones = async (ids) => {
+    const lista = (ids || []).filter(Boolean);
+    if (lista.length === 0) return;
+    try {
+      setSaving(true);
+      const resultado = await cotizacionesAPI.restaurar(lista);
+      setHistorialArchivadas(prev => prev.filter(cot => !lista.includes(cot.id)));
+      setSelectedHistorialIds(new Set());
+      invalidarCotizacionesYCrm();
+      setArchivadasRecarga(n => n + 1);
+      setActivasRecarga(n => n + 1);
+      notify(`Se restauraron ${textoConteoArchivo(resultado)}.`, { tipo: 'ok' });
+    } catch (error) {
+      notify(error.message || 'No se pudo restaurar', { tipo: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Tras archivar (por ids o por fecha): quita de las activas lo que ya no está y avisa.
+  const trasArchivar = (resultado, ids) => {
+    if (Array.isArray(ids)) setHistorial(prev => prev.filter(cot => !ids.includes(cot.id)));
+    setSelectedHistorialIds(new Set());
+    setExpandedHistorialId(prev => (Array.isArray(ids) && ids.includes(prev) ? null : prev));
+    invalidarCotizacionesYCrm();
+    setArchivadasRecarga(n => n + 1);
+    // Archivar por fecha no dice qué ids salieron: se vuelve a pedir la lista de activas.
+    if (!Array.isArray(ids)) {
+      queryClient.fetchQuery({
+        queryKey: [...queryKeys.cotizaciones, 'includeItems'],
+        queryFn: () => cotizacionesAPI.getAll({ includeItems: true })
+      }).then(data => setHistorial(Array.isArray(data) ? data : [])).catch(() => {});
+    }
+    notify(`Se archivaron ${textoConteoArchivo(resultado)}. Puedes verlas y restaurarlas en Archivadas.`, {
+      tipo: 'ok',
+      accion: Array.isArray(ids) ? { label: 'Deshacer', onClick: () => restaurarCotizaciones(ids) } : undefined
+    });
+  };
+
+  const archivarCotizaciones = async (ids) => {
+    const lista = (ids || []).filter(Boolean);
+    if (lista.length === 0) return;
+    try {
+      setSaving(true);
+      const resultado = await cotizacionesAPI.archivar({ ids: lista });
+      trasArchivar(resultado, lista);
+    } catch (error) {
+      notify(error.message || 'No se pudo archivar', { tipo: 'error' });
     } finally {
       setSaving(false);
     }
@@ -4096,7 +4233,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const handleCotizacionEditada = (actualizada) => {
     if (!actualizada?.id) return;
     setHistorial(prev => prev.map(c => (c.id === actualizada.id ? { ...c, ...actualizada } : c)));
-    invalidarHistorial();
+    invalidarCotizacionesYCrm();
   };
 
   // Producto del catálogo que corresponde a una fila de stock (por MPN, luego SKU).
@@ -4167,46 +4304,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       return marca.includes('axis') || sku.includes('axis') || mpn.includes('axis') || desc.includes('axis');
     });
     return hasAxis ? 'Axis' : 'QNAP';
-  };
-
-  const buildCompraMailto = (cot) => {
-    const origenLabel = getCompraOrigenLabel(cot);
-    const bo = (boByCotizacionId[cot.id] || '').trim() || cot.id || 'XXXX';
-    const subject = `Compra ${origenLabel} - BO ${bo}`;
-    const items = cot.items || [];
-    const headers = ['Marca', 'Cantidad', 'SKU', 'MPN', 'Costo XUS'];
-    const dataRows = items.map(item => ([
-      item.marca || '',
-      String(item.cantidad || item.cant || 1),
-      item.sku || '',
-      item.mpn || '',
-      formatCurrency(parseFloat(item.precio_disty || 0))
-    ]));
-    const allRows = [headers, ...dataRows];
-    const colWidths = headers.map((_, idx) =>
-      Math.max(...allRows.map(r => (r[idx] || '').toString().length))
-    );
-    const formatRow = (row) =>
-      `| ${row.map((cell, i) => (cell || '').toString().padEnd(colWidths[i], ' ')).join(' | ')} |`;
-    const sep = `| ${colWidths.map(w => '-'.repeat(w)).join(' | ')} |`;
-    const tableLines = [
-      formatRow(headers),
-      sep,
-      ...dataRows.map(formatRow)
-    ];
-    const body = [
-      'Juan',
-      'Favor tu apoyo gestionando la siguiente compra:',
-      '',
-      `Compra ${origenLabel}, aéreo consolidado, XCL – BO ${bo}`,
-      '',
-      ...tableLines,
-      '',
-      'Muchas gracias',
-      'Quedo atento',
-      'Saludos.'
-    ].join('\n');
-    return `mailto:juan.parral@intcomex.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   const buildCompraTableHtml = (cot) => {
@@ -4832,7 +4929,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   };
 
   const enviarACompras = (cot) => {
-    window.location.href = buildCompraMailto(cot);
+    // Solo se muestra la info para copiar/pegar; ya no se abre el cliente de correo.
     setCompraPreviewCot(cot);
   };
 
@@ -4935,6 +5032,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     setPageByTable(prev => ({ ...prev, historial: 1 }));
   }, [historialFilters, globalQuery]);
 
+  // Al abrir una cotización desde otra vista: se ubica su página y queda a la vista.
+  useEffect(() => {
+    const id = enfocarCotizacionRef.current;
+    if (!id || historialLoading) return;
+    const indice = filteredHistorial.findIndex(cot => cot.id === id);
+    if (indice < 0) {
+      if (historial.some(cot => cot.id === id)) {
+        // Existe pero los filtros la ocultan: se limpian y se vuelve a intentar.
+        setHistorialFilters(FILTROS_HISTORIAL_VACIOS);
+        setGlobalSearch('');
+      }
+      return;
+    }
+    enfocarCotizacionRef.current = null;
+    const tamano = pageSizeByTable.historial || DEFAULT_PAGE_SIZE;
+    setPageByTable(prev => ({ ...prev, historial: Math.floor(indice / tamano) + 1 }));
+    setTimeout(() => document.getElementById(`cotizacion-fila-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80);
+  }, [filteredHistorial, historialLoading, expandedHistorialId]);
+
   useEffect(() => {
     setPageByTable(prev => ({ ...prev, usuarios: 1 }));
   }, [globalQuery, usuarios.length]);
@@ -5017,95 +5133,82 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // LOGIN
   if (!isLoggedIn) {
-    const puntosLogin = [
-      ['calc', 'Cotiza AXIS y QNAP con precio, margen y plazo en la misma línea.'],
-      ['box', 'Stock disponible y ETA leídos del maestro en cada búsqueda.'],
-      ['clock', 'Historial con versiones, estados y PDF listo para enviar.']
-    ];
-    const campoLogin = "h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-400";
+    const campoLogin = "h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 text-[15px] text-slate-900";
     return (
-      <div className="min-h-screen app-bg">
-        <div className="absolute top-4 right-4 z-20">
+      <div className="min-h-screen app-bg flex flex-col">
+        <header className="flex items-center justify-between px-6 sm:px-10 h-16">
+          <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
           <ThemeToggle theme={theme} onToggle={toggleTheme} />
-        </div>
-        <div className="min-h-screen flex items-center justify-center px-4 py-10">
-          <div className="view-enter w-full max-w-4xl grid md:grid-cols-[1.05fr_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-float">
-            <div className="hidden md:flex flex-col justify-between gap-10 p-10 bg-[#0F1216] text-white">
-              <div className="space-y-5">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-9 w-auto invert" />
-                <p className="text-2xl leading-8 font-bold tracking-tight text-white">
-                  Cotizaciones de Axis y QNAP, listas para enviar.
-                </p>
-              </div>
-              <ul className="space-y-4">
-                {puntosLogin.map(([icono, texto]) => (
-                  <li key={icono} className="flex items-start gap-3 text-sm leading-5 text-white/75">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-white">
-                      <NavIcon name={icono} className="h-4 w-4" />
-                    </span>
-                    <span className="pt-1.5">{texto}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-white/50">Intcomex Chile · Product Management</p>
+        </header>
+        <main className="flex-1 flex items-center justify-center px-6 pb-24">
+          <form
+            className="stagger-children w-full max-w-[340px] flex flex-col gap-7"
+            onSubmit={e => {
+              e.preventDefault();
+              const campos = new FormData(e.currentTarget);
+              handleLogin(campos.get('usuario'), campos.get('password'));
+            }}
+          >
+            <div className="space-y-2">
+              <div className="mq-sobre">Acceso</div>
+              <h1 className="text-[32px] leading-9 font-semibold tracking-tight text-slate-900">Ingresar</h1>
+              <p className="text-sm leading-5 text-slate-500">Usa el usuario y la contraseña que te entregó Intcomex.</p>
             </div>
-
-            <form
-              className="flex flex-col justify-center gap-6 p-6 sm:p-10"
-              onSubmit={e => { e.preventDefault(); handleLogin(); }}
-            >
-              <div className="space-y-1">
-                <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-8 w-auto mb-5 md:hidden dark:invert" />
-                <h1 className="text-2xl leading-8 font-bold tracking-tight text-slate-900">Ingresar</h1>
-                <p className="text-sm text-slate-500">Usa el usuario y la contraseña que te entregó Intcomex.</p>
-              </div>
-              <div className="space-y-4">
-                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-usuario">
-                  Usuario
+            <div className="space-y-4">
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-usuario">
+                Usuario
+                <input
+                  id="login-usuario"
+                  name="usuario"
+                  type="text"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={usuario}
+                  onChange={e => setUsuario(e.target.value)}
+                  className={campoLogin}
+                  placeholder="nombre.apellido"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-password">
+                Contraseña
+                <span className="relative">
                   <input
-                    id="login-usuario"
-                    type="text"
-                    autoComplete="username"
-                    value={usuario}
-                    onChange={e => setUsuario(e.target.value)}
-                    className={campoLogin}
-                    placeholder="nombre.apellido"
+                    id="login-password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className={`${campoLogin} pr-20`}
+                    placeholder="••••••••"
                   />
-                </label>
-                <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-700" htmlFor="login-password">
-                  Contraseña
-                  <span className="relative">
-                    <input
-                      id="login-password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      className={`${campoLogin} pr-20`}
-                      placeholder="••••••••"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-pressed={showPassword}
-                      className="mq-btn mq-btn-xs mq-btn-fantasma absolute right-1.5 top-1/2 -translate-y-1/2"
-                    >
-                      {showPassword ? 'Ocultar' : 'Mostrar'}
-                    </button>
-                  </span>
-                </label>
-                {loginError && (
-                  <p role="alert" className="rounded-[10px] border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
-                    {loginError}
-                  </p>
-                )}
-              </div>
-              <button type="submit" className="mq-btn mq-btn-lg mq-btn-primario w-full">
-                Ingresar
-              </button>
-            </form>
-          </div>
-        </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-pressed={showPassword}
+                    className="mq-btn mq-btn-xs mq-btn-fantasma absolute right-1.5 top-1/2 -translate-y-1/2"
+                  >
+                    {showPassword ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </span>
+              </label>
+              {loginError && (
+                <p role="alert" className="animate-fade-in-up rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+                  {loginError}
+                </p>
+              )}
+            </div>
+            <button type="submit" className="mq-btn mq-btn-lg mq-btn-primario w-full">
+              Ingresar
+            </button>
+          </form>
+        </main>
+        <footer className="px-6 sm:px-10 h-14 flex items-center justify-between border-t border-slate-200">
+          <span className="mq-sobre">Intcomex Chile · Product Management</span>
+          <span className="mq-sobre hidden sm:inline">Axis · QNAP</span>
+        </footer>
       </div>
     );
   }
@@ -5216,6 +5319,518 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     );
   }
 
+  // Lista de cotizaciones: "Mis cotizaciones" (clientes) y CRM › Cotizaciones (admin completo).
+  // En el CRM recibe `abrirEmpresa` para enlazar la empresa del CRM de cada fila.
+  const renderHistorialContenido = ({ abrirEmpresa } = {}) => {
+    const verArchivadas = isFullAdmin && historialVista === 'archivadas';
+    const cargandoLista = verArchivadas ? archivadasLoading : historialLoading;
+    const errorLista = verArchivadas ? archivadasError : historialError;
+    const seleccionadas = selectedHistorialIds.size;
+    const conteosEtapa = contarPorEtapa(historialBase);
+    const limpiarFiltros = () => {
+      setGlobalSearch('');
+      setHistorialFilters(FILTROS_HISTORIAL_VACIOS);
+    };
+    const tituloLista = !isAdmin ? 'Mis cotizaciones' : verArchivadas ? 'Cotizaciones archivadas' : 'Cotizaciones activas';
+    return (
+      <div className="space-y-4">
+        <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="mq-cot-barra">
+              <h2 className="text-base font-semibold text-slate-900">{tituloLista}</h2>
+              {isFullAdmin && <ConmutadorArchivo vista={historialVista} onCambiar={cambiarVistaHistorial} />}
+              {seleccionadas > 0 && isFullAdmin && !verArchivadas && (
+                <button
+                  type="button"
+                  onClick={() => archivarCotizaciones(Array.from(selectedHistorialIds))}
+                  disabled={saving}
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
+                >
+                  Archivar seleccionadas ({seleccionadas})
+                </button>
+              )}
+              {seleccionadas > 0 && verArchivadas && (
+                <button
+                  type="button"
+                  onClick={() => restaurarCotizaciones(Array.from(selectedHistorialIds))}
+                  disabled={saving}
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
+                >
+                  Restaurar seleccionadas ({seleccionadas})
+                </button>
+              )}
+              {seleccionadas > 0 && (verArchivadas || !isFullAdmin) && (
+                <button
+                  type="button"
+                  onClick={deleteSelectedCotizaciones}
+                  disabled={saving}
+                  className="mq-btn mq-btn-xs mq-btn-peligro"
+                >
+                  Eliminar seleccionados ({seleccionadas})
+                </button>
+              )}
+            </div>
+            <div className="mq-cot-barra">
+              {isFullAdmin && !verArchivadas && (
+                <button type="button" onClick={() => setArchivarFechaAbierto(true)} className="mq-btn mq-btn-xs mq-btn-fantasma">
+                  Archivar anteriores a…
+                </button>
+              )}
+              {isFullAdmin && canViewCotizador && !verArchivadas && (
+                <button type="button" onClick={() => setCurrentView('cotizador')} className="mq-btn mq-btn-xs mq-btn-primario">Nueva cotización</button>
+              )}
+              <span className="text-xs text-slate-500">{historialPage.total} resultados</span>
+            </div>
+          </div>
+          {verArchivadas && (
+            <p className="mt-2 text-xs text-slate-500">
+              Archivar no borra. Las archivadas no aparecen en el embudo, el resumen, el dashboard ni el seguimiento automático.
+              Aquí son de solo lectura: puedes verlas, exportarlas y ver sus versiones, o restaurarlas para volver a trabajarlas.
+              «Eliminar» las borra para siempre.
+            </p>
+          )}
+          {isAdmin && !verArchivadas && (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50 text-blue-700">
+                Cotizaciones de clientes: <b>{historialCounts.clienteQuotes}</b>
+              </span>
+              <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-amber-50 text-amber-700">
+                Con registro de proyecto: <b>{historialCounts.registroQuotes}</b>
+              </span>
+            </div>
+          )}
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-2 text-sm">
+            {isAdmin && (
+              <input
+                type="text"
+                aria-label="Buscar"
+                placeholder="Buscar…"
+                value={globalSearch}
+                onChange={e => setGlobalSearch(e.target.value)}
+                className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm md:col-span-2"
+              />
+            )}
+            <input
+              type="date"
+              aria-label="Fecha"
+              value={historialFilters.fecha}
+              onChange={e => setHistorialFilters(f => ({ ...f, fecha: e.target.value }))}
+              className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+            />
+            {!isAdmin && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Buscar cliente..."
+                  value={historialFilters.cliente}
+                  onChange={e => setHistorialFilters(f => ({ ...f, cliente: e.target.value }))}
+                  className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Buscar PID..."
+                  value={historialFilters.pid}
+                  onChange={e => setHistorialFilters(f => ({ ...f, pid: e.target.value }))}
+                  className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Buscar proyecto..."
+                  value={historialFilters.proyecto}
+                  onChange={e => setHistorialFilters(f => ({ ...f, proyecto: e.target.value }))}
+                  className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Buscar producto..."
+                  value={historialFilters.producto}
+                  onChange={e => setHistorialFilters(f => ({ ...f, producto: e.target.value }))}
+                  className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
+                />
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setHistorialFilters(FILTROS_HISTORIAL_VACIOS)}
+              className="mq-btn mq-btn-secundario"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+          {isAdmin && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-slate-500">Etapa:</span>
+              <FiltroEtapas seleccion={historialFilters.etapas || []} conteos={conteosEtapa} onAlternar={toggleEtapaFilter} />
+            </div>
+          )}
+        </div>
+        <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
+          {cargandoLista ? (
+            <table className="w-full text-sm"><tbody><FilasEsqueleto filas={6} columnas={7} /></tbody></table>
+          ) : errorLista ? (
+            <div className="p-6 text-center text-red-600">{errorLista}</div>
+          ) : historialPage.total === 0 ? (
+            <EstadoVacio
+              icono="carpeta"
+              titulo={historialBase.length > 0
+                ? 'Ninguna cotización coincide con los filtros'
+                : verArchivadas ? 'No hay cotizaciones archivadas' : 'Aún no hay cotizaciones'}
+              detalle={historialBase.length > 0
+                ? 'Quita algún filtro para ver más resultados.'
+                : verArchivadas ? 'Lo que archives aparecerá aquí y se podrá restaurar.' : 'Las cotizaciones que generes aparecerán aquí.'}
+              accion={historialBase.length > 0
+                ? { label: 'Limpiar filtros', onClick: limpiarFiltros }
+                : (canViewCotizador && !verArchivadas ? { label: 'Nueva cotización', onClick: () => setCurrentView('cotizador') } : undefined)}
+            />
+          ) : (
+            <div className="max-h-[60vh] overflow-auto">
+              <table className="w-full min-w-[1080px] text-sm">
+                <thead className="bg-slate-50 sticky top-0 z-10 text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleccionar todas las filtradas"
+                        checked={filteredHistorial.length > 0 && filteredHistorial.every(cot => selectedHistorialIds.has(cot.id))}
+                        onChange={toggleSelectAllHistorialFiltered}
+                      />
+                    </th>
+                    <th className="px-3 py-2 text-left">Folio</th>
+                    <th className="px-3 py-2 text-left">Fecha</th>
+                    <th className="px-3 py-2 text-left">Proyecto</th>
+                    <th className="px-3 py-2 text-left">Empresa</th>
+                    <th className="px-3 py-2 text-left">PID</th>
+                    <th className="px-3 py-2 text-left">Etapa</th>
+                    {isFullAdmin && <th className="px-3 py-2 text-right">Margen</th>}
+                    <th className="px-3 py-2 text-right">Monto</th>
+                    <th className="px-3 py-2 text-right"><span className="sr-only">Acciones</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {historialPage.rows.map(cot => {
+                    const highlightCliente = isAdmin && isClienteQuote(cot);
+                    const showRegistroAlert = isAdmin && !verArchivadas && isClienteQuote(cot) && hasProjectRegistro(cot) && !dismissedRegistroById[cot.id];
+                    const highlightRegistro = highlightCliente && showRegistroAlert;
+                    const etapa = etapaDeCotizacion(cot);
+                    const isGanada = etapa === 'ganada';
+                    const isExpanded = expandedHistorialId === cot.id;
+                    const folio = cot.numero || `#${cot.id}`;
+                    const verVersiones = isFullAdmin ? () => setVersionesDe(cot) : undefined;
+                    return (
+                      <React.Fragment key={cot.id}>
+                        <tr
+                          id={`cotizacion-fila-${cot.id}`}
+                          onClick={() => {
+                            setExpandedHistorialId(prev => (prev === cot.id ? null : cot.id));
+                            if (showRegistroAlert) setProjectRegistroModal(cot);
+                          }}
+                          className={`cursor-pointer ${
+                            verArchivadas
+                              ? 'mq-cot-archivada hover:bg-slate-50'
+                              : highlightRegistro
+                                ? 'bg-amber-50/70 border-l-4 border-amber-300'
+                                : isGanada
+                                  ? 'bg-green-50/70 border-l-4 border-green-300'
+                                  : highlightCliente
+                                    ? 'bg-blue-50/60'
+                                    : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Seleccionar cotización ${folio}`}
+                              checked={selectedHistorialIds.has(cot.id)}
+                              onChange={() => toggleSelectHistorial(cot.id)}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs text-slate-700">{folio}</span>
+                              <EtiquetaVersion version={cot.version} numero={folio} onVer={verVersiones} />
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-600">{getDateKey(cot.created_at) || 'N/A'}</td>
+                          <td className="px-3 py-2">{cot.cliente_telefono || 'N/A'}</td>
+                          <td className="px-3 py-2">
+                            <div>{cot.cliente_empresa || 'N/A'}</div>
+                            {isFullAdmin && cot.empresa_crm && (
+                              abrirEmpresa && cot.empresa_id ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); abrirEmpresa(cot.empresa_id); }}
+                                  className="mq-enlace mq-cot-empresa text-left"
+                                  title="Abrir la ficha de la empresa en el CRM"
+                                >
+                                  CRM: {cot.empresa_crm}
+                                </button>
+                              ) : (
+                                <span className="mq-cot-empresa text-slate-500">CRM: {cot.empresa_crm}</span>
+                              )
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span>{cot.cliente_email || 'N/A'}</span>
+                              {showRegistroAlert && (
+                                <span
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold"
+                                  title="Registro de proyecto"
+                                >
+                                  !
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2"><EtapaCotizacion etapa={etapa} /></td>
+                          {isFullAdmin && (
+                            <td className="px-3 py-2 text-right">
+                              {(() => {
+                                const m = margenCotizacion(cot);
+                                return m ? (
+                                  <span className="inline-flex flex-col items-end" title={m.parcial ? 'Algunas líneas no tienen costo' : undefined}>
+                                    <MargenChip gpPct={m.gpPct} origen={m.origenes} />
+                                  </span>
+                                ) : <span className="text-xs text-slate-500">—</span>;
+                              })()}
+                            </td>
+                          )}
+                          <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(cot.total || 0)}</td>
+                          <td className="px-2 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            {isFullAdmin && !verArchivadas && (
+                              <button
+                                type="button"
+                                onClick={() => setEditorCotizacionId(cot.id)}
+                                className="mq-btn mq-btn-xs mq-btn-fantasma text-slate-900"
+                                title="Editar (E)"
+                              >
+                                Editar
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => exportHistorialPdf(cot)}
+                              className="mq-btn mq-btn-xs mq-btn-fantasma"
+                              title="Descargar PDF (P)"
+                            >
+                              PDF
+                            </button>
+                            {canViewCotizador && (
+                              <button
+                                type="button"
+                                onClick={() => duplicarCotizacion(cot)}
+                                className="mq-btn mq-btn-xs mq-btn-fantasma"
+                                title="Duplicar como nueva cotización (D)"
+                              >
+                                Duplicar
+                              </button>
+                            )}
+                            {isFullAdmin && (verArchivadas ? (
+                              <button
+                                type="button"
+                                onClick={() => restaurarCotizaciones([cot.id])}
+                                disabled={saving}
+                                className="mq-btn mq-btn-xs mq-btn-fantasma"
+                                title="Volver a las activas"
+                              >
+                                Restaurar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => archivarCotizaciones([cot.id])}
+                                disabled={saving}
+                                className="mq-btn mq-btn-xs mq-btn-fantasma"
+                                title="Archivar (no borra; se puede restaurar)"
+                              >
+                                Archivar
+                              </button>
+                            ))}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-white">
+                            <td colSpan={isFullAdmin ? 10 : 9} className="px-4 py-3 border-t">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <div className="text-xs text-slate-500">Proyecto</div>
+                                  <div className="font-semibold text-slate-800">{cot.cliente_telefono || 'N/A'}</div>
+                                </div>
+                                {isAdmin && (
+                                  <div>
+                                    <div className="text-xs text-slate-500">Etapa</div>
+                                    <div className="mt-1">
+                                      {verArchivadas
+                                        ? <EtapaCotizacion etapa={etapa} />
+                                        : (
+                                          <SelectorEtapa
+                                            etapa={etapa}
+                                            etiqueta={`Etapa de la cotización ${folio}`}
+                                            deshabilitado={saving}
+                                            onElegir={(nueva) => cambiarEtapaCotizacion(cot, nueva)}
+                                          />
+                                        )}
+                                    </div>
+                                    {etapa === 'perdida' && (
+                                      <div className="mq-cot-motivo">Motivo: {cot.motivo_perdida || 'sin motivo registrado'}</div>
+                                    )}
+                                  </div>
+                                )}
+                                {isFullAdmin && (
+                                  <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <div className="text-xs text-slate-600">
+                                      {verArchivadas
+                                        ? `Archivada${cot.archivada_en ? ` el ${getDateKey(cot.archivada_en)}` : ''}. Restáurala para editarla o cambiar su etapa.`
+                                        : `Vigente: v${Number(cot.version) || 1}. Cada guardado con cambios crea una versión nueva y conserva las anteriores.`}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setVersionesDe(cot); }}
+                                        className="mq-btn mq-btn-sm mq-btn-secundario"
+                                      >
+                                        Versiones
+                                      </button>
+                                      {verArchivadas ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); restaurarCotizaciones([cot.id]); }}
+                                          disabled={saving}
+                                          className="mq-btn mq-btn-sm mq-btn-primario"
+                                        >
+                                          Restaurar
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setEditorCotizacionId(cot.id); }}
+                                          className="mq-btn mq-btn-sm mq-btn-primario"
+                                        >
+                                          Editar cotización
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="text-xs text-slate-500">PDF</div>
+                                  <div className="mt-1 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); exportHistorialPdf(cot); }}
+                                      className="mq-btn mq-btn-xs mq-btn-secundario"
+                                    >
+                                      PDF
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); exportHistorialExcel(cot); }}
+                                      className="mq-btn mq-btn-xs mq-btn-secundario"
+                                    >
+                                      Excel
+                                    </button>
+                                    {isAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); exportHistorialAxis(cot); }}
+                                        className="mq-btn mq-btn-xs mq-btn-secundario"
+                                      >
+                                        Exportar a Axis
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                {isAdmin && (
+                                  <div>
+                                    <div className="text-xs text-slate-500">Compras</div>
+                                    {!verArchivadas && normalizeEstado(cot.estado) === 'aprobada' ? (
+                                      <div className="mt-1 flex items-center gap-2">
+                                        <input
+                                          type="text"
+                                          aria-label="BO"
+                                          value={boByCotizacionId[cot.id] || ''}
+                                          onChange={e => setBoByCotizacionId(prev => ({ ...prev, [cot.id]: e.target.value }))}
+                                          placeholder="BO"
+                                          className="w-24 px-2 py-1 border rounded text-xs"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); enviarACompras(cot); }}
+                                          className="mq-btn mq-btn-xs mq-btn-primario"
+                                        >
+                                          Enviar a compras
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="mt-1 text-xs text-slate-500">
+                                        {verArchivadas ? 'No disponible en archivadas' : 'Disponible cuando está Ganada'}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="md:col-span-2">
+                                  <div className="text-xs text-slate-500 mb-1">Productos</div>
+                                  {Array.isArray(cot.items) && cot.items.length > 0 ? (
+                                    <div className="space-y-1 text-xs text-slate-600">
+                                      {cot.items.map(item => (
+                                        <div key={`${cot.id}-${item.id}`} className="flex justify-between gap-3">
+                                          <span className="truncate">
+                                            {Number(item.cantidad) || 1}× {(item.sku || item.mpn || 'SKU')} - {item.descripcion || 'Sin descripción'}
+                                          </span>
+                                          <span className="shrink-0 tabular-nums">{formatCurrency(Number(item.precio_total) || 0)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-500">Sin productos</span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="p-3 border-t bg-white flex items-center justify-end gap-2 text-xs">
+                <label htmlFor="page-size-historial">Filas</label>
+                <select
+                  id="page-size-historial"
+                  value={historialPage.pageSize}
+                  onChange={(e) => updateTablePageSize('historial', Number(e.target.value))}
+                  className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
+                >
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => updateTablePage('historial', Math.max(1, historialPage.page - 1))}
+                  disabled={historialPage.page <= 1}
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
+                >
+                  Anterior
+                </button>
+                <span>Página {historialPage.page}/{historialPage.totalPages}</span>
+                <button
+                  type="button"
+                  onClick={() => updateTablePage('historial', Math.min(historialPage.totalPages, historialPage.page + 1))}
+                  disabled={historialPage.page >= historialPage.totalPages}
+                  className="mq-btn mq-btn-xs mq-btn-secundario"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // VISTA PRINCIPAL
   const cotizadorContextValue = {
     isAdmin,
@@ -5237,17 +5852,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const navItems = [
     canViewCotizador && { key: 'cotizador', grupo: 'ventas', label: 'Cotizador', short: 'Cotizar', icon: 'calc', badge: cotizacion.length > 0 ? cotizacion.length : null, badgeTone: 'blue' },
     canViewIA && { key: 'ia', grupo: 'ventas', label: 'Asistente IA', short: 'IA', icon: 'sparkles' },
-    canViewHistorial && {
+    // El admin completo ve sus cotizaciones en CRM › Cotizaciones.
+    canViewHistorial && !isFullAdmin && {
       key: 'historial',
       grupo: 'ventas',
-      label: isFullAdmin ? 'Historial' : 'Mis cotizaciones',
+      label: 'Mis cotizaciones',
       short: 'Historial',
-      icon: 'clock',
-      badge: isFullAdmin && historialCounts.registroPendientes > 0 ? historialCounts.registroPendientes : null,
-      badgeTone: 'amber'
+      icon: 'clock'
     },
     canViewStock && { key: 'stock', grupo: 'ventas', label: 'Stock disponible', short: 'Stock', icon: 'box' },
     canViewDashboard && { key: 'dashboard', grupo: 'ventas', label: 'Dashboard', short: 'Inicio', icon: 'home' },
+    isFullAdmin && {
+      key: 'crm',
+      grupo: 'ventas',
+      label: 'CRM',
+      short: 'CRM',
+      icon: 'users',
+      badge: historialCounts.registroPendientes > 0 ? historialCounts.registroPendientes : null,
+      badgeTone: 'amber'
+    },
     isFullAdmin && { key: 'ordenes', grupo: 'operaciones', label: 'Órdenes activas', short: 'Órdenes', icon: 'truck' },
     (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', grupo: 'operaciones', label: 'Vista compras', short: 'Compras', icon: 'cart' },
     isFullAdmin && { key: 'admin', grupo: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
@@ -5259,10 +5882,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     .map(([clave, titulo]) => ({ clave, titulo, items: navItems.filter(item => item.grupo === clave) }))
     .filter(g => g.items.length > 0);
   // Con un solo grupo (clientes) no se muestran encabezados.
-  const mostrarTitulosNav = gruposNav.length > 1;
   const vistaActual = navItems.find(item => item.key === currentView);
-  const claseNavItem = (activo, colapsado) => `relative w-full flex items-center gap-3 rounded-lg text-sm transition ${colapsado ? 'justify-center px-0 h-10' : 'px-3 h-9 text-left'} ${activo ? 'bg-slate-100 text-slate-900 font-semibold before:absolute before:-left-3 before:top-2 before:bottom-2 before:w-[3px] before:rounded-r before:bg-[var(--mq-ink)]' : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`;
-  const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
+  // Hacia qué lado entra la vista: depende de si se avanza o retrocede en el menú.
+  const direccionVista = direccionDeVista(navItems.map(item => item.key), currentView);
+  const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'crm', 'compras', 'ordenes', 'cuenta'];
   const bottomNavItems = BOTTOM_NAV_PRIORITY
     .map(key => navItems.find(item => item.key === key))
     .filter(Boolean)
@@ -5270,7 +5893,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
-    <div className="min-h-screen app-bg lg:flex">
+    <div className="min-h-screen app-bg">
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
@@ -5282,120 +5905,32 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <span className="text-sm font-semibold">¿Necesitas Ayuda?</span>
         </a>
       )}
-      <aside
-        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-slate-200 bg-white transition-[width] duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-60'}`}
-        aria-label="Barra lateral de navegación"
-      >
-        <div className={`flex items-center gap-3 h-16 ${sidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
-          {sidebarCollapsed ? (
-            <img src="/brand/myquote-app-icon-dark.svg" alt="MyQuote" className="w-10 h-10 shrink-0" />
-          ) : (
-            <div className="min-w-0 flex-1">
-              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
-            </div>
-          )}
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 pb-3 space-y-5" aria-label="Secciones">
-          {gruposNav.map(grupo => (
-          <div key={grupo.clave} className="space-y-0.5">
-          {mostrarTitulosNav && (sidebarCollapsed
-            ? <div className="mx-2 mb-2 border-t border-slate-200" aria-hidden="true" />
-            : <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>)}
-          {grupo.items.map(item => (
-            <button
-              key={item.key}
-              onClick={() => setCurrentView(item.key)}
-              title={sidebarCollapsed ? item.label : undefined}
-              aria-current={currentView === item.key ? 'page' : undefined}
-              className={claseNavItem(currentView === item.key, sidebarCollapsed)}
-            >
-              <span className="relative shrink-0">
-                <NavIcon name={item.icon} className="w-[18px] h-[18px]" />
-                {sidebarCollapsed && item.badge ? (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-slate-900 text-white text-[9px] flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </span>
-              {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
-              {!sidebarCollapsed && item.badge ? (
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                  {item.badge}
-                </span>
-              ) : null}
-            </button>
-          ))}
-          </div>
-          ))}
-        </nav>
-        <div className="p-3 border-t border-slate-200 space-y-1">
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title={sidebarCollapsed ? 'Buscar (Ctrl+K)' : undefined}
-            className={claseNavItem(false, sidebarCollapsed)}
-          >
-            <NavIcon name="search" className="w-[18px] h-[18px] shrink-0" />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 truncate">Buscar</span>
-                <kbd className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">Ctrl K</kbd>
-              </>
-            )}
-          </button>
-          <div className={`flex items-center py-1 ${sidebarCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
-            {!sidebarCollapsed && <span className="text-xs text-slate-500">Tema</span>}
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          </div>
-          <div className={`flex items-center gap-3 py-2 ${sidebarCollapsed ? 'justify-center' : 'px-3'}`}>
-            {/* El logo de la empresa del usuario (si tiene) vive aquí; arriba va la marca MyQuote. */}
-            {user?.logo_url ? (
-              <img src={user.logo_url} alt={user?.empresa || 'Empresa'} className="w-8 h-8 rounded-lg object-contain bg-white shadow-sm shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-semibold uppercase shrink-0">
-                {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                <div className="text-xs text-slate-500 truncate">{user?.empresa || ''}</div>
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <button
-                onClick={handleLogout}
-                aria-label="Cerrar sesión"
-                title="Cerrar sesión"
-                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0"
-              >
-                <NavIcon name="logout" className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          {sidebarCollapsed && (
-            <button
-              onClick={handleLogout}
-              aria-label="Cerrar sesión"
-              title="Cerrar sesión"
-              className="w-full flex justify-center py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-            >
-              <NavIcon name="logout" />
-            </button>
-          )}
-          <button
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
-            className="w-full flex items-center justify-center gap-2 h-8 rounded-lg text-slate-500 hover:bg-slate-100 text-xs"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} aria-hidden="true">
-              <path d="m15 6-6 6 6 6" />
-            </svg>
-            {!sidebarCollapsed && 'Colapsar'}
-          </button>
-        </div>
-      </aside>
+      <BarraSuperior
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onIndice={() => setMobileMenuOpen(true)}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Indice
+        abierto={mobileMenuOpen}
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onCerrar={cerrarIndice}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Cortina vista={currentView} />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="lg:hidden bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40">
+        <header className="lg:hidden bg-[var(--mq-ground)] border-b border-slate-200 sticky top-0 z-40">
           <div className="px-4 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <img src="/brand/myquote-symbol-web.svg" alt="MyQuote" className="h-7 w-7 shrink-0 dark:invert" />
@@ -5407,72 +5942,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 type="button"
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label="Abrir menú"
-                className="grid h-10 w-10 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
+                className="mq-btn-icono !h-10 !w-10"
               >
                 <NavIcon name="menu" className="w-6 h-6" />
               </button>
             </div>
           </div>
         </header>
-
-        {mobileMenuOpen && (
-          <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menú de navegación">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setMobileMenuOpen(false)} />
-            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-float flex flex-col">
-              <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-semibold uppercase shrink-0">
-                    {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'MyQuote'}</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMobileMenuOpen(false)}
-                  aria-label="Cerrar menú"
-                  className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0"
-                >
-                  <NavIcon name="close" className="w-5 h-5" />
-                </button>
-              </div>
-              <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Secciones">
-                {gruposNav.map(grupo => (
-                <div key={grupo.clave} className="space-y-0.5">
-                {mostrarTitulosNav && <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>}
-                {grupo.items.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => { setCurrentView(item.key); setMobileMenuOpen(false); }}
-                    aria-current={currentView === item.key ? 'page' : undefined}
-                    className={`${claseNavItem(currentView === item.key, false)} h-11`}
-                  >
-                    <NavIcon name={item.icon} />
-                    <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge ? (
-                      <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-                </div>
-                ))}
-              </nav>
-              <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                >
-                  <NavIcon name="logout" />
-                  Cerrar sesión
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <CommandPalette
           open={paletteOpen}
@@ -5515,6 +5991,28 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </Suspense>
         )}
 
+        {isFullAdmin && versionesDe && (
+          <PanelVersiones
+            cotizacionId={versionesDe.id}
+            versionActual={Number(versionesDe.version) || 1}
+            numero={versionesDe.numero || `#${versionesDe.id}`}
+            onCerrar={() => setVersionesDe(null)}
+          />
+        )}
+        {isFullAdmin && perdidaDe && (
+          <PerdidaDialogo
+            oportunidad={{ titulo: `Cotización ${perdidaDe.numero || `#${perdidaDe.id}`}${perdidaDe.cliente_empresa ? ` · ${perdidaDe.cliente_empresa}` : ''}` }}
+            onCerrar={() => setPerdidaDe(null)}
+            onConfirmar={(motivo) => cambiarEtapaCotizacion(perdidaDe, 'perdida', motivo)}
+          />
+        )}
+        {isFullAdmin && archivarFechaAbierto && (
+          <ArchivarAnterioresDialogo
+            onCerrar={() => setArchivarFechaAbierto(false)}
+            onArchivado={(resultado) => trasArchivar(resultado, null)}
+          />
+        )}
+
         <nav
           aria-label="Navegación principal móvil"
           className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]"
@@ -5552,7 +6050,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {/* w-[92%] junto a w-full aplicaba dos anchos en conflicto sobre el mismo
             elemento y cual ganaba dependia del orden del CSS compilado. Se usa
             max-w, que expresa lo mismo sin competir con w-full. */}
-        <main className={`${isClient ? 'max-w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
+        <main
+          className={`mq-vista ${isClient ? 'max-w-[92%]' : 'max-w-[84rem]'} mx-auto w-full px-3 sm:px-6 pt-4 sm:pt-7 pb-28 lg:pb-10`}
+          style={direccionVista ? { '--mq-dx': `${direccionVista * 44}px`, '--mq-dy': '0px' } : undefined}
+        >
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
@@ -5566,6 +6067,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 setCurrentView('cotizador');
                 setPegarListaTexto(texto);
               }}
+            />
+          </Suspense>
+        )}
+        {currentView === 'crm' && isFullAdmin && (
+          <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
+            <CrmView
+              onAbrirCotizacion={abrirCotizacionEnHistorial}
+              tab={crmTab}
+              onTab={setCrmTab}
+              cotizaciones={renderHistorialContenido}
             />
           </Suspense>
         )}
@@ -5612,29 +6123,53 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="text-xs text-slate-500">
                   {filteredStockCatalog.length} productos con unidades · puedes buscar por varias palabras, por ejemplo «Axis 03181».
                 </div>
+                {isFullAdmin && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600">
+                    <span className="font-medium text-slate-700">Margen del precio de sistema</span>
+                    {['AXIS', 'QNAP'].map(marca => (
+                      <label key={marca} className="flex items-center gap-1.5">
+                        {marca === 'AXIS' ? 'Axis' : 'QNAP'}
+                        <NumeroInput
+                          value={margenSistema[marca]}
+                          onCommit={valor => { if (valor !== null && valor < 100) cambiarMargenSistema(marca, valor); }}
+                          decimales={1}
+                          min={0}
+                          ariaLabel={`Margen del precio de sistema ${marca === 'AXIS' ? 'Axis' : 'QNAP'} en porcentaje`}
+                          className="h-8 w-16 rounded-lg border border-slate-300 bg-white px-2 text-right text-sm tabular-nums text-slate-800"
+                        />
+                        %
+                      </label>
+                    ))}
+                    <button type="button" onClick={restablecerMargenSistema} className="text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline">
+                      Restablecer (13% / 15%)
+                    </button>
+                    <span className="text-slate-500">Costo real de bodega ÷ (1 − margen), sin rebate de partner.</span>
+                  </div>
+                )}
               </div>
               <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-3 py-4 sm:px-6 sm:py-6">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase tracking-wide">
                     <tr>
-                      <th className="px-4 py-3 text-left">Producto</th>
-                      <th className="px-4 py-3 text-left">Marca</th>
-                      <th className="px-4 py-3 text-left">SKU</th>
-                      <th className="px-4 py-3 text-left">MPN</th>
-                      <th className="px-4 py-3 text-right">Disponible</th>
-                      {canViewCotizador && <th className="px-4 py-3 text-right"><span className="sr-only">Cotizar</span></th>}
+                      <th className="w-full px-3 py-3 text-left">Producto</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">Marca</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">SKU</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">MPN</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right">Disponible</th>
+                      {isFullAdmin && <th className="whitespace-nowrap px-3 py-3 text-right">Precio sistema</th>}
+                      {canViewCotizador && <th className="px-3 py-3 text-right"><span className="sr-only">Cotizar</span></th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {stockCatalogLoading && <FilasEsqueleto filas={6} columnas={canViewCotizador ? 6 : 5} />}
+                    {stockCatalogLoading && <FilasEsqueleto filas={6} columnas={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)} />}
                     {!stockCatalogLoading && stockCatalogError && (
                       <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
+                        <td colSpan={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
                       </tr>
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.length === 0 && (
                       <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5}>
+                        <td colSpan={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)}>
                           <EstadoVacio
                             icono="search"
                             titulo={stockCatalogQuery.trim() ? 'Sin coincidencias en stock' : 'No hay stock disponible'}
@@ -5645,30 +6180,30 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.map((item, idx) => (
                       <tr key={`${item.mpn || item.sku || 'item'}-${idx}`} className={`${idx % 2 === 1 ? 'bg-slate-50/40' : ''} ${Number(item.quantity) > 0 ? '' : 'opacity-60'}`}>
-                        <td className="px-4 py-3">
+                        <td className="w-full min-w-[240px] max-w-0 px-3 py-3">
                           <div className="flex items-center gap-3">
                             {item.imageUrl ? (
                               <img
                                 src={item.imageUrl}
                                 alt={item.name || 'Producto'}
-                                className="w-14 h-14 object-contain bg-white border rounded"
+                                className="w-14 h-14 shrink-0 object-contain bg-white border rounded"
                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
                               />
                             ) : (
-                              <div className="w-14 h-14 bg-slate-100 border rounded" />
+                              <div className="w-14 h-14 shrink-0 bg-slate-100 border rounded" />
                             )}
                             <div className="min-w-0">
-                              <div className="font-medium text-slate-800 truncate">{item.name || 'Sin descripción'}</div>
+                              <div className="font-medium text-slate-800 truncate" title={item.name || undefined}>{item.name || 'Sin descripción'}</div>
                               {item.origin && (
                                 <div className="text-xs text-slate-500">{item.origin}</div>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3">{item.brand || 'N/A'}</td>
-                        <td className="px-4 py-3">{item.sku || 'N/A'}</td>
-                        <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">
+                        <td className="whitespace-nowrap px-3 py-3">{item.brand || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3">{item.sku || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3">{item.mpn || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
                           <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-500/30">{formatStockQuantity(item.quantity) || '0'}</span>
                           {Number(item.asignado) > 0 && (
                             <div className="text-xs text-slate-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
@@ -5676,15 +6211,33 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             </div>
                           )}
                         </td>
-                        {canViewCotizador && (
-                          <td className="px-4 py-3 text-right" data-html2canvas-ignore="true">
+                        {isFullAdmin && (
+                          <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
                             {(() => {
-                              const producto = productoDeStock(item);
+                              const precio = precioSistemaDe(item, margenSistema);
+                              return precio === null
+                                ? <span className="text-xs text-slate-500" title="La hoja de stock no trae costo para este equipo">Sin costo</span>
+                                : <span className="font-semibold text-slate-900">{formatCurrency(precio)}</span>;
+                            })()}
+                          </td>
+                        )}
+                        {canViewCotizador && (
+                          <td className="whitespace-nowrap px-3 py-3 text-right" data-html2canvas-ignore="true">
+                            {(() => {
+                              const enLista = productoDeStock(item);
+                              // En stock pero fuera de la lista de precios: el admin lo cotiza igual,
+                              // con el costo real de stock como base del precio.
+                              const producto = enLista || (isFullAdmin
+                                ? productoFueraDeLista(item, {
+                                    gpPorDefecto: String(item.origin || item.brand || '').toUpperCase().includes('AXIS') ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap
+                                  })
+                                : null);
                               if (!producto) return <span className="text-xs text-slate-500" title="No está en tu lista de precios">Sin precio</span>;
                               const enCarrito = cotizacion.find(x => x.id === producto.id);
                               return (
                                 <button
                                   type="button"
+                                  title={enLista ? undefined : 'No está en la lista de precios: se cotiza con el costo real de stock'}
                                   onClick={() => {
                                     addToCotizacion(producto);
                                     notify(`Agregado ${producto.sku || producto.mpn} al cotizador`, {
@@ -5694,7 +6247,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   }}
                                   className="mq-btn mq-btn-sm mq-btn-secundario"
                                 >
-                                  {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : 'Agregar'}
+                                  {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : (enLista ? 'Agregar' : 'Agregar · fuera de lista')}
                                 </button>
                               );
                             })()}
@@ -5731,7 +6284,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre de empresa"
                       value={empresaForm.nombre}
                       onChange={e => setEmpresaForm(f => ({ ...f, nombre: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -5739,7 +6292,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         <select
                           value={empresaForm.role}
                           onChange={e => setEmpresaForm(f => ({ ...f, role: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         >
                           <option value="client">Cliente</option>
                           <option value="admin">Administrador</option>
@@ -5751,7 +6304,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           type="number"
                           value={empresaForm.gp_qnap}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_qnap: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -5760,14 +6313,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           type="number"
                           value={empresaForm.gp_axis}
                           onChange={e => setEmpresaForm(f => ({ ...f, gp_axis: e.target.value }))}
-                          className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-800"
+                          className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-800"
                         />
                       </label>
                     </div>
                     <select
                       value={empresaForm.partner_category}
                       onChange={e => setEmpresaForm(f => ({ ...f, partner_category: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     >
                       <option>Partner Autorizado</option>
                       <option>Partner Silver</option>
@@ -5974,7 +6527,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Buscar…"
                       value={globalSearch}
                       onChange={e => setGlobalSearch(e.target.value)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                   </div>
                 )}
@@ -6091,7 +6644,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Usuario"
                       value={nuevoUsuario.usuario}
                       onChange={e => setNuevoUsuario(u => ({ ...u, usuario: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       name="nuevo_nombre"
@@ -6099,7 +6652,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       placeholder="Nombre"
                       value={nuevoUsuario.nombre}
                       onChange={e => setNuevoUsuario(u => ({ ...u, nombre: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <input
                       name="nuevo_password"
@@ -6108,7 +6661,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       autoComplete="new-password"
                       value={nuevoUsuario.password}
                       onChange={e => setNuevoUsuario(u => ({ ...u, password: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                     />
                     <button
                       type="submit"
@@ -6393,13 +6946,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
                   <h3 className="text-base font-semibold text-slate-900 mb-3">Nuevo producto</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
-                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                    <input placeholder="Marca" value={newProduct.marca} onChange={e => setNewProduct(p => ({ ...p, marca: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="SKU *" value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="MPN" value={newProduct.mpn} onChange={e => setNewProduct(p => ({ ...p, mpn: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="Descripción" value={newProduct.desc} onChange={e => setNewProduct(p => ({ ...p, desc: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input type="number" placeholder="Precio Disty" value={newProduct.precio} onChange={e => setNewProduct(p => ({ ...p, precio: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="GP % (ej: 15)" value={newProduct.gp} onChange={e => setNewProduct(p => ({ ...p, gp: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
+                    <input placeholder="Tiempo Entrega" value={newProduct.tiempo} onChange={e => setNewProduct(p => ({ ...p, tiempo: e.target.value }))} className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
                   </div>
                   <div className="flex gap-2 mt-3">
                     <button onClick={handleAddProduct} disabled={saving} className="mq-btn mq-btn-primario">
@@ -6420,7 +6973,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.INBOUND_FREIGHT : (Number.isFinite(calcParams.INBOUND_FREIGHT) ? calcParams.INBOUND_FREIGHT : '')}
                     onChange={e => updateCalcParam('INBOUND_FREIGHT', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -6430,7 +6983,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.001"
                     value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.IC : (Number.isFinite(calcParams.IC) ? calcParams.IC : '')}
                     onChange={e => updateCalcParam('IC', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -6440,7 +6993,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     step="0.1"
                     value={adminOrigin === 'AXIS' ? (AXIS_CONSTANTS.INT * 100) : (Number.isFinite(calcParams.INT) ? (calcParams.INT * 100) : '')}
                     onChange={e => updateCalcParam('INT', e.target.value, true)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-[10px] bg-white text-sm tabular-nums"
+                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
                   />
                 </div>
               </div>
@@ -6455,10 +7008,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     placeholder="Buscar…"
                     value={globalSearch}
                     onChange={e => setGlobalSearch(e.target.value)}
-                    className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
+                    className="h-9 w-56 px-3 border border-slate-300 rounded-lg bg-white text-sm"
                   />
                 ) : (
-                  <input type="text" aria-label="Buscar productos" placeholder="Buscar…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-56 px-3 border border-slate-300 rounded-[10px] bg-white text-sm" />
+                  <input type="text" aria-label="Buscar productos" placeholder="Buscar…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-56 px-3 border border-slate-300 rounded-lg bg-white text-sm" />
                 )}
               </div>
               {selectedIds.size > 1 && (
@@ -6575,515 +7128,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
 
-        {currentView === 'historial' && (
+        {currentView === 'historial' && !isFullAdmin && (
           <div className="space-y-4 view-enter">
             <EncabezadoPagina
               seccion="Ventas"
-              titulo={isAdmin ? 'Historial' : 'Mis cotizaciones'}
-              subtitulo={isAdmin ? 'Cotizaciones emitidas, su estado y sus versiones.' : 'Las cotizaciones que has generado y su estado.'}
+              titulo="Mis cotizaciones"
+              subtitulo="Las cotizaciones que has generado y su etapa."
             >
               {canViewCotizador && (
                 <button type="button" onClick={() => setCurrentView('cotizador')} className="mq-btn mq-btn-primario">Nueva cotización</button>
               )}
             </EncabezadoPagina>
-            {isAdmin && (
-              <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900">Funnel de aprobación</h2>
-                    <p className="text-xs text-slate-500">
-                      {(funnelFrom || funnelTo)
-                        ? `Rango: ${funnelFrom || '...'} - ${funnelTo || '...'}${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`
-                        : `Últimos ${funnelDays} días${funnelEmpresa ? ` - ${funnelEmpresa}` : ''}`}
-                    </p>
-                  </div>
-                  <CollapsibleFilters label="Filtros del funnel">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                      <input
-                        type="date"
-                        value={funnelFrom}
-                        onChange={(e) => setFunnelFrom(e.target.value)}
-                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
-                      />
-                      <span>hasta</span>
-                      <input
-                        type="date"
-                        value={funnelTo}
-                        onChange={(e) => setFunnelTo(e.target.value)}
-                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
-                      />
-                      <button
-                        onClick={() => { setFunnelFrom(''); setFunnelTo(''); }}
-                        className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
-                      >
-                        Limpiar
-                      </button>
-                    </div>
-                    <select
-                      value={funnelDays}
-                      onChange={(e) => setFunnelDays(Number(e.target.value))}
-                      disabled={Boolean(funnelFrom || funnelTo)}
-                      className={`h-8 px-2 border border-slate-300 rounded-lg text-sm ${funnelFrom || funnelTo ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-slate-700'}`}
-                    >
-                      <option value={7}>7 días</option>
-                      <option value={30}>30 días</option>
-                      <option value={90}>90 días</option>
-                    </select>
-                    <select
-                      value={funnelEmpresa}
-                      onChange={(e) => setFunnelEmpresa(e.target.value)}
-                      className="h-8 px-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
-                    >
-                      <option value="">Todas las empresas</option>
-                      {historialEmpresas.map(emp => (
-                        <option key={emp} value={emp}>{emp}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => loadFunnel()}
-                      className="mq-btn mq-btn-sm mq-btn-secundario"
-                    >
-                      Refrescar
-                    </button>
-                  </CollapsibleFilters>
-                </div>
-                {funnelError && <div className="mt-2 text-sm text-rose-600">{funnelError}</div>}
-                {funnelLoading ? (
-                  <TarjetasEsqueleto className="mt-4" />
-                ) : (
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                    {funnelStages.map(stage => (
-                      <div key={stage.key} className="rounded-xl border border-white/70 bg-white/70 p-3">
-                        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${stage.tone}`}>
-                          {stage.label}
-                        </div>
-                        <div className="mt-2 text-2xl font-semibold text-slate-900">{stage.count}</div>
-                        <div className="text-xs text-slate-500">Cotizaciones</div>
-                        <div className="mt-2 text-sm font-semibold text-slate-800">{formatCurrency(stage.amount)}</div>
-                        <div className="text-xs text-slate-400">Monto total</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-semibold text-slate-900">{isAdmin ? 'Historial de cotizaciones' : 'Mis cotizaciones'}</h2>
-                  {selectedHistorialIds.size > 0 && (
-                    <button
-                      onClick={deleteSelectedCotizaciones}
-                      disabled={saving}
-                      className="mq-btn mq-btn-xs mq-btn-peligro"
-                    >
-                      Eliminar seleccionados ({selectedHistorialIds.size})
-                    </button>
-                  )}
-                </div>
-                <span className="text-xs text-slate-500">{historialPage.total} resultados</span>
-              </div>
-              {isAdmin && (
-                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50 text-blue-700">
-                    Cotizaciones de clientes: <b>{historialCounts.clienteQuotes}</b>
-                  </span>
-                  <span className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-amber-50 text-amber-700">
-                    Con registro de proyecto: <b>{historialCounts.registroQuotes}</b>
-                  </span>
-                </div>
-              )}
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-2 text-sm">
-                {isAdmin && (
-                  <input
-                    type="text"
-                    aria-label="Buscar"
-                    placeholder="Buscar…"
-                    value={globalSearch}
-                    onChange={e => setGlobalSearch(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm md:col-span-2"
-                  />
-                )}
-                <input
-                  type="date"
-                  value={historialFilters.fecha}
-                  onChange={e => setHistorialFilters(f => ({ ...f, fecha: e.target.value }))}
-                  className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
-                />
-                {!isAdmin && (
-                  <>
-                    <input
-                      type="text"
-                      placeholder="Buscar cliente..."
-                      value={historialFilters.cliente}
-                      onChange={e => setHistorialFilters(f => ({ ...f, cliente: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Buscar PID..."
-                      value={historialFilters.pid}
-                      onChange={e => setHistorialFilters(f => ({ ...f, pid: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Buscar proyecto..."
-                      value={historialFilters.proyecto}
-                      onChange={e => setHistorialFilters(f => ({ ...f, proyecto: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Buscar producto..."
-                      value={historialFilters.producto}
-                      onChange={e => setHistorialFilters(f => ({ ...f, producto: e.target.value }))}
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm"
-                    />
-                  </>
-                )}
-                <button
-                  onClick={() => setHistorialFilters({ fecha: '', cliente: '', pid: '', proyecto: '', producto: '', estados: [] })}
-                  className="mq-btn mq-btn-secundario"
-                >
-                  Limpiar filtros
-                </button>
-              </div>
-              {isAdmin && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-slate-500">Estado:</span>
-                  {['enviada', 'revision', 'aprobada', 'rechazada'].map(value => ({
-                    value,
-                    nombre: { enviada: 'Enviada', revision: 'En revisión', aprobada: 'Aceptada', rechazada: 'Rechazada' }[value]
-                  })).map(option => {
-                    const activo = (historialFilters.estados || []).includes(option.value);
-                    const total = historial.filter(c => normalizeEstado(c.estado) === option.value).length;
-                    const tono = {
-                      enviada: 'border-blue-200 text-blue-700',
-                      revision: 'border-slate-200 text-slate-700',
-                      aprobada: 'border-emerald-200 text-emerald-700 dark:text-emerald-300',
-                      rechazada: 'border-rose-200 text-rose-700'
-                    }[option.value] || 'border-slate-200 text-slate-700';
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => toggleEstadoFilter(option.value)}
-                        aria-pressed={activo}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium transition ${activo ? 'bg-slate-900 border-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : `bg-white hover:bg-slate-50 ${tono}`}`}
-                      >
-                        {option.nombre}
-                        <span className={`rounded-full px-1.5 tabular-nums ${activo ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>{total}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
-              {historialLoading ? (
-                <table className="w-full text-sm"><tbody><FilasEsqueleto filas={6} columnas={7} /></tbody></table>
-              ) : historialError ? (
-                <div className="p-6 text-center text-red-600">{historialError}</div>
-              ) : historialPage.total === 0 ? (
-                <EstadoVacio
-                  icono="carpeta"
-                  titulo={historial.length > 0 ? 'Ninguna cotización coincide con los filtros' : 'Aún no hay cotizaciones'}
-                  detalle={historial.length > 0 ? 'Quita algún filtro para ver más resultados.' : 'Las cotizaciones que generes aparecerán aquí.'}
-                  accion={historial.length > 0
-                    ? { label: 'Limpiar filtros', onClick: () => { setGlobalSearch(''); setHistorialFilters({ fecha: '', cliente: '', pid: '', proyecto: '', producto: '', estados: [] }); } }
-                    : (canViewCotizador ? { label: 'Nueva cotización', onClick: () => setCurrentView('cotizador') } : undefined)}
-                />
-              ) : (
-                <div className="max-h-[60vh] overflow-auto">
-                  <table className="w-full min-w-[1080px] text-sm">
-                    <thead className="bg-slate-50 sticky top-0 z-10 text-[11px] uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={filteredHistorial.length > 0 && filteredHistorial.every(cot => selectedHistorialIds.has(cot.id))}
-                            onChange={toggleSelectAllHistorialFiltered}
-                          />
-                        </th>
-                        <th className="px-3 py-2 text-left">Folio</th>
-                        <th className="px-3 py-2 text-left">Fecha</th>
-                        <th className="px-3 py-2 text-left">Proyecto</th>
-                        <th className="px-3 py-2 text-left">Empresa</th>
-                        <th className="px-3 py-2 text-left">PID</th>
-                        <th className="px-3 py-2 text-left">Estado</th>
-                        {isFullAdmin && <th className="px-3 py-2 text-right">Margen</th>}
-                        <th className="px-3 py-2 text-right">Monto</th>
-                        <th className="px-3 py-2 text-right"><span className="sr-only">Acciones</span></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {historialPage.rows.map(cot => {
-                        const highlightCliente = isAdmin && isClienteQuote(cot);
-                        const showRegistroAlert = isAdmin && isClienteQuote(cot) && hasProjectRegistro(cot) && !dismissedRegistroById[cot.id];
-                        const highlightRegistro = highlightCliente && showRegistroAlert;
-                        const isGanada = normalizeEstado(cot.estado) === 'aprobada';
-                        const isExpanded = expandedHistorialId === cot.id;
-                        return (
-                        <>
-                          <tr
-                            key={cot.id}
-                            onClick={() => {
-                              setExpandedHistorialId(prev => (prev === cot.id ? null : cot.id));
-                              if (showRegistroAlert) setProjectRegistroModal(cot);
-                            }}
-                            className={`cursor-pointer ${
-                              highlightRegistro
-                                ? 'bg-amber-50/70 border-l-4 border-amber-300'
-                                : isGanada
-                                  ? 'bg-green-50/70 border-l-4 border-green-300'
-                                  : highlightCliente
-                                    ? 'bg-blue-50/60'
-                                    : 'hover:bg-slate-50'
-                            }`}
-                          >
-                            <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={selectedHistorialIds.has(cot.id)}
-                                onChange={() => toggleSelectHistorial(cot.id)}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono text-xs text-slate-700">{cot.numero || `#${cot.id}`}</td>
-                            <td className="px-3 py-2 text-xs text-slate-600">{getDateKey(cot.created_at) || 'N/A'}</td>
-                            <td className="px-3 py-2">{cot.cliente_telefono || 'N/A'}</td>
-                            <td className="px-3 py-2">{cot.cliente_empresa || 'N/A'}</td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <span>{cot.cliente_email || 'N/A'}</span>
-                                {showRegistroAlert && (
-                                  <span
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold"
-                                    title="Registro de proyecto"
-                                  >
-                                    !
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2">
-                              {(() => {
-                                const estado = normalizeEstado(cot.estado);
-                                const nombreEstado = { enviada: 'Enviada', revision: 'En revisión', aprobada: 'Aceptada', rechazada: 'Rechazada' }[estado] || estado;
-                                const tono = {
-                                  enviada: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
-                                  revision: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-                                  aprobada: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
-                                  rechazada: 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
-                                }[estado] || 'bg-slate-100 text-slate-700';
-                                return (
-                                  <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${tono}`}>
-                                    {nombreEstado}
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                            {isFullAdmin && (
-                              <td className="px-3 py-2 text-right">
-                                {(() => {
-                                  const m = margenCotizacion(cot);
-                                  return m ? (
-                                    <span className="inline-flex flex-col items-end" title={m.parcial ? 'Algunas líneas no tienen costo' : undefined}>
-                                      <MargenChip gpPct={m.gpPct} origen={m.origenes} />
-                                    </span>
-                                  ) : <span className="text-xs text-slate-500">—</span>;
-                                })()}
-                              </td>
-                            )}
-                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(cot.total || 0)}</td>
-                            <td className="px-2 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                              {isFullAdmin && (
-                                <button
-                                  onClick={() => setEditorCotizacionId(cot.id)}
-                                  className="mq-btn mq-btn-xs mq-btn-fantasma text-slate-900"
-                                  title="Editar (E)"
-                                >
-                                  Editar
-                                </button>
-                              )}
-                              <button
-                                onClick={() => exportHistorialPdf(cot)}
-                                className="mq-btn mq-btn-xs mq-btn-fantasma"
-                                title="Descargar PDF (P)"
-                              >
-                                PDF
-                              </button>
-                              {canViewCotizador && (
-                                <button
-                                  onClick={() => duplicarCotizacion(cot)}
-                                  className="mq-btn mq-btn-xs mq-btn-fantasma"
-                                  title="Duplicar como nueva cotización (D)"
-                                >
-                                  Duplicar
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr className="bg-white">
-                              <td colSpan={isFullAdmin ? 10 : 9} className="px-4 py-3 border-t">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                  <div>
-                                    <div className="text-xs text-slate-500">Proyecto</div>
-                                    <div className="font-semibold text-slate-800">{cot.cliente_telefono || 'N/A'}</div>
-                                  </div>
-                                  {isAdmin && (
-                                    <div>
-                                      <div className="text-xs text-slate-500">Estado</div>
-                                      <div className="flex flex-wrap gap-1 mt-1">
-                                        {COTIZACION_ESTADOS.map(option => {
-                                          const isActive = normalizeEstado(cot.estado) === option.value;
-                                          const isRechazada = option.value === 'rechazada';
-                                          const isAceptada = option.value === 'aprobada';
-                                          const baseClass = isActive
-                                            ? 'mq-btn-primario'
-                                            : 'mq-btn-secundario';
-                                          const toneClass = isRechazada
-                                            ? 'text-red-700 font-semibold'
-                                            : isAceptada
-                                              ? 'text-green-700 font-semibold'
-                                              : '';
-                                          return (
-                                            <button
-                                              key={option.value}
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                updateCotizacionEstado(cot.id, option.value);
-                                              }}
-                                              className={`mq-btn mq-btn-xs ${baseClass} ${toneClass}`}
-                                              title={option.label}
-                                            >
-                                              {option.short}
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {isFullAdmin && (
-                                    <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                                      <div className="text-xs text-slate-600">
-                                        Cambia cantidades, precios, costos o productos. Cada guardado conserva la versión anterior.
-                                        {cot.version > 1 && <span className="ml-1 font-semibold">v{cot.version}</span>}
-                                      </div>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); setEditorCotizacionId(cot.id); }}
-                                        className="mq-btn mq-btn-sm mq-btn-primario"
-                                      >
-                                        Editar cotización
-                                      </button>
-                                    </div>
-                                  )}
-                                  <div>
-                                    <div className="text-xs text-slate-500">PDF</div>
-                                    <div className="mt-1 flex flex-wrap gap-2">
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); exportHistorialPdf(cot); }}
-                                        className="mq-btn mq-btn-xs mq-btn-secundario"
-                                      >
-                                        PDF
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); exportHistorialExcel(cot); }}
-                                        className="mq-btn mq-btn-xs mq-btn-secundario"
-                                      >
-                                        Excel
-                                      </button>
-                                      {isAdmin && (
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); exportHistorialAxis(cot); }}
-                                          className="mq-btn mq-btn-xs mq-btn-secundario"
-                                        >
-                                          Exportar a Axis
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {isAdmin && (
-                                    <div>
-                                      <div className="text-xs text-slate-500">Compras</div>
-                                      {normalizeEstado(cot.estado) === 'aprobada' ? (
-                                        <div className="mt-1 flex items-center gap-2">
-                                          <input
-                                            type="text"
-                                            value={boByCotizacionId[cot.id] || ''}
-                                            onChange={e => setBoByCotizacionId(prev => ({ ...prev, [cot.id]: e.target.value }))}
-                                            placeholder="BO"
-                                            className="w-24 px-2 py-1 border rounded text-xs"
-                                          />
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); enviarACompras(cot); }}
-                                            className="mq-btn mq-btn-xs mq-btn-primario"
-                                          >
-                                            Enviar a compras
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="mt-1 text-xs text-slate-500">No disponible</div>
-                                      )}
-                                    </div>
-                                  )}
-                                  <div className="md:col-span-2">
-                                    <div className="text-xs text-slate-500 mb-1">Productos</div>
-                                    {Array.isArray(cot.items) && cot.items.length > 0 ? (
-                                      <div className="space-y-1 text-xs text-slate-600">
-                                        {cot.items.map(item => (
-                                          <div key={`${cot.id}-${item.id}`} className="flex justify-between gap-3">
-                                            <span className="truncate">
-                                              {Number(item.cantidad) || 1}× {(item.sku || item.mpn || 'SKU')} - {item.descripcion || 'Sin descripción'}
-                                            </span>
-                                            <span className="shrink-0 tabular-nums">{formatCurrency(Number(item.precio_total) || 0)}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs text-slate-500">Sin productos</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );})}
-                    </tbody>
-                  </table>
-                  <div className="p-3 border-t bg-white flex items-center justify-end gap-2 text-xs">
-                    <label htmlFor="page-size-historial">Filas</label>
-                    <select
-                      id="page-size-historial"
-                      value={historialPage.pageSize}
-                      onChange={(e) => updateTablePageSize('historial', Number(e.target.value))}
-                      className="h-8 px-2 border border-slate-300 rounded-lg bg-white text-sm"
-                    >
-                      <option value={10}>10</option>
-                      <option value={15}>15</option>
-                      <option value={25}>25</option>
-                    </select>
-                    <button
-                      onClick={() => updateTablePage('historial', Math.max(1, historialPage.page - 1))}
-                      disabled={historialPage.page <= 1}
-                      className="mq-btn mq-btn-xs mq-btn-secundario"
-                    >
-                      Anterior
-                    </button>
-                    <span>Página {historialPage.page}/{historialPage.totalPages}</span>
-                    <button
-                      onClick={() => updateTablePage('historial', Math.min(historialPage.totalPages, historialPage.page + 1))}
-                      disabled={historialPage.page >= historialPage.totalPages}
-                      className="mq-btn mq-btn-xs mq-btn-secundario"
-                    >
-                      Siguiente
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            {renderHistorialContenido()}
           </div>
         )}
 
@@ -7099,7 +7155,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={(e) => setGlobalSearch(e.target.value)}
                       placeholder="Buscar…"
                       aria-label="Buscar"
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   ) : (
                     <input
@@ -7107,13 +7163,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       onChange={(e) => setOsoFilter(e.target.value)}
                       placeholder="Buscar BO o cliente"
                       aria-label="Buscar órdenes"
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                      className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                     />
                   )}
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7123,7 +7179,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7134,7 +7190,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7174,7 +7230,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
@@ -7190,7 +7246,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
                     <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
@@ -7373,12 +7429,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     onChange={(e) => setGlobalSearch(e.target.value)}
                     placeholder="Buscar…"
                     aria-label="Buscar"
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-full md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-full md:w-52"
                   />
                   <select
                     value={osoStatusFilter}
                     onChange={(e) => setOsoStatusFilter(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-40"
                   >
                     <option value="all">Todos</option>
                     <option value="activa">Activas</option>
@@ -7388,7 +7444,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <select
                     value={osoSort}
                     onChange={(e) => setOsoSort(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="bo">Ordenar por BO</option>
                     <option value="empresa">Ordenar por empresa</option>
@@ -7399,7 +7455,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <div className="relative w-[calc(50%-0.25rem)] md:w-52">
                     <button
                       onClick={() => setShowCompanyDropdown(prev => !prev)}
-                      className="w-full h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 text-left"
+                      className="w-full h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 text-left"
                     >
                       {osoCompanyFilter ? `Empresa: ${osoCompanyFilter}` : 'Empresa: Todas'}
                     </button>
@@ -7439,7 +7495,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       if (value === 'copy') copyOsoExecutiveSummary();
                       setOsoActionSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-44"
                   >
                     <option value="">Acciones…</option>
                     <option value="refresh">Refrescar</option>
@@ -7455,7 +7511,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       setShowOsoReportModal(true);
                       setOsoReportSelect('');
                     }}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
+                    className="h-10 px-3 border border-slate-300 rounded-lg bg-white text-sm text-slate-900 w-[calc(50%-0.25rem)] md:w-52"
                   >
                     <option value="">Informes…</option>
                     <option value="empresa">Informe por empresa</option>
@@ -8348,7 +8404,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
             <section className="glass-card rounded-2xl shadow-card border border-white/70">
               {/* Barra de herramientas: fija arriba al bajar por el carrito (escritorio). */}
-              <div className="lg:sticky lg:top-0 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
+              <div className="lg:sticky lg:top-14 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1 min-w-0">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
@@ -8626,7 +8682,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={user?.nombre || user?.usuario || ''}
                     readOnly
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8634,7 +8690,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   <input
                     value={user?.empresa || ''}
                     readOnly
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8644,7 +8700,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <select
                         value={ownPartnerCategory}
                         onChange={e => setOwnPartnerCategory(e.target.value)}
-                        className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white flex-1"
+                        className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white flex-1"
                       >
                         <option>Partner Autorizado</option>
                         <option>Partner Silver</option>
@@ -8663,7 +8719,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <input
                       value={user?.partner_category || 'Partner Autorizado'}
                       readOnly
-                      className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-slate-50"
+                      className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-slate-50"
                     />
                   )}
                 </label>
@@ -8682,7 +8738,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     autoComplete="current-password"
                     value={accountPasswordCurrent}
                     onChange={e => setAccountPasswordCurrent(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8691,7 +8747,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     type="password"
                     value={accountPassword}
                     onChange={e => setAccountPassword(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -8700,7 +8756,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     type="password"
                     value={accountPasswordConfirm}
                     onChange={e => setAccountPasswordConfirm(e.target.value)}
-                    className="h-10 px-3 border border-slate-300 rounded-[10px] text-sm text-slate-900 bg-white"
+                    className="h-10 px-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white"
                   />
                 </label>
                 <div>
@@ -8799,6 +8855,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     className="mq-btn mq-btn-sm mq-btn-secundario"
                   >
                     Copiar asunto
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText('juan.parral@intcomex.com')}
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
+                  >
+                    Copiar destinatario
                   </button>
                 </div>
               </div>

@@ -81,36 +81,40 @@ const crearWhatsApp = ({
   const conversaciones = new Map(); // numero -> { marca, mensajes, actualizada, ocupada }
   const vistos = new Map(); // id de mensaje de Meta -> hora (Meta reintenta)
 
+  const publicar = async (numero, mensaje) => {
+    const res = await fetchImpl(
+      `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: numero, ...mensaje })
+      }
+    );
+    if (!res.ok) {
+      const detalle = await res.text().catch(() => '');
+      logger.error?.(
+        {
+          event: 'whatsapp_envio_error',
+          status: res.status,
+          detalle: detalle.slice(0, 300)
+        },
+        'No se pudo enviar el WhatsApp'
+      );
+      return false;
+    }
+    return true;
+  };
+
   const enviar = async (numero, texto) => {
     for (const parte of partirMensaje(texto)) {
-      const res = await fetchImpl(
-        `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${config.token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to: numero,
-            type: 'text',
-            text: { body: parte, preview_url: false }
-          })
-        }
-      );
-      if (!res.ok) {
-        const detalle = await res.text().catch(() => '');
-        logger.error?.(
-          {
-            event: 'whatsapp_envio_error',
-            status: res.status,
-            detalle: detalle.slice(0, 300)
-          },
-          'No se pudo enviar el WhatsApp'
-        );
-        return false;
-      }
+      const ok = await publicar(numero, {
+        type: 'text',
+        text: { body: parte, preview_url: false }
+      });
+      if (!ok) return false;
     }
     return true;
   };
@@ -218,6 +222,32 @@ const crearWhatsApp = ({
     /** Aviso del sistema a todos los numeros autorizados. true si llego a alguno. */
     async avisar(texto) {
       const r = await Promise.all(config.numeros.map((n) => enviar(n, texto)));
+      return r.some(Boolean);
+    },
+
+    /**
+     * Aviso con una plantilla aprobada por Meta (llega aunque hayan pasado más de 24 h
+     * desde el último mensaje del usuario). parametros = textos del cuerpo ({{1}}, {{2}}...).
+     */
+    async avisarPlantilla({ nombre, idioma = 'es', parametros = [] }) {
+      const mensaje = {
+        type: 'template',
+        template: {
+          name: nombre,
+          language: { code: idioma },
+          ...(parametros.length
+            ? {
+                components: [
+                  {
+                    type: 'body',
+                    parameters: parametros.map((p) => ({ type: 'text', text: String(p) }))
+                  }
+                ]
+              }
+            : {})
+        }
+      };
+      const r = await Promise.all(config.numeros.map((n) => publicar(n, mensaje)));
       return r.some(Boolean);
     },
 

@@ -382,10 +382,15 @@ describe('API security and critical endpoints', () => {
       .send(cuerpoEdicion);
 
     expect(response.status).toBe(200);
-    const snapshot = escrituras.find((e) => e.sql.includes('INSERT INTO cotizacion_versiones'));
-    expect(snapshot.params[1]).toBe(3);
-    expect(JSON.parse(snapshot.params[2]).items[0].cantidad).toBe(2);
-    expect(snapshot.params[4]).toBe('Cliente pidio 3 unidades');
+    // Dos filas: la version anterior (v3, sin nota) y la nueva (v4, con la nota de esta edicion).
+    const [anterior, nueva] = escrituras.filter((e) => e.sql.includes('INSERT INTO cotizacion_versiones'));
+    expect(anterior.params[1]).toBe(3);
+    expect(JSON.parse(anterior.params[2]).items[0].cantidad).toBe(2);
+    expect(anterior.sql).toContain('DO NOTHING');
+    expect(nueva.params[1]).toBe(4);
+    expect(JSON.parse(nueva.params[2]).items[0].cantidad).toBe(3);
+    expect(nueva.params[4]).toBe('Cliente pidio 3 unidades');
+    expect(nueva.params[5]).toBe('admin');
     expect(response.body.version).toBe(4);
     expect(response.body.total).toBe(2850);
     expect(response.body.items[0].margen_unitario).toBe(150);

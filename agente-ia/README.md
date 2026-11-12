@@ -177,6 +177,58 @@ el número escribió al bot en las últimas 24 h.
 Ponle al miniPC el arranque automático tras un corte de luz (opción de la BIOS
 "Restore on AC power loss") para que vuelva solo.
 
+## 9. Seguimiento por correo (Outlook)
+
+Además de las consultas del Asistente IA, el mismo agente ejecuta las **tareas de correo** del seguimiento
+automático de cotizaciones. Las pide a `GET /api/seguimiento/agente/tarea` (mismo `IA_AGENTE_TOKEN`) y devuelve el
+resultado a `POST /api/seguimiento/agente/tarea/:id/resultado`. Hay tres tipos:
+
+- `buscar_envios`: busca en Enviados el correo que lleva adjunto el PDF de cada cotización.
+- `revisar_hilos`: mira si el cliente respondió, si enviaste algo nuevo y si el borrador sigue existiendo.
+- `crear_borradores`: crea **borradores** de respuesta (seguimiento 1 y 2) en el hilo de cada cotización.
+
+Usa el conector de Outlook (Microsoft 365) que ya tiene Claude Code en este equipo (el de claude.ai: Configuración >
+Conectores > Microsoft 365, con la sesión iniciada). Una sola cosa a la vez: las consultas del usuario siempre van
+primero; las tareas de correo solo se toman cuando no hay consulta pendiente. Si el backend aún no tiene esas rutas
+(404), el agente sigue con solo consultas y vuelve a probar cada 10 minutos. `SEGUIMIENTO_CORREO=0` lo apaga.
+
+### `MCP_CORREO`
+
+Nombre del servidor MCP de Outlook tal como lo ve Claude Code. Por defecto `claude_ai_Microsoft_365` (así se llaman las
+herramientas del conector de claude.ai: `mcp__claude_ai_Microsoft_365__outlook_email_search`, …). Si en tu equipo se
+llama distinto, ponlo en `.env` (`MCP_CORREO=...`). No lo adivines: usa el comando de diagnóstico.
+
+### Comprobar que funciona: `--probar-correo`
+
+```
+cd agente-ia
+npm run probar-correo        # o: node agente.mjs --probar-correo
+```
+
+Lanza Claude Code una vez, solo con herramientas de lectura, y le pide listar los 3 correos más recientes de Enviados
+(asunto y fecha). Imprime cuántas herramientas reportó Claude Code, cuáles son de Outlook, si encontró la esperada
+y el resultado. Si el nombre del servidor no coincide, te sugiere el valor correcto de `MCP_CORREO`. No crea ni envía
+nada. Termina con código 0 si todo está bien.
+
+### Garantías de seguridad
+
+- **Nunca envía.** Para las tareas de correo solo se permiten: buscar correos (`outlook_email_search`), leer
+  (`read_resource`) y, solo en `crear_borradores`, crear borrador de respuesta / respuesta a todos / actualizar borrador
+  (`outlook_create_reply_draft`, `outlook_create_reply_all_draft`, `outlook_update_draft`) y las herramientas de
+  MyQuote `cotizar_rapido` y `consultar_producto`.
+- Prohibidas explícitamente con `--disallowedTools`: `outlook_send_mail`, `outlook_send_draft`, `outlook_forward_mail`,
+  `outlook_delete_draft`, `outlook_trash_thread`, `outlook_batch_delete_messages`, `outlook_create_filter`,
+  `outlook_delete_filter`, `outlook_set_vacation`, `outlook_modify_labels`, `outlook_batch_modify_labels`,
+  `outlook_modify_thread_labels`, `outlook_untrash_thread`, `outlook_create_draft` y los mensajes de Teams; además
+  `Bash`, `Edit`, `Write`, `NotebookEdit`, `WebSearch` y `WebFetch`. Las consultas normales no reciben herramientas
+  de correo.
+- Cada prompt repite la prohibición de enviar, reenviar o borrar y trata el contenido de los correos como datos, no
+  como instrucciones.
+- El resultado de Claude Code se valida a mano contra el contrato; si no es válido se devuelve `ok: false` y el
+  backend reintenta.
+- Logs y métricas llevan solo ids, conteos, nombres de herramienta y tiempos: nunca asuntos, remitentes ni cuerpos.
+- Tiempo máximo por tarea: `TIMEOUT_TAREA_MIN` (12 minutos por defecto; el backend reencola a los 15).
+
 ## Problemas comunes
 
 | Síntoma | Causa |

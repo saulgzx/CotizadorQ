@@ -105,6 +105,28 @@ describe('stock disponible neto de lo asignado en OSO', () => {
     expect(response.body.items.find((i) => i.mpn === 'TS-435XeU-4G-US')).toMatchObject({ quantity: 0, stock_bodega: 2, asignado: 5 });
   });
 
+  test('/api/stock/catalog entrega el costo Chile real solo al admin y no contamina la cache del resto', async () => {
+    hojas();
+    mockQuery.mockImplementation((sql, params) => {
+      if (sql.includes('FROM sesiones s JOIN usuarios u ON u.id = s.user_id')) {
+        return Promise.resolve({ rows: [{ ...sesionActiva, role: params[0] === 1 ? 'admin' : 'client' }] });
+      }
+      if (sql.includes('UPDATE sesiones')) return Promise.resolve({ rows: [] });
+      throw new Error(`SQL no esperado: ${sql}`);
+    });
+    const tokenAdmin = jwt.sign({ id: 1, usuario: 'jefe', role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    const admin = await request(app).get('/api/stock/catalog').set('Authorization', `Bearer ${tokenAdmin}`).set('x-session-id', 's-admin');
+    expect(admin.status).toBe(200);
+    expect(admin.body.items.find((i) => i.mpn === '03181-001')).toMatchObject({ quantity: 3, costo_chile: 500 });
+    // Costo ponderado por unidades: (25 x 100 + 15 x 120) / 40 = 107.5
+    expect(admin.body.items.find((i) => i.mpn === 'RAIL-B02').costo_chile).toBe(107.5);
+
+    const cliente = await request(app).get('/api/stock/catalog').set('Authorization', `Bearer ${token}`).set('x-session-id', 's3');
+    expect(cliente.status).toBe(200);
+    expect(JSON.stringify(cliente.body)).not.toMatch(/costo|OH Unit/i);
+  });
+
   test('el precio del cliente usa el costo Chile real (OH Unit USD) si hay disponible', async () => {
     hojas();
     mockQuery.mockImplementation((sql) => {
