@@ -32,6 +32,8 @@ const crearRutasAdmin = (servicio, { logger = console, ahora = () => Date.now() 
 
   r.get('/hoy', manejar(logger, 'seguimiento_hoy_error', async (req, res) => res.json(await servicio.hoy())));
 
+  r.get('/lista', manejar(logger, 'seguimiento_lista_error', async (req, res) => res.json(await servicio.lista())));
+
   r.get('/estado', manejar(logger, 'seguimiento_estado_error', async (req, res) => res.json(await servicio.estado())));
 
   r.get(

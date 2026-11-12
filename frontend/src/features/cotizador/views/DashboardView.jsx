@@ -128,7 +128,7 @@ export default function DashboardView() {
               placeholder='Buscar en todas las vistas…'
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              className='h-10 w-full rounded-[10px] border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900'
+              className='h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900'
             />
           </label>
         )}
