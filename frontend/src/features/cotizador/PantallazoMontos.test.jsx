@@ -3,7 +3,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PantallazoMontos from './PantallazoMontos';
 
 const png = (nombre = 'oc.png') => new File(['datos'], nombre, { type: 'image/png' });
-const zona = () => screen.getByRole('button', { name: /Cargar pantallazo/ });
+const pdf = (nombre = 'oc.pdf') => new File(['%PDF'], nombre, { type: 'application/pdf' });
+const conPeso = (file, mb) => {
+  Object.defineProperty(file, 'size', { value: mb * 1024 * 1024 });
+  return file;
+};
+const zona = () => screen.getByRole('button', { name: /Cargar .* para Monto/ });
 const input = () => screen.getByLabelText(/elegir archivo/);
 const subir = (file) => fireEvent.change(input(), { target: { files: [file] } });
 
@@ -24,14 +29,14 @@ describe('PantallazoMontos', () => {
 
   test('renderiza el estado vacío con la instrucción según el campo', () => {
     const { rerender } = render(<PantallazoMontos campo='intcomex' onLeer={vi.fn()} onListo={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Cargar pantallazo para Monto Intcomex' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cargar la OC del cliente para Monto Intcomex' })).toBeInTheDocument();
     expect(screen.getByText(/OC del cliente/)).toBeInTheDocument();
     expect(screen.getByText(/Ctrl\+V/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quitar' })).not.toBeInTheDocument();
 
     rerender(<PantallazoMontos campo='axis' onLeer={vi.fn()} onListo={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Cargar pantallazo para Monto Axis' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cargar los costos de Axis para Monto Axis' })).toBeInTheDocument();
     expect(screen.getByText(/planilla de costos de Axis/)).toBeInTheDocument();
   });
 
@@ -49,7 +54,7 @@ describe('PantallazoMontos', () => {
     expect(onLeer).toHaveBeenCalledWith(file);
     expect(screen.getByText('oc.png')).toBeInTheDocument();
     expect(screen.getByAltText('Miniatura del pantallazo')).toHaveAttribute('src', 'blob:miniatura');
-    expect(screen.getByRole('status')).toHaveTextContent(/Pantallazo leído/);
+    expect(screen.getByRole('status')).toHaveTextContent(/Revisa los montos/);
   });
 
   test('pegar una imagen desde el portapapeles la lee', async () => {
@@ -88,22 +93,57 @@ describe('PantallazoMontos', () => {
     const onLeer = vi.fn();
     render(<PantallazoMontos onLeer={onLeer} onListo={vi.fn()} />);
 
-    subir(new File(['%PDF'], 'oc.pdf', { type: 'application/pdf' }));
+    subir(new File(['hola'], 'notas.txt', { type: 'text/plain' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Solo se aceptan imágenes PNG, JPG o WEBP');
+    expect(screen.getByRole('alert')).toHaveTextContent('Solo se aceptan PDF o imágenes PNG, JPG o WEBP');
     expect(onLeer).not.toHaveBeenCalled();
   });
 
-  test('un archivo de más de 10 MB muestra el error con su tamaño', () => {
+  test('una imagen de más de 6 MB muestra el error con su tamaño', () => {
     const onLeer = vi.fn();
     render(<PantallazoMontos onLeer={onLeer} onListo={vi.fn()} />);
 
-    const grande = png('grande.png');
-    Object.defineProperty(grande, 'size', { value: 12.5 * 1024 * 1024 });
-    subir(grande);
+    subir(conPeso(png('grande.png'), 7.5));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('La imagen pesa 12.5 MB y el máximo es 10 MB');
+    expect(screen.getByRole('alert')).toHaveTextContent('La imagen pesa 7.5 MB y el máximo es 6.0 MB');
     expect(onLeer).not.toHaveBeenCalled();
+  });
+
+  test('un PDF se acepta y se lee', async () => {
+    const onLeer = vi.fn().mockResolvedValue({ asignaciones: {} });
+    const onListo = vi.fn();
+    render(<PantallazoMontos onLeer={onLeer} onListo={onListo} />);
+
+    const archivo = pdf();
+    subir(archivo);
+
+    await waitFor(() => expect(onLeer).toHaveBeenCalledWith(archivo));
+    expect(onListo).toHaveBeenCalledWith({ asignaciones: {} });
+  });
+
+  test('el PDF se muestra con su nombre y sin miniatura', async () => {
+    render(<PantallazoMontos onLeer={vi.fn().mockResolvedValue({})} onListo={vi.fn()} />);
+
+    subir(pdf('OC-4500123.pdf'));
+
+    expect(await screen.findByText('OC-4500123.pdf')).toBeInTheDocument();
+    expect(screen.queryByAltText(/Miniatura/)).not.toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  test('un PDF aguanta más peso que una imagen, pero no 13 MB', () => {
+    const onLeer = vi.fn();
+    const { unmount } = render(<PantallazoMontos onLeer={onLeer} onListo={vi.fn()} />);
+
+    subir(conPeso(pdf('ok.pdf'), 10));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(onLeer).toHaveBeenCalledTimes(1);
+    unmount();
+
+    render(<PantallazoMontos onLeer={onLeer} onListo={vi.fn()} />);
+    subir(conPeso(pdf('enorme.pdf'), 13));
+    expect(screen.getByRole('alert')).toHaveTextContent('El PDF pesa 13.0 MB y el máximo es 12.0 MB');
+    expect(onLeer).toHaveBeenCalledTimes(1);
   });
 
   test('mientras lee queda deshabilitado y no acepta otra imagen', async () => {
