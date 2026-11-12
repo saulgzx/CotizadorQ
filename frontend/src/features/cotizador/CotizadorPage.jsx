@@ -70,6 +70,7 @@ import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
+import { precioSistemaDe, useMargenSistema } from './precioSistema';
 import Resaltado from '../ui/Resaltado';
 import Icono from '../ui/Icono';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
@@ -325,6 +326,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const canViewDashboard = !isVentasUser && !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewCotizador = !isComprasOnlyUser;
   const canViewStock = !isComprasOnlyUser;
+  // Precio de sistema del stock (costo real / (1 - margen), sin rebate): solo admin.
+  const { config: margenSistema, cambiar: cambiarMargenSistema, restablecer: restablecerMargenSistema } = useMargenSistema();
   const canViewHistorial = !isComprasOnlyUser && !isCotizadorStockAdmin;
   const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
   // Asistente IA: solo personal interno (usa la sesion de IA y las skills de cada usuario).
@@ -3349,10 +3352,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       item.sku || '',
       item.mpn || '',
       formatStockQuantity(item.quantity) || '',
+      ...(isFullAdmin ? [precioSistemaDe(item, margenSistema) ?? ''] : []),
       item.origin || '',
       item.imageUrl || ''
     ]));
-    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Disponible', 'Origen', 'Imagen'];
+    const header = ['Marca', 'Descripción', 'SKU', 'MPN', 'Disponible', ...(isFullAdmin ? ['Precio sistema (USD)'] : []), 'Origen', 'Imagen'];
     const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
     const wb = XLSX.utils.book_new();
@@ -6118,29 +6122,53 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <div className="text-xs text-slate-500">
                   {filteredStockCatalog.length} productos con unidades · puedes buscar por varias palabras, por ejemplo «Axis 03181».
                 </div>
+                {isFullAdmin && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600">
+                    <span className="font-medium text-slate-700">Margen del precio de sistema</span>
+                    {['AXIS', 'QNAP'].map(marca => (
+                      <label key={marca} className="flex items-center gap-1.5">
+                        {marca === 'AXIS' ? 'Axis' : 'QNAP'}
+                        <NumeroInput
+                          value={margenSistema[marca]}
+                          onCommit={valor => { if (valor !== null && valor < 100) cambiarMargenSistema(marca, valor); }}
+                          decimales={1}
+                          min={0}
+                          ariaLabel={`Margen del precio de sistema ${marca === 'AXIS' ? 'Axis' : 'QNAP'} en porcentaje`}
+                          className="h-8 w-16 rounded-lg border border-slate-300 bg-white px-2 text-right text-sm tabular-nums text-slate-800"
+                        />
+                        %
+                      </label>
+                    ))}
+                    <button type="button" onClick={restablecerMargenSistema} className="text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline">
+                      Restablecer (13% / 15%)
+                    </button>
+                    <span className="text-slate-500">Costo real de bodega ÷ (1 − margen), sin rebate de partner.</span>
+                  </div>
+                )}
               </div>
               <div ref={stockExportRef} data-pdf-root="1" className="overflow-x-auto bg-white px-3 py-4 sm:px-6 sm:py-6">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase tracking-wide">
                     <tr>
-                      <th className="px-4 py-3 text-left">Producto</th>
-                      <th className="px-4 py-3 text-left">Marca</th>
-                      <th className="px-4 py-3 text-left">SKU</th>
-                      <th className="px-4 py-3 text-left">MPN</th>
-                      <th className="px-4 py-3 text-right">Disponible</th>
-                      {canViewCotizador && <th className="px-4 py-3 text-right"><span className="sr-only">Cotizar</span></th>}
+                      <th className="w-full px-3 py-3 text-left">Producto</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">Marca</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">SKU</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-left">MPN</th>
+                      <th className="whitespace-nowrap px-3 py-3 text-right">Disponible</th>
+                      {isFullAdmin && <th className="whitespace-nowrap px-3 py-3 text-right">Precio sistema</th>}
+                      {canViewCotizador && <th className="px-3 py-3 text-right"><span className="sr-only">Cotizar</span></th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {stockCatalogLoading && <FilasEsqueleto filas={6} columnas={canViewCotizador ? 6 : 5} />}
+                    {stockCatalogLoading && <FilasEsqueleto filas={6} columnas={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)} />}
                     {!stockCatalogLoading && stockCatalogError && (
                       <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
+                        <td colSpan={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)} className="px-4 py-6 text-center text-red-600">{stockCatalogError}</td>
                       </tr>
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.length === 0 && (
                       <tr>
-                        <td colSpan={canViewCotizador ? 6 : 5}>
+                        <td colSpan={(canViewCotizador ? 6 : 5) + (isFullAdmin ? 1 : 0)}>
                           <EstadoVacio
                             icono="search"
                             titulo={stockCatalogQuery.trim() ? 'Sin coincidencias en stock' : 'No hay stock disponible'}
@@ -6151,30 +6179,30 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     )}
                     {!stockCatalogLoading && !stockCatalogError && filteredStockCatalog.map((item, idx) => (
                       <tr key={`${item.mpn || item.sku || 'item'}-${idx}`} className={`${idx % 2 === 1 ? 'bg-slate-50/40' : ''} ${Number(item.quantity) > 0 ? '' : 'opacity-60'}`}>
-                        <td className="px-4 py-3">
+                        <td className="w-full min-w-[240px] max-w-0 px-3 py-3">
                           <div className="flex items-center gap-3">
                             {item.imageUrl ? (
                               <img
                                 src={item.imageUrl}
                                 alt={item.name || 'Producto'}
-                                className="w-14 h-14 object-contain bg-white border rounded"
+                                className="w-14 h-14 shrink-0 object-contain bg-white border rounded"
                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
                               />
                             ) : (
-                              <div className="w-14 h-14 bg-slate-100 border rounded" />
+                              <div className="w-14 h-14 shrink-0 bg-slate-100 border rounded" />
                             )}
                             <div className="min-w-0">
-                              <div className="font-medium text-slate-800 truncate">{item.name || 'Sin descripción'}</div>
+                              <div className="font-medium text-slate-800 truncate" title={item.name || undefined}>{item.name || 'Sin descripción'}</div>
                               {item.origin && (
                                 <div className="text-xs text-slate-500">{item.origin}</div>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3">{item.brand || 'N/A'}</td>
-                        <td className="px-4 py-3">{item.sku || 'N/A'}</td>
-                        <td className="px-4 py-3">{item.mpn || 'N/A'}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">
+                        <td className="whitespace-nowrap px-3 py-3">{item.brand || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3">{item.sku || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3">{item.mpn || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
                           <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:text-emerald-300 dark:ring-emerald-500/30">{formatStockQuantity(item.quantity) || '0'}</span>
                           {Number(item.asignado) > 0 && (
                             <div className="text-xs text-slate-500" title="Unidades en bodega ya asignadas a clientes (OSO)">
@@ -6182,8 +6210,18 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             </div>
                           )}
                         </td>
+                        {isFullAdmin && (
+                          <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
+                            {(() => {
+                              const precio = precioSistemaDe(item, margenSistema);
+                              return precio === null
+                                ? <span className="text-xs text-slate-500" title="La hoja de stock no trae costo para este equipo">Sin costo</span>
+                                : <span className="font-semibold text-slate-900">{formatCurrency(precio)}</span>;
+                            })()}
+                          </td>
+                        )}
                         {canViewCotizador && (
-                          <td className="px-4 py-3 text-right" data-html2canvas-ignore="true">
+                          <td className="whitespace-nowrap px-3 py-3 text-right" data-html2canvas-ignore="true">
                             {(() => {
                               const producto = productoDeStock(item);
                               if (!producto) return <span className="text-xs text-slate-500" title="No está en tu lista de precios">Sin precio</span>;

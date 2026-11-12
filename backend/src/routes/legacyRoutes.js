@@ -3272,13 +3272,16 @@ app.get('/api/stock', authenticateToken, async (req, res) => {
 // STOCK - Catalogo disponible (imagen, marca, descripcion, SKU, MPN, cantidad). Sin costos.
 app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
   try {
+    // El costo Chile real (para el precio de sistema) solo viaja al admin y nunca entra
+    // en la cache compartida: el resto de los usuarios recibe el catalogo sin costo.
+    const esAdmin = String(req.user?.role || '').toLowerCase() === 'admin';
     const cached = cacheGet(CACHE_KEY_STOCK_CATALOG);
-    if (cached) {
+    if (cached && !esAdmin) {
       res.set('X-Cache', 'HIT');
       return res.json(cached);
     }
     const agregado = await leerStockAgregado();
-    const items = agregado.map((item) => ({
+    const fila = (item) => ({
       imageUrl: item.imageUrl,
       brand: item.brand,
       name: item.name,
@@ -3288,11 +3291,16 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
       stock_bodega: item.stock_bodega,
       asignado: item.asignado,
       origin: item.origin
-    }));
-    const payload = { items };
-    cacheSet(CACHE_KEY_STOCK_CATALOG, payload, STOCK_CATALOG_CACHE_TTL_MS);
+    });
+    if (!cached) cacheSet(CACHE_KEY_STOCK_CATALOG, { items: agregado.map(fila) }, STOCK_CATALOG_CACHE_TTL_MS);
+    if (esAdmin) {
+      res.set('X-Cache', 'BYPASS');
+      return res.json({
+        items: agregado.map((item) => ({ ...fila(item), costo_chile: item.costo_chile > 0 ? item.costo_chile : null }))
+      });
+    }
     res.set('X-Cache', 'MISS');
-    res.json(payload);
+    res.json(cached || { items: agregado.map(fila) });
   } catch (error) {
     if (error?.status === 400) return res.status(400).json({ error: error.message });
     logger.error({ event: 'stock_catalog_read_failed', err: compactErrorForLog(error) }, 'Error leyendo stock catalogo');
