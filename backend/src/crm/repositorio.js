@@ -365,7 +365,7 @@ const moverContactos = async (db, origenEmpresaId, destinoEmpresaId) => {
 
 // ---------------------------------------------------------------- oportunidades
 
-const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual,
+const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, bo,
   to_char(fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, motivo_perdida, etapa_desde, cerrada_en,
   created_at, updated_at`;
 
@@ -402,16 +402,18 @@ const insertarOportunidad = async (db, datos) => {
     motivo_perdida = null,
     etapa_desde = null,
     cerrada_en = null,
-    created_at = null
+    created_at = null,
+    bo = null
   } = datos;
   const { rows } = await db.query(
     `INSERT INTO crm_oportunidades (
        empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, fecha_cierre_estimada,
-       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at)
+       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at, bo)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              COALESCE($10::timestamp, CURRENT_TIMESTAMP),
              CASE WHEN $13::boolean THEN CURRENT_TIMESTAMP ELSE $11::timestamp END,
-             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, $14)
+     ON CONFLICT (bo) WHERE bo IS NOT NULL DO NOTHING
      RETURNING ${COLUMNAS_OPORTUNIDAD}`,
     [
       empresa_id,
@@ -426,10 +428,69 @@ const insertarOportunidad = async (db, datos) => {
       etapa_desde === AHORA ? null : etapa_desde,
       cerrada_en === AHORA ? null : cerrada_en,
       created_at,
-      cerrada_en === AHORA
+      cerrada_en === AHORA,
+      bo
     ]
   );
+  // undefined = otra transaccion inserto el mismo BO entre medio: lo resuelve quien llama.
   return rows[0];
+};
+
+/** La oportunidad de un BO, o null. Clave de idempotencia de la sincronizacion. */
+const buscarOportunidadPorBo = async (db, bo) => {
+  const { rows } = await db.query(
+    `SELECT ${COLUMNAS_OPORTUNIDAD} FROM crm_oportunidades WHERE bo = $1`,
+    [bo]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Oportunidades abiertas (no cerradas ni archivadas) de una empresa que aun no tienen
+ * BO. Si hay exactamente una, la orden que llega es su cierre y se le engancha en vez
+ * de crear una oportunidad nueva y duplicar el negocio en el embudo.
+ */
+const oportunidadesAbiertasSinBo = async (db, empresaId) => {
+  const { rows } = await db.query(
+    `SELECT ${COLUMNAS_OPORTUNIDAD} FROM crm_oportunidades
+      WHERE empresa_id = $1 AND bo IS NULL AND archivada_en IS NULL
+        AND etapa IN ('nueva', 'cotizada', 'negociacion')
+      ORDER BY created_at ASC`,
+    [empresaId]
+  );
+  return rows;
+};
+
+/** Marca el BO en una oportunidad existente. No pisa un BO ya puesto. */
+const asignarBo = async (db, oportunidadId, bo) => {
+  const { rows } = await db.query(
+    `UPDATE crm_oportunidades SET bo = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND bo IS NULL
+      RETURNING ${COLUMNAS_OPORTUNIDAD}`,
+    [oportunidadId, bo]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Ordenes vigentes de la pestana OSO, ya persistidas en bo_meta por
+ * GET /api/oso/orders, con el monto que suman sus lineas en bo_line_meta.
+ * Se excluyen las borradas logicamente.
+ */
+const ordenesVigentes = async (db, { limite = 5000 } = {}) => {
+  const { rows } = await db.query(
+    `SELECT m.bo,
+            NULLIF(TRIM(COALESCE(m.customer_name, '')), '') AS cliente,
+            NULLIF(TRIM(COALESCE(m.customer_po, '')), '')   AS customer_po,
+            m.last_seen_at,
+            (SELECT COALESCE(SUM(l.monto_intcomex), 0) FROM bo_line_meta l WHERE l.bo = m.bo) AS monto
+       FROM bo_meta m
+      WHERE m.deleted IS NOT TRUE
+      ORDER BY m.bo
+      LIMIT $1`,
+    [limite]
+  );
+  return rows;
 };
 
 const obtenerOportunidad = async (db, id, { bloquear = false } = {}) => {
@@ -751,6 +812,10 @@ const restaurarCotizaciones = async (db, { ids }) => {
 };
 
 module.exports = {
+  buscarOportunidadPorBo,
+  oportunidadesAbiertasSinBo,
+  asignarBo,
+  ordenesVigentes,
   AHORA,
   patronIlike,
   conTransaccion,

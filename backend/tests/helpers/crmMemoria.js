@@ -22,7 +22,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
     contactos: [],
     oportunidades: [],
     cotizaciones: [],
-    items: []
+    items: [],
+    ordenes: []
   };
   const fallas = new Map(); // nombre de funcion -> error a lanzar
   const llamadas = [];
@@ -248,6 +249,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
     // oportunidades
     insertarOportunidad: async (db, datos) => {
       if (!empresaPorId(datos.empresa_id)) throw errorPg('23503', 'crm_oportunidades_empresa_id_fkey');
+      // Indice unico parcial sobre bo: ON CONFLICT DO NOTHING no devuelve fila.
+      if (datos.bo && estado.oportunidades.some((o) => o.bo === datos.bo)) return undefined;
       estado.seq.oportunidad += 1;
       const fila = {
         id: estado.seq.oportunidad,
@@ -258,6 +261,7 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
         marca: datos.marca ?? null,
         es_proyecto: datos.es_proyecto ?? false,
         monto_manual: datos.monto_manual ?? null,
+        bo: datos.bo ?? null,
         fecha_cierre_estimada: datos.fecha_cierre_estimada ?? null,
         motivo_perdida: datos.motivo_perdida ?? null,
         etapa_desde: valorFecha(datos.etapa_desde) || ahora(),
@@ -270,6 +274,28 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       return clonar(fila);
     },
     obtenerOportunidad: async (db, id) => clonar(oportunidadPorId(id)),
+    buscarOportunidadPorBo: async (db, bo) =>
+      clonar(estado.oportunidades.find((o) => o.bo === bo) || null),
+    oportunidadesAbiertasSinBo: async (db, empresaId) =>
+      clonar(
+        estado.oportunidades
+          .filter(
+            (o) =>
+              o.empresa_id === Number(empresaId) &&
+              !o.bo &&
+              !o.archivada_en &&
+              ETAPAS_ABIERTAS.includes(o.etapa)
+          )
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      ),
+    asignarBo: async (db, id, bo) => {
+      const fila = oportunidadPorId(id);
+      if (!fila || fila.bo) return null;
+      fila.bo = bo;
+      fila.updated_at = ahora();
+      return clonar(fila);
+    },
+    ordenesVigentes: async () => clonar(estado.ordenes),
     actualizarOportunidad: async (db, id, campos) => {
       const fila = oportunidadPorId(id);
       if (!fila) return null;
@@ -453,12 +479,20 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
     return clonar(fila);
   };
 
+  /** Siembra una orden vigente, como la devolveria repo.ordenesVigentes. */
+  const agregarOrden = ({ bo, cliente: nombreCliente = null, customer_po = null, monto = 0 } = {}) => {
+    const fila = { bo, cliente: nombreCliente, customer_po, monto, last_seen_at: ahora() };
+    estado.ordenes.push(fila);
+    return clonar(fila);
+  };
+
   return {
     repo,
     pool,
     cliente,
     llamadas,
     agregarCotizacion,
+    agregarOrden,
     fallarEn: (nombre, error = new Error(`fallo simulado en ${nombre}`)) => fallas.set(nombre, error),
     sinFallas: () => fallas.clear(),
     get estado() {

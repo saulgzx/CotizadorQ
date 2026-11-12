@@ -11,7 +11,8 @@ vi.mock('./crmApi', () => ({
     actualizarOportunidad: vi.fn(),
     listarEmpresas: vi.fn(),
     obtenerEmpresa: vi.fn(),
-    crearOportunidad: vi.fn()
+    crearOportunidad: vi.fn(),
+    sincronizarOrdenes: vi.fn()
   }
 }));
 
@@ -235,5 +236,22 @@ describe('EmbudoTab', () => {
     renderConQuery(<EmbudoTab onAbrirEmpresa={() => {}} />);
     expect(await screen.findByText('Aún no hay oportunidades')).toBeInTheDocument();
     expect(screen.getByText(/se crean solas al generar una cotización/i)).toBeInTheDocument();
+  });
+
+  test('«Traer órdenes» dispara la sincronización', async () => {
+    crmApi.sincronizarOrdenes.mockResolvedValue({
+      ordenes: 12,
+      creadas: 3,
+      enlazadas: 1,
+      ganadas: 0,
+      sinCambio: 8,
+      sinCliente: 0,
+      errores: 0
+    });
+    renderConQuery(<EmbudoTab onAbrirEmpresa={() => {}} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Traer órdenes' }));
+
+    await waitFor(() => expect(crmApi.sincronizarOrdenes).toHaveBeenCalledTimes(1));
   });
 });

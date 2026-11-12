@@ -74,6 +74,12 @@ const SENTENCIAS = [
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_etapa_idx ON crm_oportunidades(etapa)`,
   // Archivado: la oportunidad sale de listados, embudo, resumenes y seguimiento (se puede restaurar).
   `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS archivada_en TIMESTAMP`,
+  // BO de la orden (pestana OSO) que gano esta oportunidad. Nullable: las
+  // oportunidades que nacen de una cotizacion no tienen orden todavia. Unico
+  // parcial: un BO vive en una sola oportunidad, y eso hace idempotente la
+  // sincronizacion de ordenes.
+  `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS bo VARCHAR(100)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS crm_oportunidades_bo_idx ON crm_oportunidades(bo) WHERE bo IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_vigentes_idx ON crm_oportunidades(etapa) WHERE archivada_en IS NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES crm_empresas(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS contacto_id INTEGER REFERENCES crm_contactos(id) ON DELETE SET NULL`,
