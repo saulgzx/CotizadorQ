@@ -363,6 +363,36 @@ const crearServicioSeguimiento = ({
     return { activo: config.activo, ...datos, texto: resumenes.textoDiario(datos) };
   }
 
+  /**
+   * Todas las oportunidades en seguimiento automático, con su próximo paso.
+   * Solo devuelve lo que el panel muestra (sin ids de correo ni datos del hilo).
+   */
+  async function lista(t = new Date(ahora())) {
+    const segs = await crm.oportunidadesParaSeguimiento(db);
+    const items = segs.map((s) => {
+      const sp = motor.siguientePaso(s, t, cal);
+      return {
+        oportunidad_id: s.oportunidad_id,
+        cotizacion_id: s.cotizacion_id,
+        numero: s.numero || null,
+        titulo: s.titulo,
+        empresa_nombre: s.empresa_nombre || s.cliente_empresa || null,
+        contacto_nombre: s.contacto_nombre || s.cliente_nombre || null,
+        monto: s.monto,
+        etapa: s.etapa,
+        estado: s.estado,
+        paso: s.paso,
+        enviado_en: iso(s.enviado_en),
+        borrador_creado_en: iso(s.borrador_creado_en),
+        respuesta_en: iso(s.respuesta_en),
+        respuesta_resumen: s.respuesta_resumen || null,
+        siguiente: sp.accion ? { accion: sp.accion, en: iso(sp.en), vencida: !!sp.vencida } : null,
+        actualizado_en: iso(s.updated_at)
+      };
+    });
+    return { activo: config.activo, total: items.length, items };
+  }
+
   const valor = async (desde, hasta) => {
     const d = new Date(desde);
     const h = new Date(hasta);
@@ -459,6 +489,7 @@ const crearServicioSeguimiento = ({
     iniciar,
     detener,
     hoy,
+    lista,
     semana,
     valor,
     detalle,

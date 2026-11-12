@@ -3,8 +3,8 @@ import { fetchWithAuth } from '../../api';
 // Cliente del CRM (contrato /api/crm). Los errores traen `status` y `data`
 // (p. ej. un 409 de empresa duplicada trae data.empresa_id).
 
-const pedir = async (endpoint, { method = 'GET', body } = {}) => {
-  const response = await fetchWithAuth(`/api/crm${endpoint}`, {
+const pedir = async (endpoint, { method = 'GET', body, base = '/api/crm' } = {}) => {
+  const response = await fetchWithAuth(`${base}${endpoint}`, {
     method,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   });
@@ -48,4 +48,14 @@ export const crmApi = {
   actualizarOportunidad: (id, datos) => pedir(`/oportunidades/${id_(id)}`, { method: 'PATCH', body: datos }),
   vincularCotizacion: (id, cotizacionId) =>
     pedir(`/oportunidades/${id_(id)}/cotizaciones`, { method: 'POST', body: { cotizacion_id: cotizacionId } })
+};
+
+// Seguimiento automático de cotizaciones (contrato /api/seguimiento, solo admin).
+const seg = (endpoint, opciones) => pedir(endpoint, { ...opciones, base: '/api/seguimiento' });
+
+export const seguimientoApi = {
+  lista: () => seg('/lista'),
+  valor: () => seg('/valor'),
+  pausar: (oportunidadId) => seg(`/oportunidad/${id_(oportunidadId)}/pausar`, { method: 'POST' }),
+  reanudar: (oportunidadId) => seg(`/oportunidad/${id_(oportunidadId)}/reanudar`, { method: 'POST' })
 };

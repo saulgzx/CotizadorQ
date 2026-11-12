@@ -71,32 +71,32 @@ export default function EmpresasTab({ inputBusquedaRef, onAbrirEmpresa, onRevisa
         </label>
       </div>
 
-      <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-card dark:border-slate-700 dark:bg-slate-900'>
-        <table className='w-full text-sm'>
-          <thead className='border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400'>
+      <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'>
+        <table className='mq-tabla'>
+          <thead>
             <tr>
-              <th scope='col' className='px-3 py-2 font-semibold'>Empresa</th>
-              <th scope='col' className='px-3 py-2 font-semibold'>RUT</th>
-              <th scope='col' className='px-3 py-2 text-right font-semibold'>Contactos</th>
-              <th scope='col' className='px-3 py-2 text-right font-semibold'>Oport. abiertas</th>
-              <th scope='col' className='px-3 py-2 text-right font-semibold'>Monto abierto</th>
-              <th scope='col' className='px-3 py-2 font-semibold'>Última cotización</th>
+              <th scope='col'>Empresa</th>
+              <th scope='col'>RUT</th>
+              <th scope='col' className='text-right'>Contactos</th>
+              <th scope='col' className='text-right'>Oport. abiertas</th>
+              <th scope='col' className='text-right'>Monto abierto</th>
+              <th scope='col'>Última cotización</th>
             </tr>
           </thead>
-          <tbody className='divide-y divide-slate-100 dark:divide-slate-800'>
+          <tbody>
             {empresas.isLoading && <FilasEsqueleto filas={6} columnas={6} />}
             {items.map((emp) => (
-              <tr key={emp.id} className='hover:bg-slate-50 dark:hover:bg-slate-800/60'>
-                <td className='px-3 py-2'>
-                  <button type='button' onClick={() => onAbrirEmpresa(emp.id)} className='text-left font-medium text-blue-700 hover:underline dark:text-blue-300'>
+              <tr key={emp.id}>
+                <td>
+                  <button type='button' onClick={() => onAbrirEmpresa(emp.id)} className='mq-enlace text-left font-medium'>
                     <Resaltado texto={emp.nombre} busqueda={q} />
                   </button>
                 </td>
-                <td className='px-3 py-2 text-slate-600 dark:text-slate-300'>{emp.rut || '—'}</td>
-                <td className='px-3 py-2 text-right tabular-nums'>{emp.contactos}</td>
-                <td className='px-3 py-2 text-right tabular-nums'>{emp.oportunidades_abiertas}</td>
-                <td className='px-3 py-2 text-right tabular-nums'>{usd(emp.monto_abierto)}</td>
-                <td className='px-3 py-2 text-slate-600 dark:text-slate-300'>{fechaCL(emp.ultima_cotizacion_en)}</td>
+                <td className='text-slate-600'>{emp.rut || '—'}</td>
+                <td className='text-right tabular-nums'>{emp.contactos}</td>
+                <td className='text-right tabular-nums'>{emp.oportunidades_abiertas}</td>
+                <td className='text-right tabular-nums'>{usd(emp.monto_abierto)}</td>
+                <td className='text-slate-600'>{fechaCL(emp.ultima_cotizacion_en)}</td>
               </tr>
             ))}
           </tbody>

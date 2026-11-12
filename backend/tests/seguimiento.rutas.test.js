@@ -48,6 +48,32 @@ describe('rutas admin /api/seguimiento', () => {
     expect(res.body.texto).toMatch(/Sin pendientes/);
   });
 
+  test('GET /lista devuelve los seguimientos con su proximo paso y sin datos del correo', async () => {
+    expect((await request(app).get('/api/seguimiento/lista').set(auth(2))).status).toBe(403);
+    const vacia = await request(app).get('/api/seguimiento/lista').set(auth(1));
+    expect(vacia.status).toBe(200);
+    expect(vacia.body).toEqual({ activo: false, total: 0, items: [] });
+
+    mockQuery.mockImplementation((sql, params) => (/crm_seguimientos s/.test(sql)
+      ? Promise.resolve({
+        rows: [{
+          id: 9, oportunidad_id: 5, cotizacion_id: 7, estado: 'esperando', paso: 0, numero: 'COT-65424',
+          titulo: 'NAS para respaldo', empresa_nombre: 'Acme SpA', contacto_nombre: 'Ana', monto: '1200.50',
+          etapa: 'cotizada', enviado_en: new Date('2026-11-02T13:00:00Z'), updated_at: new Date('2026-11-02T13:00:00Z'),
+          conversation_id: 'conv-secreta', message_id: 'msg-secreto', contacto_email: 'ana@acme.cl'
+        }]
+      })
+      : dbOk(sql, params)));
+    const res = await request(app).get('/api/seguimiento/lista').set(auth(1));
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(1);
+    expect(res.body.items[0]).toMatchObject({
+      oportunidad_id: 5, numero: 'COT-65424', empresa_nombre: 'Acme SpA', monto: 1200.5, estado: 'esperando', paso: 0
+    });
+    expect(res.body.items[0].siguiente).toMatchObject({ accion: 'crear_borrador_1' });
+    expect(JSON.stringify(res.body)).not.toMatch(/secret|acme\.cl/);
+  });
+
   test('GET /valor valida fechas y responde la forma del contrato', async () => {
     expect((await request(app).get('/api/seguimiento/valor?desde=ayer').set(auth(1))).status).toBe(400);
     expect((await request(app).get('/api/seguimiento/valor?desde=2026-11-10&hasta=2026-11-01').set(auth(1))).status).toBe(400);

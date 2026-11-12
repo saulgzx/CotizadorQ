@@ -14,9 +14,9 @@ const LIMITE_CERRADAS = 25;
 
 function Total({ etiqueta, cantidad, monto, tono }) {
   return (
-    <div className='rounded-xl border border-slate-200 bg-white p-3 shadow-card dark:border-slate-700 dark:bg-slate-900'>
+    <div className='rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900'>
       <div className='mq-sobre'>{etiqueta}</div>
-      <div className={`mt-1 text-xl font-bold tabular-nums ${tono}`}>{usd(monto)}</div>
+      <div className={`mt-1.5 text-2xl font-semibold tracking-tight tabular-nums ${tono}`}>{usd(monto)}</div>
       <div className='text-sm text-slate-500 dark:text-slate-400'>{cantidad} {cantidad === 1 ? 'oportunidad' : 'oportunidades'}</div>
     </div>
   );
@@ -30,13 +30,13 @@ export function TarjetaOportunidad({ op, onMover, onAbrirEmpresa, arrastrable = 
         e.dataTransfer.setData('text/plain', String(op.id));
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className='animate-fade-in-up rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-card motion-reduce:animate-none dark:border-slate-700 dark:bg-slate-900'
+      className='mq-tarjeta animate-fade-in-up text-sm motion-reduce:animate-none'
       aria-label={`Oportunidad ${op.titulo}`}
     >
       <button
         type='button'
         onClick={() => onAbrirEmpresa?.(op.empresa_id)}
-        className='block max-w-full truncate text-left text-xs font-semibold text-blue-700 hover:underline dark:text-blue-300'
+        className='mq-enlace block max-w-full truncate text-left text-xs font-semibold !text-slate-500 hover:!text-slate-900'
       >
         {op.empresa_nombre}
       </button>
@@ -179,17 +179,13 @@ export default function EmbudoTab({ inputBusquedaRef, onAbrirEmpresa }) {
                 onDragOver={(ev) => { ev.preventDefault(); setSobre(et.clave); }}
                 onDragLeave={() => setSobre((s) => (s === et.clave ? null : s))}
                 onDrop={(ev) => onDrop(ev, et.clave)}
-                className={`min-w-[250px] flex-1 rounded-xl border p-2 transition-colors ${
-                  sobre === et.clave
-                    ? 'border-blue-400 bg-blue-50/60 dark:border-blue-400/60 dark:bg-blue-500/10'
-                    : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50'
-                }`}
+                className={`mq-columna ${sobre === et.clave ? 'mq-columna-sobre' : ''}`}
               >
                 <header className='mb-2 flex items-center justify-between gap-2 px-1'>
                   <h3 className='flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100'>
                     <span className={`h-2 w-2 rounded-full ${et.punto}`} aria-hidden='true' />
                     {et.nombre}
-                    <span className='rounded-full bg-slate-200 px-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100'>{col.length}</span>
+                    <span className='font-mono text-xs font-medium text-slate-500'>{col.length}</span>
                   </h3>
                   <span className='text-xs tabular-nums text-slate-500 dark:text-slate-400'>{usd(total)}</span>
                 </header>

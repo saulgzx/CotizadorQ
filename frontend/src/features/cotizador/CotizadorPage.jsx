@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
@@ -59,6 +59,7 @@ import {
 } from './cotizadorHelpers';
 import { CotizadorContext } from './cotizadorContext';
 import useTheme from '../theme/useTheme';
+import { BarraSuperior, Cortina, Indice, direccionDeVista } from '../ui/Navegacion';
 import ThemeToggle from '../theme/ThemeToggle';
 import { notify, Toaster } from '../ui/toast';
 import MargenChip from './MargenChip';
@@ -397,22 +398,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem('sidebarCollapsed') === '1';
-    } catch {
-      return false;
-    }
-  });
-  const toggleSidebar = () => setSidebarCollapsed(prev => {
-    const next = !prev;
-    try {
-      localStorage.setItem('sidebarCollapsed', next ? '1' : '0');
-    } catch {
-      // localStorage no disponible
-    }
-    return next;
-  });
+  const cerrarIndice = useCallback(() => setMobileMenuOpen(false), []);
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
@@ -5200,10 +5186,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     .map(([clave, titulo]) => ({ clave, titulo, items: navItems.filter(item => item.grupo === clave) }))
     .filter(g => g.items.length > 0);
   // Con un solo grupo (clientes) no se muestran encabezados.
-  const mostrarTitulosNav = gruposNav.length > 1;
   const vistaActual = navItems.find(item => item.key === currentView);
-  // El estado activo lo pinta el CSS a partir de aria-current='page'.
-  const claseNavItem = (_activo, colapsado) => `mq-nav${colapsado ? ' mq-nav-colapsado' : ''}`;
+  // Hacia qué lado entra la vista: depende de si se avanza o retrocede en el menú.
+  const direccionVista = direccionDeVista(navItems.map(item => item.key), currentView);
   const BOTTOM_NAV_PRIORITY = ['cotizador', 'dashboard', 'stock', 'historial', 'compras', 'ordenes', 'cuenta'];
   const bottomNavItems = BOTTOM_NAV_PRIORITY
     .map(key => navItems.find(item => item.key === key))
@@ -5212,7 +5197,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   return (
     <CotizadorContext.Provider value={cotizadorContextValue}>
-    <div className="min-h-screen app-bg lg:flex">
+    <div className="min-h-screen app-bg">
       {!isAdmin && (
         <a
           href="https://wa.me/56935134131"
@@ -5224,118 +5209,30 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           <span className="text-sm font-semibold">¿Necesitas Ayuda?</span>
         </a>
       )}
-      <aside
-        className={`hidden lg:flex flex-col sticky top-0 h-screen shrink-0 z-40 border-r border-slate-200 bg-[var(--mq-ground)] transition-[width] duration-300 ease-[cubic-bezier(0.2,0.7,0.2,1)] ${sidebarCollapsed ? 'w-[76px]' : 'w-60'}`}
-        aria-label="Barra lateral de navegación"
-      >
-        <div className={`flex items-center gap-3 h-16 ${sidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
-          {sidebarCollapsed ? (
-            <img src="/brand/myquote-app-icon-dark.svg" alt="MyQuote" className="w-10 h-10 shrink-0" />
-          ) : (
-            <div className="min-w-0 flex-1">
-              <img src="/brand/myquote-horizontal-web.svg" alt="MyQuote" className="h-7 w-auto dark:invert" />
-            </div>
-          )}
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 pb-3 space-y-5" aria-label="Secciones">
-          {gruposNav.map(grupo => (
-          <div key={grupo.clave} className="space-y-0.5">
-          {mostrarTitulosNav && (sidebarCollapsed
-            ? <div className="mx-2 mb-2 border-t border-slate-200" aria-hidden="true" />
-            : <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>)}
-          {grupo.items.map(item => (
-            <button
-              key={item.key}
-              onClick={() => setCurrentView(item.key)}
-              title={sidebarCollapsed ? item.label : undefined}
-              aria-current={currentView === item.key ? 'page' : undefined}
-              className={claseNavItem(currentView === item.key, sidebarCollapsed)}
-            >
-              <span className="relative shrink-0">
-                <NavIcon name={item.icon} className="w-[18px] h-[18px]" />
-                {sidebarCollapsed && item.badge ? (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-slate-900 text-white text-[9px] flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                ) : null}
-              </span>
-              {!sidebarCollapsed && <span className="flex-1 truncate">{item.label}</span>}
-              {!sidebarCollapsed && item.badge ? (
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                  {item.badge}
-                </span>
-              ) : null}
-            </button>
-          ))}
-          </div>
-          ))}
-        </nav>
-        <div className="p-3 border-t border-slate-200 space-y-1">
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title={sidebarCollapsed ? 'Buscar (Ctrl+K)' : undefined}
-            className={claseNavItem(false, sidebarCollapsed)}
-          >
-            <NavIcon name="search" className="w-[18px] h-[18px] shrink-0" />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 truncate">Buscar</span>
-                <kbd className="text-[10.5px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500">Ctrl K</kbd>
-              </>
-            )}
-          </button>
-          <div className={`flex items-center py-1 ${sidebarCollapsed ? 'justify-center' : 'justify-between px-3'}`}>
-            {!sidebarCollapsed && <span className="text-xs text-slate-500">Tema</span>}
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          </div>
-          <div className={`flex items-center gap-3 py-2 ${sidebarCollapsed ? 'justify-center' : 'px-3'}`}>
-            {/* El logo de la empresa del usuario (si tiene) vive aquí; arriba va la marca MyQuote. */}
-            {user?.logo_url ? (
-              <img src={user.logo_url} alt={user?.empresa || 'Empresa'} className="w-8 h-8 rounded-lg object-contain bg-white shadow-sm shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-lg border border-slate-300 text-slate-900 flex items-center justify-center text-xs font-semibold uppercase shrink-0">
-                {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                <div className="text-xs text-slate-500 truncate">{user?.empresa || ''}</div>
-              </div>
-            )}
-            {!sidebarCollapsed && (
-              <button
-                onClick={handleLogout}
-                aria-label="Cerrar sesión"
-                title="Cerrar sesión"
-                className="mq-btn-icono !h-8 !w-8 shrink-0 hover:!text-rose-600"
-              >
-                <NavIcon name="logout" className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          {sidebarCollapsed && (
-            <button
-              onClick={handleLogout}
-              aria-label="Cerrar sesión"
-              title="Cerrar sesión"
-              className="mq-btn-icono mx-auto hover:!text-rose-600"
-            >
-              <NavIcon name="logout" />
-            </button>
-          )}
-          <button
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
-            className="w-full flex items-center justify-center gap-2 h-8 rounded-lg text-slate-500 hover:text-slate-900 text-xs"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} aria-hidden="true">
-              <path d="m15 6-6 6 6 6" />
-            </svg>
-            {!sidebarCollapsed && 'Colapsar'}
-          </button>
-        </div>
-      </aside>
+      <BarraSuperior
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onIndice={() => setMobileMenuOpen(true)}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Indice
+        abierto={mobileMenuOpen}
+        grupos={gruposNav}
+        actual={currentView}
+        onIr={setCurrentView}
+        onCerrar={cerrarIndice}
+        onBuscar={() => setPaletteOpen(true)}
+        theme={theme}
+        onTema={toggleTheme}
+        user={user}
+        onSalir={handleLogout}
+      />
+      <Cortina vista={currentView} />
       <div className="flex-1 flex flex-col min-w-0">
         <header className="lg:hidden bg-[var(--mq-ground)] border-b border-slate-200 sticky top-0 z-40">
           <div className="px-4 h-14 flex items-center justify-between gap-3">
@@ -5356,65 +5253,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             </div>
           </div>
         </header>
-
-        {mobileMenuOpen && (
-          <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menú de navegación">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setMobileMenuOpen(false)} />
-            <div className="drawer-enter absolute top-0 right-0 h-full w-[300px] max-w-[85vw] bg-white dark:bg-slate-900 shadow-float flex flex-col">
-              <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-700 text-white flex items-center justify-center text-sm font-semibold uppercase shrink-0">
-                    {(user?.nombre || user?.usuario || '?').slice(0, 1)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">{user?.nombre || user?.usuario}</div>
-                    <div className="text-xs text-slate-500 truncate">{user?.empresa || 'MyQuote'}</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMobileMenuOpen(false)}
-                  aria-label="Cerrar menú"
-                  className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0"
-                >
-                  <NavIcon name="close" className="w-5 h-5" />
-                </button>
-              </div>
-              <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Secciones">
-                {gruposNav.map(grupo => (
-                <div key={grupo.clave} className="space-y-0.5">
-                {mostrarTitulosNav && <div className="mq-sobre px-3 pb-1.5">{grupo.titulo}</div>}
-                {grupo.items.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => { setCurrentView(item.key); setMobileMenuOpen(false); }}
-                    aria-current={currentView === item.key ? 'page' : undefined}
-                    className={`${claseNavItem(currentView === item.key, false)} h-11`}
-                  >
-                    <NavIcon name={item.icon} />
-                    <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge ? (
-                      <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold rounded-full tabular-nums ${item.badgeTone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-900 text-white'}`}>
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-                </div>
-                ))}
-              </nav>
-              <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                >
-                  <NavIcon name="logout" />
-                  Cerrar sesión
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <CommandPalette
           open={paletteOpen}
@@ -5494,7 +5332,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         {/* w-[92%] junto a w-full aplicaba dos anchos en conflicto sobre el mismo
             elemento y cual ganaba dependia del orden del CSS compilado. Se usa
             max-w, que expresa lo mismo sin competir con w-full. */}
-        <main className={`${isClient ? 'max-w-[92%]' : 'max-w-7xl'} mx-auto w-full px-3 sm:px-4 pt-4 sm:pt-6 pb-28 lg:pb-6`}>
+        <main
+          className={`mq-vista ${isClient ? 'max-w-[92%]' : 'max-w-[84rem]'} mx-auto w-full px-3 sm:px-6 pt-4 sm:pt-7 pb-28 lg:pb-10`}
+          style={direccionVista ? { '--mq-dx': `${direccionVista * 44}px`, '--mq-dy': '0px' } : undefined}
+        >
         {currentView === 'dashboard' && (
           <Suspense fallback={<div className="text-sm text-slate-500 p-4">Cargando…</div>}>
             <DashboardView />
@@ -8295,7 +8136,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
             <section className="glass-card rounded-2xl shadow-card border border-white/70">
               {/* Barra de herramientas: fija arriba al bajar por el carrito (escritorio). */}
-              <div className="lg:sticky lg:top-0 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
+              <div className="lg:sticky lg:top-14 z-20 rounded-t-2xl border-b border-slate-200/80 bg-white/95 backdrop-blur px-3 py-3 space-y-2 dark:bg-slate-900/95 dark:border-slate-700">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1 min-w-0">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">

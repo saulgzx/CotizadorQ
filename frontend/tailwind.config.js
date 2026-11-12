@@ -34,8 +34,8 @@ export default {
         '3xl': '10px',
       },
       fontFamily: {
-        sans: ["'Instrument Sans'", "'Segoe UI'", 'system-ui', 'sans-serif'],
-        mono: ["'JetBrains Mono'", 'ui-monospace', "'Cascadia Mono'", 'Consolas', 'monospace'],
+        sans: ["'Geist'", "'Segoe UI'", 'system-ui', 'sans-serif'],
+        mono: ["'Geist Mono'", 'ui-monospace', "'Cascadia Mono'", 'Consolas', 'monospace'],
       },
       keyframes: {
         'fade-in-up': {
