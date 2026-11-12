@@ -15,7 +15,7 @@ export default function ThemeToggle({ theme, onToggle }) {
       onClick={onToggle}
       aria-label="Cambiar tema"
       title={isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
-      className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 transition-colors duration-200"
+      className="mq-btn-icono relative"
     >
       <span className="relative block w-[18px] h-[18px]">
         {/* Sol: visible en tema claro */}
