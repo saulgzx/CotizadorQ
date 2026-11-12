@@ -170,12 +170,33 @@ export const productosAPI = {
 const leerJsonOError = async (response, porDefecto) => {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data?.error || data?.message || `${porDefecto} (${response.status})`);
+    // "Payload invalido" solo no dice nada: se agrega el detalle que manda el servidor.
+    const detalle = Array.isArray(data?.details) && data.details.length ? `: ${data.details.join('; ')}` : '';
+    const base = data?.error || data?.message;
+    const error = new Error(base ? `${base}${detalle}` : `${porDefecto} (${response.status})`);
     error.status = response.status;
     error.data = data;
     throw error;
   }
   return data;
+};
+
+export const LOTE_IDS_COTIZACIONES = 500;
+
+// Envia ids enteros, sin repetir, en lotes de 500 y suma { cotizaciones, oportunidades }.
+const enLotesDeIds = async (ids, endpoint, porDefecto) => {
+  const limpios = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const total = { cotizaciones: 0, oportunidades: 0 };
+  for (let i = 0; i < limpios.length; i += LOTE_IDS_COTIZACIONES) {
+    const response = await fetchWithAuth(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ ids: limpios.slice(i, i + LOTE_IDS_COTIZACIONES) }),
+    });
+    const parte = await leerJsonOError(response, porDefecto);
+    total.cotizaciones += Number(parte?.cotizaciones) || 0;
+    total.oportunidades += Number(parte?.oportunidades) || 0;
+  }
+  return total;
 };
 
 export const cotizacionesAPI = {
@@ -302,11 +323,13 @@ export const cotizacionesAPI = {
     return response.json();
   },
   // Archiva (no borra) por ids o todo lo anterior a una fecha (YYYY-MM-DD).
+  // Por ids se envia en lotes: el servidor acepta hasta 500 por llamada y "seleccionar
+  // todo" puede traer miles. Se suman los conteos de cada lote.
   archivar: async ({ ids, antesDe } = {}) => {
-    const body = Array.isArray(ids) ? { ids } : { antes_de: antesDe };
+    if (Array.isArray(ids)) return enLotesDeIds(ids, '/api/cotizaciones/archivar', 'Error archivando cotizaciones');
     const response = await fetchWithAuth('/api/cotizaciones/archivar', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ antes_de: antesDe }),
     });
     return leerJsonOError(response, 'Error archivando cotizaciones');
   },
@@ -316,13 +339,7 @@ export const cotizacionesAPI = {
     );
     return leerJsonOError(response, 'Error consultando qué se archivaría');
   },
-  restaurar: async (ids) => {
-    const response = await fetchWithAuth('/api/cotizaciones/restaurar', {
-      method: 'POST',
-      body: JSON.stringify({ ids }),
-    });
-    return leerJsonOError(response, 'Error restaurando cotizaciones');
-  },
+  restaurar: async (ids) => enLotesDeIds(ids, '/api/cotizaciones/restaurar', 'Error restaurando cotizaciones'),
   downloadPdf: async (payload, filenameBase = 'cotizacion') => {
     const response = await fetchWithAuth('/api/cotizaciones/pdf', {
       method: 'POST',
