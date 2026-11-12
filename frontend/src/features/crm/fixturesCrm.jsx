@@ -25,7 +25,7 @@ export const op = (extra) => ({
 });
 
 export const OPORTUNIDADES = [
-  op({ id: 1 }),
+  op({ id: 1, cotizacion_id: 77, cotizacion_numero: 101 }),
   op({ id: 2, titulo: 'Proyecto BID Norte', etapa: 'negociacion', empresa_id: 11, empresa_nombre: 'Entel', marca: 'QNAP', es_proyecto: true, monto: 8200, dias_en_etapa: 1 }),
   op({ id: 3, titulo: 'Cotización #090', etapa: 'ganada', monto: 300, marca: 'MIXTA' }),
   op({ id: 4, titulo: 'Cotización #080', etapa: 'perdida', monto: 120, motivo_perdida: 'Precio' })

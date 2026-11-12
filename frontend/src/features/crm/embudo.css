@@ -1,0 +1,323 @@
+/* Tablero del embudo del CRM: alto fijo, scroll interno por columna, tarjetas compactas.
+   Usa solo los tokens del sistema (src/index.css); el tema oscuro cambia los tokens solos. */
+
+.embudo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ---------- Franja de totales (una línea) ---------- */
+.embudo-franja {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 1.5rem;
+  min-height: 2.5rem;
+  padding: 0.4375rem 0.875rem;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-surface);
+}
+.embudo-cifra {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+.embudo-cifra .mq-punto { align-self: center; }
+.embudo-cifra + .embudo-cifra {
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--mq-line);
+}
+.embudo-cifra-monto {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--mq-ink);
+}
+.embudo-cifra-cantidad {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--mq-muted);
+}
+
+/* ---------- Filtros ---------- */
+.embudo-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.embudo-vacio {
+  border: 1px dashed var(--mq-line-strong);
+  border-radius: var(--mq-r-3);
+}
+
+/* ---------- Tablero ---------- */
+.embudo-tablero {
+  /* --embudo-alto lo fija EmbudoTab midiendo su posición; esto es el respaldo antes de medir. */
+  height: var(--embudo-alto, max(420px, calc(100vh - 22rem)));
+  min-height: 420px;
+  display: flex;
+  gap: 0.625rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.25rem;
+}
+
+.embudo-columna {
+  flex: 1 0 15rem;
+  min-width: 15rem;
+  max-width: 24rem;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-surface-2);
+  transition: border-color var(--mq-t-2) var(--mq-ease), background-color var(--mq-t-2) var(--mq-ease);
+}
+.embudo-columna-sobre {
+  border-color: var(--mq-ink);
+  border-style: dashed;
+  background: var(--mq-surface);
+}
+
+.embudo-cabecera {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-bottom: 1px solid var(--mq-line);
+}
+.embudo-etapa {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mq-ink);
+}
+.embudo-cantidad {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--mq-muted);
+}
+.embudo-total {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mq-muted);
+  white-space: nowrap;
+}
+
+.embudo-lista {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  /* Aire arriba para que el leve desplazamiento del hover no se recorte. */
+  padding: 0.5rem 0.5rem 0.625rem;
+  scrollbar-gutter: stable;
+}
+
+.embudo-columna-vacia {
+  padding: 1.5rem 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--mq-muted);
+}
+
+/* ---------- Tarjeta compacta (2 líneas) ---------- */
+.embudo-tarjeta {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.4375rem 1.625rem 0.4375rem 0.625rem;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-2);
+  background: var(--mq-surface);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  /* Columnas largas: el navegador se salta el pintado de las tarjetas fuera de vista. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
+  transition: border-color var(--mq-t-2) var(--mq-ease), translate var(--mq-t-2) var(--mq-ease);
+}
+.embudo-tarjeta[draggable='true'] { cursor: grab; }
+.embudo-tarjeta[draggable='true']:active { cursor: grabbing; }
+.embudo-tarjeta:hover,
+.embudo-tarjeta:focus-within {
+  border-color: var(--mq-ink);
+}
+.embudo-tarjeta:hover { translate: 0 -1px; }
+
+.embudo-linea {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.embudo-empresa {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: 600;
+  color: var(--mq-ink);
+  border-radius: var(--mq-r-1);
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0 1px;
+  transition: background-size var(--mq-t-3) var(--mq-ease);
+}
+.embudo-empresa:hover { background-size: 100% 1px; }
+
+.embudo-monto {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--mq-ink);
+  white-space: nowrap;
+}
+
+.embudo-linea-2 {
+  font-size: 0.75rem;
+  line-height: 1.125rem;
+  color: var(--mq-muted);
+}
+.embudo-titulo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mq-ink-2);
+}
+.embudo-meta {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+.embudo-dias { font-variant-numeric: tabular-nums; }
+.embudo-marca,
+.embudo-cot {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--mq-ink-2);
+}
+.embudo-bid { color: var(--mq-accent); }
+.embudo-cot {
+  border-radius: var(--mq-r-1);
+  letter-spacing: 0;
+}
+button.embudo-cot {
+  color: var(--mq-accent);
+  transition: color var(--mq-t-1) var(--mq-ease);
+}
+button.embudo-cot:hover { color: var(--mq-ink); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Tercera línea solo en perdidas con motivo; el texto completo va en el title de la tarjeta. */
+.embudo-motivo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  color: var(--mq-muted);
+}
+
+/* ---------- Control "mover" ----------
+   Un <select> nativo e invisible encima de un ícono: siempre está en el DOM y en el orden
+   de tabulación (conserva su aria-label); solo se revela al pasar el mouse o enfocar la tarjeta. */
+.embudo-mover {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: -0.625rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--mq-r-1);
+  color: var(--mq-muted);
+  opacity: 0;
+  transition: opacity var(--mq-t-2) var(--mq-ease), color var(--mq-t-1) var(--mq-ease), border-color var(--mq-t-1) var(--mq-ease), background-color var(--mq-t-1) var(--mq-ease);
+}
+.embudo-tarjeta:hover .embudo-mover,
+.embudo-tarjeta:focus-within .embudo-mover { opacity: 1; }
+.embudo-mover:hover {
+  color: var(--mq-ink);
+  border-color: var(--mq-line-strong);
+  background: var(--mq-surface-2);
+}
+.embudo-mover:focus-within {
+  opacity: 1;
+  color: var(--mq-ink);
+  outline: 2px solid var(--mq-accent);
+  outline-offset: 1px;
+}
+.embudo-mover select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 1rem; /* evita el zoom automático de iOS al enfocar */
+}
+.embudo-mover select:focus,
+.embudo-mover select:focus-visible { outline: none; box-shadow: none; }
+
+/* Sin mouse (pantallas táctiles) el control queda siempre visible. */
+@media (hover: none) {
+  .embudo-mover { opacity: 1; }
+}
+
+/* Foco visible de los botones de la tarjeta. */
+.embudo-empresa:focus-visible,
+button.embudo-cot:focus-visible {
+  outline: 2px solid var(--mq-accent);
+  outline-offset: 1px;
+}
+
+/* ---------- Pantallas angostas ---------- */
+@media (max-width: 639px) {
+  .embudo-franja { gap: 0.25rem 1rem; }
+  .embudo-cifra + .embudo-cifra { padding-left: 0; border-left: 0; }
+  .embudo-columna { flex-basis: 82vw; min-width: 15rem; }
+}
+
+/* ---------- Movimiento reducido ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .embudo-tarjeta,
+  .embudo-tarjeta:hover { transition: none; translate: none; }
+  .embudo-columna,
+  .embudo-mover,
+  .embudo-empresa,
+  button.embudo-cot { transition: none; }
+}
