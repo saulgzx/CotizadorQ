@@ -4631,6 +4631,19 @@ app.post(
   }
 );
 
+// --- Seguimiento automático de cotizaciones (todo en ../seguimiento) ----------
+// /api/seguimiento/agente/* usa el mismo token que /api/ia/agente/*; el resto es admin.
+const seguimiento = require('../seguimiento').montarSeguimiento({
+  app,
+  db: pool,
+  authAdmin: [authenticateToken, requireAdmin],
+  authAgente: [agenteLimiter, requireAgente],
+  whatsapp: iaWhatsApp,
+  leerStock: leerStockAgregado,
+  pdfNombre: ({ created_at, proyecto, empresa, numero }) => buildPdfFilename(created_at, proyecto, empresa, numero),
+  logger
+});
+
 // --- WhatsApp (webhook de Meta) -----------------------------------------------
 app.get('/api/whatsapp/webhook', (req, res) => {
   const challenge = iaWhatsApp.verificar(req.query);
@@ -4696,6 +4709,14 @@ const startServer = async (port = PORT, options = {}) => {
     await ensureCotizacionEdicion(pool);
     // CRM: esquema (rapido) y migracion de cotizaciones en segundo plano (no se espera).
     await crm.iniciarCrm(pool);
+    // Seguimiento: esquema idempotente y planificador en segundo plano (unref). Con
+    // SEGUIMIENTO_ACTIVO=false el planificador no crea tareas ni manda resúmenes.
+    try {
+      await seguimiento.inicializar();
+    } catch (error) {
+      logger.error({ event: 'seguimiento_esquema_error', msg: error?.message }, 'No se pudo preparar el esquema de seguimiento');
+    }
+    seguimiento.iniciar();
     try {
       const initialQnap = await syncProductosFromSheet({ origen: 'QNAP', trigger: 'boot' });
       const initialAxis = await syncProductosFromSheet({ origen: 'AXIS', trigger: 'boot' });
@@ -4720,7 +4741,8 @@ module.exports = {
   // Expuestos para pruebas.
   getSheetsClient,
   GEO_PROVIDERS,
-  resolveGeo
+  resolveGeo,
+  buildPdfFilename
 };
 
 
