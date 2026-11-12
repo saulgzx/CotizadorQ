@@ -20,7 +20,9 @@ const enlazarNueva = (cotizacionId, extra = {}) =>
   enlace.enlazarCotizacionNueva(mem.cliente, { cotizacionId, repo: mem.repo, log, ...extra });
 
 describe('enlace automatico de una cotizacion nueva', () => {
-  test('crea empresa, contacto y oportunidad "cotizada" con titulo y marca', async () => {
+  // Una cotizacion nueva (estado 'revision') crea su oportunidad en etapa 'nueva'
+  // (antes se caracterizaba como 'cotizada'; cambio por la tabla de equivalencias).
+  test('crea empresa, contacto y oportunidad "nueva" con titulo y marca', async () => {
     const cot = mem.agregarCotizacion({ cliente_empresa: 'SONDA S.A.', cliente_nombre: 'Ana Soto', cliente_email: 'Ana@Sonda.cl', cliente_telefono: '+56 9 1' });
     const v = await enlazarNueva(cot.id, { marca: 'AXIS' });
 
@@ -28,7 +30,7 @@ describe('enlace automatico de una cotizacion nueva', () => {
     expect(mem.estado.empresas[0]).toMatchObject({ nombre: 'SONDA S.A.', nombre_normalizado: 'sonda' });
     expect(mem.estado.contactos[0]).toMatchObject({ empresa_id: 1, nombre: 'Ana Soto', email: 'ana@sonda.cl', telefono: '+56 9 1' });
     expect(mem.estado.oportunidades[0]).toMatchObject({
-      empresa_id: 1, contacto_id: 1, etapa: 'cotizada', marca: 'AXIS', titulo: `Cotización #${cot.numero}`, cerrada_en: null
+      empresa_id: 1, contacto_id: 1, etapa: 'nueva', marca: 'AXIS', titulo: `Cotización #${cot.numero}`, cerrada_en: null
     });
     expect(mem.estado.cotizaciones[0]).toMatchObject({ empresa_id: 1, contacto_id: 1, oportunidad_id: 1 });
     expect(mem.cliente.query.mock.calls.map(([sql]) => sql)).toEqual(['BEGIN', 'COMMIT']);
@@ -92,6 +94,7 @@ describe('enlace automatico de una cotizacion nueva', () => {
     expect(v).toEqual({ empresa_id: empresa.id, contacto_id: 1, oportunidad_id: op.id, oportunidad_creada: false });
     expect(mem.estado.oportunidades).toHaveLength(1);
     expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'cotizada', marca: 'MIXTA', contacto_id: 1 });
+    expect(mem.estado.cotizaciones[0].estado).toBe('enviada'); // derivado de la etapa de la oportunidad
     expect(mem.estado.empresas.map((e) => e.nombre)).toEqual(['Sonda']); // "Otra Empresa" no se crea
     expect(mem.estado.contactos[0].empresa_id).toBe(empresa.id);
   });
@@ -134,38 +137,93 @@ describe('enlace automatico de una cotizacion nueva', () => {
   });
 });
 
-describe('cambio de estado de la cotizacion', () => {
-  const preparar = async (etapa = 'cotizada') => {
+describe('cambio de etapa desde la cotizacion (PATCH /api/cotizaciones/:id/estado)', () => {
+  // La etapa de la oportunidad manda; cotizaciones.estado se deriva de ella.
+  const conOportunidad = async (etapa = 'nueva', extra = {}) => {
     const empresa = await mem.repo.insertarEmpresa(null, { nombre: 'Sonda', nombre_normalizado: 'sonda' });
-    return mem.repo.insertarOportunidad(null, { empresa_id: empresa.id, titulo: 'X', etapa });
+    const op = await mem.repo.insertarOportunidad(null, { empresa_id: empresa.id, titulo: 'X', etapa, ...extra });
+    const a = mem.agregarCotizacion({ cliente_empresa: 'Sonda', estado: 'revision' });
+    const b = mem.agregarCotizacion({ cliente_empresa: 'Sonda', estado: 'revision' });
+    for (const c of [a, b]) await mem.repo.vincularCotizacion(null, c.id, { empresa_id: empresa.id, contacto_id: null, oportunidad_id: op.id });
+    return { op, a, b };
   };
-  const sincronizar = (oportunidadId, estado) => enlace.sincronizarEstadoCotizacion(null, { oportunidadId, estado, repo: mem.repo, log });
+  const cambiar = (cotizacionId, opciones) =>
+    enlace.cambiarEtapaDeCotizacion(mem.pool, { cotizacionId, repo: mem.repo, log, ...opciones });
 
-  test('aprobada => ganada con cerrada_en', async () => {
-    const op = await preparar();
-    expect(await sincronizar(op.id, 'aprobada')).toEqual({ id: op.id, etapa: 'ganada' });
-    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'ganada', motivo_perdida: null });
-    expect(mem.estado.oportunidades[0].cerrada_en).toBeInstanceOf(Date);
+  test('forma nueva: cambia la etapa con las reglas del CRM y deriva el estado de TODAS sus cotizaciones', async () => {
+    const { a, b } = await conOportunidad('nueva');
+    const res = await cambiar(a.id, { etapa: 'negociacion' });
+    expect(res).toMatchObject({ id: a.id, estado: 'enviada', etapa: 'negociacion', motivo_perdida: null });
+    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'negociacion', cerrada_en: null });
+    expect(mem.estado.cotizaciones.find((c) => c.id === b.id).estado).toBe('enviada');
   });
 
-  test('rechazada => perdida con motivo "Rechazada en el cotizador"', async () => {
-    const op = await preparar('negociacion');
-    await sincronizar(op.id, 'rechazada');
+  test('perdida con motivo: cierra; luego reabrir (perdida -> nueva) borra motivo y cerrada_en', async () => {
+    const { a } = await conOportunidad('cotizada');
+    const perdida = await cambiar(a.id, { etapa: 'perdida', motivoPerdida: 'Precio' });
+    expect(perdida).toMatchObject({ estado: 'rechazada', etapa: 'perdida', motivo_perdida: 'Precio' });
+    expect(mem.estado.oportunidades[0].cerrada_en).toBeInstanceOf(Date);
+
+    const reabierta = await cambiar(a.id, { etapa: 'nueva' });
+    expect(reabierta).toMatchObject({ estado: 'revision', etapa: 'nueva', motivo_perdida: null });
+    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'nueva', cerrada_en: null, motivo_perdida: null });
+  });
+
+  test('ganada -> cotizada tambien reabre', async () => {
+    const { a } = await conOportunidad('ganada', { cerrada_en: new Date('2026-01-01T00:00:00Z') });
+    const res = await cambiar(a.id, { etapa: 'cotizada' });
+    expect(res).toMatchObject({ estado: 'enviada', etapa: 'cotizada' });
+    expect(mem.estado.oportunidades[0].cerrada_en).toBeNull();
+  });
+
+  test('las reglas del CRM siguen valiendo: perdida sin ningun motivo => 400', async () => {
+    const { a } = await conOportunidad('cotizada');
+    await expect(cambiar(a.id, { etapa: 'perdida' })).rejects.toMatchObject({ status: 400 });
+    expect(mem.estado.oportunidades[0].etapa).toBe('cotizada'); // ROLLBACK
+  });
+
+  test('forma heredada: rechazada usa el motivo por defecto; si la etapa ya deriva ese estado no se toca', async () => {
+    const { a } = await conOportunidad('negociacion');
+    // 'enviada' con la oportunidad en negociacion: no retrocede a cotizada.
+    await cambiar(a.id, { etapa: 'cotizada', estadoHeredado: 'enviada', motivoPorDefecto: 'Rechazada en el cotizador' });
+    expect(mem.estado.oportunidades[0].etapa).toBe('negociacion');
+    expect(mem.estado.cotizaciones[0].estado).toBe('enviada');
+
+    await cambiar(a.id, { etapa: 'perdida', estadoHeredado: 'rechazada', motivoPorDefecto: 'Rechazada en el cotizador' });
     expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'perdida', motivo_perdida: 'Rechazada en el cotizador' });
   });
 
-  test('otros estados, sin oportunidad o con la oportunidad ya cerrada: no hace nada', async () => {
-    const op = await preparar('ganada');
-    expect(await sincronizar(op.id, 'enviada')).toBeNull();
-    expect(await sincronizar(null, 'aprobada')).toBeNull();
-    expect(await sincronizar(op.id, 'rechazada')).toBeNull();
-    expect(mem.estado.oportunidades[0].etapa).toBe('ganada');
+  test('forma heredada sobre una perdida con motivo propio: no lo pisa', async () => {
+    const { a } = await conOportunidad('perdida', { motivo_perdida: 'Plazo' });
+    await cambiar(a.id, { etapa: 'perdida', estadoHeredado: 'rechazada', motivoPorDefecto: 'Rechazada en el cotizador' });
+    expect(mem.estado.oportunidades[0].motivo_perdida).toBe('Plazo');
   });
 
-  test('si la BD falla, registra y devuelve null (best-effort)', async () => {
-    const op = await preparar();
-    mem.fallarEn('cerrarOportunidadAbierta');
-    await expect(sincronizar(op.id, 'aprobada')).resolves.toBeNull();
+  test('sin oportunidad: la enlaza (crea la oportunidad) y luego aplica la etapa pedida', async () => {
+    const cot = mem.agregarCotizacion({ cliente_empresa: 'Globex', cliente_nombre: 'Eva', estado: 'revision' });
+    const res = await cambiar(cot.id, { etapa: 'negociacion' });
+    expect(res).toMatchObject({ oportunidad_id: 1, etapa: 'negociacion', estado: 'enviada' });
+    expect(mem.estado.oportunidades).toHaveLength(1);
+  });
+
+  test('sin oportunidad y sin datos para enlazar: guarda solo el estado derivado', async () => {
+    const cot = mem.agregarCotizacion({ cliente_empresa: '-', cliente_nombre: '', estado: 'revision' });
+    const res = await cambiar(cot.id, { etapa: 'ganada' });
+    expect(res).toMatchObject({ oportunidad_id: null, estado: 'aprobada', etapa: 'ganada', motivo_perdida: null });
+    expect(mem.estado.oportunidades).toHaveLength(0);
+  });
+
+  test('cotizacion inexistente: null', async () => {
+    expect(await cambiar(999, { etapa: 'nueva' })).toBeNull();
+  });
+
+  test('aplicarEtapaOportunidad dentro de una transaccion ajena: oportunidad inexistente => null', async () => {
+    expect(await enlace.aplicarEtapaOportunidad(null, { oportunidadId: 42, etapa: 'ganada', repo: mem.repo })).toBeNull();
+  });
+
+  test('derivarEstadoSinFallar: si la BD falla, registra y devuelve null', async () => {
+    mem.fallarEn('derivarEstadoCotizaciones');
+    await expect(enlace.derivarEstadoSinFallar(null, 1, { repo: mem.repo, log })).resolves.toBeNull();
     expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ event: 'crm_estado_error' }), expect.any(String));
   });
 });
@@ -193,10 +251,10 @@ describe('migracion inicial', () => {
     expect(ops.map((o) => [o.etapa, o.marca, o.motivo_perdida])).toEqual([
       ['ganada', 'AXIS', null],
       ['perdida', 'QNAP', 'Rechazada (migrado)'],
-      ['cotizada', 'MIXTA', null],
-      ['cotizada', null, null],
-      ['cotizada', null, null],
-      ['cotizada', null, null]
+      ['cotizada', 'MIXTA', null], // enviada
+      ['nueva', null, null], // pendiente
+      ['nueva', null, null], // revision
+      ['nueva', null, null] // revision
     ]);
     expect(ops[0].etapa_desde).toEqual(new Date('2026-01-05T10:00:00Z'));
     expect(ops[0].cerrada_en).toEqual(new Date('2026-01-05T10:00:00Z'));

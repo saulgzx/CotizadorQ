@@ -72,6 +72,9 @@ const SENTENCIAS = [
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_empresa_idx ON crm_oportunidades(empresa_id)`,
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_contacto_idx ON crm_oportunidades(contacto_id)`,
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_etapa_idx ON crm_oportunidades(etapa)`,
+  // Archivado: la oportunidad sale de listados, embudo, resumenes y seguimiento (se puede restaurar).
+  `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS archivada_en TIMESTAMP`,
+  `CREATE INDEX IF NOT EXISTS crm_oportunidades_vigentes_idx ON crm_oportunidades(etapa) WHERE archivada_en IS NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES crm_empresas(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS contacto_id INTEGER REFERENCES crm_contactos(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS oportunidad_id INTEGER REFERENCES crm_oportunidades(id) ON DELETE SET NULL`,

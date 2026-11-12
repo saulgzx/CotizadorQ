@@ -12,12 +12,23 @@ import useAtajosCrm from './useAtajosCrm';
 const TABS = [
   { clave: 'resumen', nombre: 'Resumen' },
   { clave: 'embudo', nombre: 'Embudo' },
+  { clave: 'cotizaciones', nombre: 'Cotizaciones' },
   { clave: 'empresas', nombre: 'Empresas' },
   { clave: 'seguimiento', nombre: 'Seguimiento automático' }
 ];
 
-export default function CrmView({ onAbrirCotizacion }) {
-  const [tab, setTab] = useState('resumen');
+/**
+ * CRM. La pestaña activa puede controlarse desde fuera con `tab` / `onTab`
+ * (sin ellas usa estado propio). `cotizaciones` es el contenido de la pestaña
+ * Cotizaciones: un nodo o una función ({ abrirEmpresa }) => nodo.
+ */
+export default function CrmView({ onAbrirCotizacion, tab: tabControlada, onTab, cotizaciones = null }) {
+  const [tabInterna, setTabInterna] = useState('resumen');
+  const tab = tabControlada ?? tabInterna;
+  const setTab = (clave) => {
+    setTabInterna(clave);
+    onTab?.(clave);
+  };
   const [empresaId, setEmpresaId] = useState(null);
   const [fusion, setFusion] = useState(false);
   const [dialogo, setDialogo] = useState(null);
@@ -51,7 +62,7 @@ export default function CrmView({ onAbrirCotizacion }) {
 
   return (
     <div className='space-y-4 view-enter'>
-      <EncabezadoPagina seccion='Ventas' titulo='CRM' subtitulo='Empresas, contactos y oportunidades de tus cotizaciones.'>
+      <EncabezadoPagina seccion='Ventas' titulo='CRM' subtitulo='Empresas, contactos, oportunidades y cotizaciones.'>
         <button type='button' className='mq-btn mq-btn-sm mq-btn-secundario' onClick={() => setDialogo('empresa')}>Nueva empresa</button>
         <button type='button' className='mq-btn mq-btn-sm mq-btn-primario' onClick={() => setDialogo('oportunidad')}>Nueva oportunidad</button>
       </EncabezadoPagina>
@@ -76,7 +87,10 @@ export default function CrmView({ onAbrirCotizacion }) {
       <div id='crm-panel' role='tabpanel' aria-labelledby={`crm-tab-${tab}`} key={tab} className='mq-panel-entra'>
         {tab === 'resumen' && <ResumenTab onAbrirEmpresa={abrirEmpresa} onIrA={cambiarTab} />}
         {tab === 'seguimiento' && <SeguimientoTab onAbrirCotizacion={onAbrirCotizacion} />}
-        {tab === 'embudo' && <EmbudoTab inputBusquedaRef={busquedaRef} onAbrirEmpresa={abrirEmpresa} />}
+        {tab === 'embudo' && (
+          <EmbudoTab inputBusquedaRef={busquedaRef} onAbrirEmpresa={abrirEmpresa} onAbrirCotizacion={onAbrirCotizacion} />
+        )}
+        {tab === 'cotizaciones' && (typeof cotizaciones === 'function' ? cotizaciones({ abrirEmpresa }) : cotizaciones)}
         {tab === 'empresas' && empresaId && (
           <FichaEmpresa
             empresaId={empresaId}

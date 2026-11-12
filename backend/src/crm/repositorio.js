@@ -4,7 +4,11 @@
  * van como parametros ($n); lo unico que se arma con texto son nombres de columna
  * de listas fijas definidas aca.
  */
-const { ETAPAS_ABIERTAS } = require('./normalizar');
+const {
+  ETAPAS_ABIERTAS,
+  estadoDesdeEtapaSql,
+  etapaDesdeEstadoSql
+} = require('./normalizar');
 
 const ABIERTAS_SQL = `('${ETAPAS_ABIERTAS.join("','")}')`;
 
@@ -187,10 +191,13 @@ const moverAlias = async (db, origenId, destinoId) => {
   );
 };
 
-/** Montos de oportunidad: monto_manual, o total de la cotizacion vinculada mas reciente, o 0. */
+/**
+ * Montos de oportunidad: monto_manual, o total de la cotizacion vinculada mas reciente
+ * (prefiriendo las no archivadas), o 0.
+ */
 const MONTO_OPORTUNIDAD_SQL = `COALESCE(o.monto_manual, (
   SELECT c.total FROM cotizaciones c WHERE c.oportunidad_id = o.id
-   ORDER BY c.created_at DESC NULLS LAST, c.id DESC LIMIT 1
+   ORDER BY (c.archivada_en IS NULL) DESC, c.created_at DESC NULLS LAST, c.id DESC LIMIT 1
 ), 0)`;
 
 const listarEmpresas = async (
@@ -236,7 +243,7 @@ const listarEmpresas = async (
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS abiertas, SUM(${MONTO_OPORTUNIDAD_SQL}) AS monto
            FROM crm_oportunidades o
-          WHERE o.empresa_id = e.id AND o.etapa IN ${ABIERTAS_SQL}
+          WHERE o.empresa_id = e.id AND o.etapa IN ${ABIERTAS_SQL} AND o.archivada_en IS NULL
        ) op ON true
        ${where}
       ORDER BY ultima_cotizacion_en DESC NULLS LAST, e.nombre ASC, e.id ASC
@@ -368,11 +375,17 @@ const SELECT_RESUMEN = `
          ${MONTO_OPORTUNIDAD_SQL} AS monto,
          to_char(o.fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, o.motivo_perdida,
          (SELECT COUNT(*)::int FROM cotizaciones c WHERE c.oportunidad_id = o.id) AS cotizaciones,
+         cv.id AS cotizacion_id, cv.numero AS cotizacion_numero,
          GREATEST(0, (CURRENT_TIMESTAMP::date - o.etapa_desde::date))::int AS dias_en_etapa,
-         o.cerrada_en, o.created_at, o.updated_at
+         o.cerrada_en, o.archivada_en, o.created_at, o.updated_at
     FROM crm_oportunidades o
     JOIN crm_empresas e ON e.id = o.empresa_id
-    LEFT JOIN crm_contactos ct ON ct.id = o.contacto_id`;
+    LEFT JOIN crm_contactos ct ON ct.id = o.contacto_id
+    LEFT JOIN LATERAL (
+      SELECT c.id, c.numero FROM cotizaciones c
+       WHERE c.oportunidad_id = o.id AND c.archivada_en IS NULL
+       ORDER BY c.created_at DESC NULLS LAST, c.id DESC LIMIT 1
+    ) cv ON true`;
 
 const aResumen = (row) => ({ ...row, monto: numero(row.monto) });
 
@@ -447,7 +460,8 @@ const listarOportunidades = async (
   { etapa, empresa_id, q, abiertas, limite = 500, offset = 0 } = {}
 ) => {
   const params = [];
-  const condiciones = [];
+  // Las archivadas no se listan (tampoco en la ficha de la empresa).
+  const condiciones = ['o.archivada_en IS NULL'];
   if (etapa) {
     params.push(etapa);
     condiciones.push(`o.etapa = $${params.length}`);
@@ -465,7 +479,7 @@ const listarOportunidades = async (
     );
   }
   params.push(limite, offset);
-  const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+  const where = `WHERE ${condiciones.join(' AND ')}`;
   const { rows } = await db.query(
     `${SELECT_RESUMEN} ${where}
       ORDER BY o.updated_at DESC, o.id DESC
@@ -475,11 +489,12 @@ const listarOportunidades = async (
   return rows.map(aResumen);
 };
 
-/** Totales por etapa y del mes en curso (en una consulta). */
+/** Totales por etapa y del mes en curso (en una consulta). Sin las archivadas. */
 const totalesEmbudo = async (db) => {
   const { rows } = await db.query(
     `WITH ops AS (
        SELECT o.etapa, o.cerrada_en, ${MONTO_OPORTUNIDAD_SQL} AS monto FROM crm_oportunidades o
+        WHERE o.archivada_en IS NULL
      ),
      mes AS (SELECT date_trunc('month', CURRENT_TIMESTAMP)::timestamp AS desde)
      SELECT 'etapa' AS tipo, etapa AS clave, COUNT(*)::int AS cantidad, COALESCE(SUM(monto), 0) AS monto
@@ -501,22 +516,20 @@ const moverOportunidades = async (db, origenEmpresaId, destinoEmpresaId) => {
   return res.rowCount || 0;
 };
 
-/** Cierra (ganada/perdida) la oportunidad si sigue abierta. Devuelve la fila o null. */
-const cerrarOportunidadAbierta = async (
-  db,
-  id,
-  etapa,
-  motivoPerdida = null
-) => {
-  const { rows } = await db.query(
-    `UPDATE crm_oportunidades
-        SET etapa = $2, motivo_perdida = $3, etapa_desde = CURRENT_TIMESTAMP,
-            cerrada_en = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND etapa IN ${ABIERTAS_SQL}
-      RETURNING id, etapa`,
-    [id, etapa, motivoPerdida]
+/**
+ * Deriva cotizaciones.estado de la etapa ACTUAL de la oportunidad, en todas sus
+ * cotizaciones. Se llama siempre que cambia la etapa. Devuelve cuantas cambiaron.
+ */
+const derivarEstadoCotizaciones = async (db, oportunidadId) => {
+  const res = await db.query(
+    `UPDATE cotizaciones c
+        SET estado = ${estadoDesdeEtapaSql('o.etapa')}
+       FROM crm_oportunidades o
+      WHERE o.id = $1 AND c.oportunidad_id = o.id
+        AND c.estado IS DISTINCT FROM ${estadoDesdeEtapaSql('o.etapa')}`,
+    [oportunidadId]
   );
-  return rows[0] || null;
+  return res?.rowCount || 0;
 };
 
 // ---------------------------------------------------------------- cotizaciones
@@ -586,10 +599,33 @@ const moverCotizaciones = async (db, origenEmpresaId, destinoEmpresaId) => {
   return res.rowCount || 0;
 };
 
+/** Cotizacion con su etapa (la de su oportunidad o, sin oportunidad, la derivada del estado). */
+const obtenerCotizacionConEtapa = async (db, id) => {
+  const { rows } = await db.query(
+    `SELECT c.*, COALESCE(o.etapa, ${etapaDesdeEstadoSql('c.estado')}) AS etapa,
+            o.motivo_perdida
+       FROM cotizaciones c
+       LEFT JOIN crm_oportunidades o ON o.id = c.oportunidad_id
+      WHERE c.id = $1`,
+    [id]
+  );
+  return rows[0] || null;
+};
+
+/** Guarda solo el estado (cotizacion sin oportunidad). */
+const guardarEstadoCotizacion = async (db, id, estado) => {
+  const res = await db.query(
+    'UPDATE cotizaciones SET estado = $2 WHERE id = $1',
+    [id, estado]
+  );
+  return res?.rowCount || 0;
+};
+
+/** Cotizaciones no archivadas de la empresa (la ficha). */
 const listarCotizacionesDeEmpresa = async (db, empresaId, limite = 500) => {
   const { rows } = await db.query(
     `SELECT id, numero, total, estado, created_at, contacto_id, oportunidad_id
-       FROM cotizaciones WHERE empresa_id = $1
+       FROM cotizaciones WHERE empresa_id = $1 AND archivada_en IS NULL
       ORDER BY created_at DESC NULLS LAST, id DESC
       LIMIT $2`,
     [empresaId, limite]
@@ -600,13 +636,118 @@ const listarCotizacionesDeEmpresa = async (db, empresaId, limite = 500) => {
 const resumenCotizacionesEmpresa = async (db, empresaId) => {
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS cotizaciones, COALESCE(SUM(total), 0) AS monto_cotizado
-       FROM cotizaciones WHERE empresa_id = $1`,
+       FROM cotizaciones WHERE empresa_id = $1 AND archivada_en IS NULL`,
     [empresaId]
   );
   return {
     cotizaciones: rows[0]?.cotizaciones || 0,
     monto_cotizado: numero(rows[0]?.monto_cotizado)
   };
+};
+
+/** Cuantas oportunidades y cotizaciones archivadas tiene la empresa (no salen en la ficha). */
+const contarArchivadasDeEmpresa = async (db, empresaId) => {
+  const { rows } = await db.query(
+    `SELECT (SELECT COUNT(*)::int FROM crm_oportunidades
+              WHERE empresa_id = $1 AND archivada_en IS NOT NULL) AS oportunidades,
+            (SELECT COUNT(*)::int FROM cotizaciones
+              WHERE empresa_id = $1 AND archivada_en IS NOT NULL) AS cotizaciones`,
+    [empresaId]
+  );
+  return {
+    oportunidades: rows[0]?.oportunidades || 0,
+    cotizaciones: rows[0]?.cotizaciones || 0
+  };
+};
+
+// ---------------------------------------------------------------- archivado
+
+const SIN_COTIZACIONES_SQL =
+  'NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = o.id)';
+const TODAS_ARCHIVADAS_SQL = `EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = o.id)
+  AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = o.id AND c.archivada_en IS NULL)`;
+
+/**
+ * Archiva cotizaciones (por ids, o todas las no archivadas creadas antes de `antesDe`
+ * 'YYYY-MM-DD') y luego las oportunidades que quedaron sin ninguna cotizacion vigente
+ * (con `antesDe`, tambien las oportunidades sin cotizaciones creadas antes de esa fecha).
+ * Va dentro de la transaccion del llamador. Devuelve { cotizaciones, oportunidades }.
+ */
+const archivarCotizaciones = async (db, { ids = null, antesDe = null }) => {
+  if (ids) {
+    const cot = await db.query(
+      `UPDATE cotizaciones SET archivada_en = CURRENT_TIMESTAMP
+        WHERE id = ANY($1::int[]) AND archivada_en IS NULL
+        RETURNING id, oportunidad_id`,
+      [ids]
+    );
+    const oportunidadIds = [
+      ...new Set(cot.rows.map((r) => r.oportunidad_id).filter(Boolean))
+    ];
+    const ops = oportunidadIds.length
+      ? await db.query(
+          `UPDATE crm_oportunidades o SET archivada_en = CURRENT_TIMESTAMP
+            WHERE o.id = ANY($1::int[]) AND o.archivada_en IS NULL
+              AND ${TODAS_ARCHIVADAS_SQL}
+            RETURNING o.id`,
+          [oportunidadIds]
+        )
+      : { rows: [] };
+    return { cotizaciones: cot.rows.length, oportunidades: ops.rows.length };
+  }
+  const cot = await db.query(
+    `UPDATE cotizaciones SET archivada_en = CURRENT_TIMESTAMP
+      WHERE archivada_en IS NULL AND created_at < $1::date
+      RETURNING id`,
+    [antesDe]
+  );
+  const ops = await db.query(
+    `UPDATE crm_oportunidades o SET archivada_en = CURRENT_TIMESTAMP
+      WHERE o.archivada_en IS NULL
+        AND ((${TODAS_ARCHIVADAS_SQL})
+             OR (${SIN_COTIZACIONES_SQL} AND o.created_at < $1::date))
+      RETURNING o.id`,
+    [antesDe]
+  );
+  return { cotizaciones: cot.rows.length, oportunidades: ops.rows.length };
+};
+
+/** Lo que archivaria archivarCotizaciones({ antesDe }), sin modificar nada. */
+const previaArchivado = async (db, { antesDe }) => {
+  const { rows } = await db.query(
+    `SELECT (SELECT COUNT(*)::int FROM cotizaciones
+              WHERE archivada_en IS NULL AND created_at < $1::date) AS cotizaciones,
+            (SELECT COUNT(*)::int FROM crm_oportunidades o
+              WHERE o.archivada_en IS NULL
+                AND ((EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = o.id)
+                      AND NOT EXISTS (SELECT 1 FROM cotizaciones c
+                                       WHERE c.oportunidad_id = o.id AND c.archivada_en IS NULL
+                                         AND (c.created_at IS NULL OR c.created_at >= $1::date)))
+                     OR (${SIN_COTIZACIONES_SQL} AND o.created_at < $1::date))) AS oportunidades`,
+    [antesDe]
+  );
+  return {
+    cotizaciones: rows[0]?.cotizaciones || 0,
+    oportunidades: rows[0]?.oportunidades || 0
+  };
+};
+
+/** Quita archivada_en a esas cotizaciones y a sus oportunidades. { cotizaciones, oportunidades }. */
+const restaurarCotizaciones = async (db, { ids }) => {
+  const cot = await db.query(
+    `UPDATE cotizaciones SET archivada_en = NULL
+      WHERE id = ANY($1::int[]) AND archivada_en IS NOT NULL
+      RETURNING id`,
+    [ids]
+  );
+  const ops = await db.query(
+    `UPDATE crm_oportunidades o SET archivada_en = NULL
+      WHERE o.archivada_en IS NOT NULL
+        AND o.id IN (SELECT c.oportunidad_id FROM cotizaciones c WHERE c.id = ANY($1::int[]))
+      RETURNING o.id`,
+    [ids]
+  );
+  return { cotizaciones: cot.rows.length, oportunidades: ops.rows.length };
 };
 
 module.exports = {
@@ -641,13 +782,20 @@ module.exports = {
   listarOportunidades,
   totalesEmbudo,
   moverOportunidades,
-  cerrarOportunidadAbierta,
+  derivarEstadoCotizaciones,
   // cotizaciones
   bloquearCotizacionSinEnlace,
   obtenerCotizacion,
   loteCotizacionesSinEnlace,
   vincularCotizacion,
   moverCotizaciones,
+  obtenerCotizacionConEtapa,
+  guardarEstadoCotizacion,
   listarCotizacionesDeEmpresa,
-  resumenCotizacionesEmpresa
+  resumenCotizacionesEmpresa,
+  contarArchivadasDeEmpresa,
+  // archivado
+  archivarCotizaciones,
+  previaArchivado,
+  restaurarCotizaciones
 };

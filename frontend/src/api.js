@@ -166,10 +166,26 @@ export const productosAPI = {
 };
 
 // API de Cotizaciones
+// Respuesta JSON o error con el mensaje del servidor (y `status`).
+const leerJsonOError = async (response, porDefecto) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error || data?.message || `${porDefecto} (${response.status})`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+};
+
 export const cotizacionesAPI = {
-  getAll: async ({ includeItems } = {}) => {
-    const query = includeItems ? '?includeItems=1' : '';
-    const response = await fetchWithAuth(`/api/cotizaciones${query}`);
+  // Por defecto el backend excluye las archivadas; con `archivadas` trae SOLO las archivadas.
+  getAll: async ({ includeItems, archivadas } = {}) => {
+    const params = new URLSearchParams();
+    if (includeItems) params.set('includeItems', '1');
+    if (archivadas) params.set('archivadas', '1');
+    const query = params.toString();
+    const response = await fetchWithAuth(`/api/cotizaciones${query ? `?${query}` : ''}`);
     if (!response.ok) throw new Error('Error obteniendo cotizaciones');
     return response.json();
   },
@@ -226,10 +242,11 @@ export const cotizacionesAPI = {
       return null;
     }
   },
-  updateEstado: async (id, estado) => {
+  // Cambia la etapa (nueva, cotizada, negociacion, ganada, perdida). "perdida" exige motivo.
+  updateEstado: async (id, { etapa, motivo_perdida: motivo } = {}) => {
     const response = await fetchWithAuth(`/api/cotizaciones/${encodeURIComponent(id)}/estado`, {
       method: 'PATCH',
-      body: JSON.stringify({ estado }),
+      body: JSON.stringify({ etapa, ...(etapa === 'perdida' ? { motivo_perdida: motivo } : {}) }),
     });
     if (!response.ok) {
       const text = await response.text();
@@ -242,7 +259,7 @@ export const cotizacionesAPI = {
           detail = text;
         }
       }
-      throw new Error(`Error actualizando estado (${response.status})${detail ? `: ${detail}` : ''}`);
+      throw new Error(detail || `Error actualizando la etapa (${response.status})`);
     }
     return response.json();
   },
@@ -284,16 +301,27 @@ export const cotizacionesAPI = {
     if (!response.ok) throw new Error('Error obteniendo la versión');
     return response.json();
   },
-  getFunnel: async ({ days = 30, empresa = '', from = '', to = '' } = {}) => {
-    const params = new URLSearchParams();
-    if (days) params.set('days', String(days));
-    if (empresa) params.set('empresa', empresa);
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    const query = params.toString();
-    const response = await fetchWithAuth(`/api/cotizaciones/funnel${query ? `?${query}` : ''}`);
-    if (!response.ok) throw new Error('Error obteniendo funnel');
-    return response.json();
+  // Archiva (no borra) por ids o todo lo anterior a una fecha (YYYY-MM-DD).
+  archivar: async ({ ids, antesDe } = {}) => {
+    const body = Array.isArray(ids) ? { ids } : { antes_de: antesDe };
+    const response = await fetchWithAuth('/api/cotizaciones/archivar', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return leerJsonOError(response, 'Error archivando cotizaciones');
+  },
+  previaArchivar: async (antesDe) => {
+    const response = await fetchWithAuth(
+      `/api/cotizaciones/archivar/previa?antes_de=${encodeURIComponent(antesDe)}`
+    );
+    return leerJsonOError(response, 'Error consultando qué se archivaría');
+  },
+  restaurar: async (ids) => {
+    const response = await fetchWithAuth('/api/cotizaciones/restaurar', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+    return leerJsonOError(response, 'Error restaurando cotizaciones');
   },
   downloadPdf: async (payload, filenameBase = 'cotizacion') => {
     const response = await fetchWithAuth('/api/cotizaciones/pdf', {

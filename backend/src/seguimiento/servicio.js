@@ -24,7 +24,7 @@ const crearServicioSeguimiento = ({
   config,
   whatsapp = null,
   leerStock = null, // async () => [{ mpn, sku, disponible }] (leerStockAgregado)
-  pdfNombre = null, // (cotizacion) => nombre del PDF sin extensión (buildPdfFilename)
+  pdfNombre = null, // (cotizacion) => nombre del PDF sin versión ni extensión (buildPdfBaseName)
   crm = crmAdaptador,
   repo = crearRepositorio(db),
   cola = null,
@@ -95,22 +95,29 @@ const crearServicioSeguimiento = ({
 
   // --- Ítems de tareas ------------------------------------------------------------
 
-  const itemBuscar = (s) => ({
-    cotizacion_id: Number(s.cotizacion_id),
-    numero: s.numero ?? null,
-    pdf_nombre: pdfNombre
-      ? // Mismos datos que usa POST /api/cotizaciones/pdf: el proyecto se guarda en cliente_telefono.
-        `${pdfNombre({
+  // El PDF se llama `<base>_v<N>.pdf` (N = versión de la cotización al exportarla). La
+  // cotización puede editarse después de enviarla, así que no se sabe qué versión salió:
+  // al agente va la base (cualquier `_vN` sirve) y, por compatibilidad, el nombre de la v1.
+  const itemBuscar = (s) => {
+    // Mismos datos que usa POST /api/cotizaciones/pdf: el proyecto se guarda en cliente_telefono.
+    const base = pdfNombre
+      ? pdfNombre({
           created_at: s.cotizacion_creada_en,
           proyecto: s.cliente_telefono || 'N/A',
           empresa: s.cliente_empresa || 'N/A',
           numero: s.numero
-        })}.pdf`
-      : null,
-    cliente_email: s.cliente_email || null,
-    cliente_empresa: s.cliente_empresa || s.empresa_nombre || null,
-    creada_en: iso(s.cotizacion_creada_en || s.created_at)
-  });
+        })
+      : null;
+    return {
+      cotizacion_id: Number(s.cotizacion_id),
+      numero: s.numero ?? null,
+      pdf_nombre: base ? `${base}_v1.pdf` : null,
+      pdf_nombre_base: base,
+      cliente_email: s.cliente_email || null,
+      cliente_empresa: s.cliente_empresa || s.empresa_nombre || null,
+      creada_en: iso(s.cotizacion_creada_en || s.created_at)
+    };
+  };
 
   const itemRevisar = (s) => ({
     oportunidad_id: Number(s.oportunidad_id),

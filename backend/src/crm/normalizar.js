@@ -135,15 +135,58 @@ const combinarMarcas = (actual, nueva) => {
   return 'MIXTA';
 };
 
-/** Etapa que corresponde al estado de una cotizacion (migracion y enlace automatico). */
-const etapaDesdeEstado = (estado) => {
-  const valor = String(estado ?? '')
+// ---------------------------------------------------------------- estado <-> etapa
+// La etapa de la oportunidad es la unica fuente de verdad del estado comercial;
+// cotizaciones.estado es un valor DERIVADO que se conserva por compatibilidad (compras,
+// dashboard, MCP, agente). Estas dos tablas son el unico lugar con las equivalencias.
+
+/** Estado heredado de una cotizacion -> etapa. revision, pendiente, null u otro => nueva. */
+const ETAPA_POR_ESTADO = Object.freeze({
+  revision: 'nueva',
+  pendiente: 'nueva',
+  enviada: 'cotizada',
+  aprobada: 'ganada',
+  rechazada: 'perdida'
+});
+
+/** Etapa -> estado que se guarda en cotizaciones.estado. */
+const ESTADO_POR_ETAPA = Object.freeze({
+  nueva: 'revision',
+  cotizada: 'enviada',
+  negociacion: 'enviada',
+  ganada: 'aprobada',
+  perdida: 'rechazada'
+});
+
+/** Estados que acepta la forma heredada de PATCH /api/cotizaciones/:id/estado. */
+const ESTADOS_COTIZACION = Object.freeze(Object.keys(ETAPA_POR_ESTADO));
+
+const normalizarClave = (valor) =>
+  String(valor ?? '')
     .trim()
     .toLowerCase();
-  if (valor === 'aprobada') return 'ganada';
-  if (valor === 'rechazada') return 'perdida';
-  return 'cotizada'; // revision, pendiente, enviada y cualquier otro
-};
+
+/** Etapa que corresponde al estado de una cotizacion (migracion, enlace y forma heredada). */
+const etapaDesdeEstado = (estado) =>
+  ETAPA_POR_ESTADO[normalizarClave(estado)] || 'nueva';
+
+/** Estado derivado de una etapa (lo que se guarda en cotizaciones.estado). */
+const estadoDesdeEtapa = (etapa) =>
+  ESTADO_POR_ETAPA[normalizarClave(etapa)] || 'revision';
+
+/** Expresion SQL CASE que traduce `columna` con una tabla fija (valores de este archivo). */
+const casoSql = (columna, tabla, porDefecto) =>
+  `(CASE ${Object.entries(tabla)
+    .map(([de, a]) => `WHEN ${columna} = '${de}' THEN '${a}'`)
+    .join(' ')} ELSE '${porDefecto}' END)`;
+
+/** SQL: etapa derivada del estado de una cotizacion (para cotizaciones sin oportunidad). */
+const etapaDesdeEstadoSql = (columna) =>
+  casoSql(columna, ETAPA_POR_ESTADO, 'nueva');
+
+/** SQL: estado derivado de la etapa de una oportunidad. */
+const estadoDesdeEtapaSql = (columna) =>
+  casoSql(columna, ESTADO_POR_ETAPA, 'revision');
 
 const esEtapaCerrada = (etapa) => ETAPAS_CERRADAS.includes(etapa);
 
@@ -250,6 +293,9 @@ module.exports = {
   MARCAS,
   MOTIVO_MIGRADO,
   MOTIVO_COTIZADOR,
+  ETAPA_POR_ESTADO,
+  ESTADO_POR_ETAPA,
+  ESTADOS_COTIZACION,
   quitarTildes,
   textoPlano,
   esValorBasura,
@@ -259,6 +305,9 @@ module.exports = {
   marcaDesdeOrigenes,
   combinarMarcas,
   etapaDesdeEstado,
+  estadoDesdeEtapa,
+  etapaDesdeEstadoSql,
+  estadoDesdeEtapaSql,
   esEtapaCerrada,
   distanciaEdicion,
   compararNombres,

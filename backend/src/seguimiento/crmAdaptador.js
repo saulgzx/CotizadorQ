@@ -4,6 +4,14 @@
 //
 // Monto de una oportunidad (contrato CRM): monto_manual, si no el total de la cotización
 // vinculada más reciente, si no 0.
+//
+// Las oportunidades archivadas (archivada_en) quedan congeladas: no entran al alta
+// automática ni a las consultas del ciclo, /hoy y /lista.
+//
+// Al cambiar la etapa se deriva cotizaciones.estado (la etapa es la fuente de verdad),
+// con el mismo helper del CRM.
+
+const { derivarEstadoSinFallar } = require('../crm/enlace');
 
 const MONTO_SQL = `COALESCE(o.monto_manual, (
     SELECT c2.total FROM cotizaciones c2
@@ -27,10 +35,11 @@ const altaAutomatica = async (db, { desde }) => {
        FROM crm_oportunidades o
        JOIN LATERAL (
          SELECT c1.id, c1.created_at FROM cotizaciones c1
-          WHERE c1.oportunidad_id = o.id
+          WHERE c1.oportunidad_id = o.id AND c1.archivada_en IS NULL
           ORDER BY c1.created_at DESC, c1.id DESC LIMIT 1
        ) c ON TRUE
       WHERE o.etapa = ANY($1::text[])
+        AND o.archivada_en IS NULL
         AND c.created_at >= $2
         AND NOT EXISTS (SELECT 1 FROM crm_seguimientos s WHERE s.oportunidad_id = o.id)
      ON CONFLICT (oportunidad_id) DO NOTHING
@@ -59,6 +68,7 @@ const oportunidadesParaSeguimiento = async (db, { estados = null, oportunidadIds
     params.push(cotizacionIds.map(Number));
     where.push(`s.cotizacion_id = ANY($${params.length}::int[])`);
   }
+  where.push('o.archivada_en IS NULL'); // archivadas: congeladas, fuera del seguimiento
   const { rows } = await db.query(
     `SELECT s.*,
             o.etapa, o.motivo_perdida, o.titulo, o.created_at AS oportunidad_creada_en, o.cerrada_en AS oportunidad_cerrada_en,
@@ -72,7 +82,7 @@ const oportunidadesParaSeguimiento = async (db, { estados = null, oportunidadIds
        LEFT JOIN crm_empresas e ON e.id = o.empresa_id
        LEFT JOIN crm_contactos ct ON ct.id = o.contacto_id
        LEFT JOIN cotizaciones cot ON cot.id = s.cotizacion_id
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      WHERE ${where.join(' AND ')}
       ORDER BY s.id`,
     params
   );
@@ -82,7 +92,8 @@ const oportunidadesParaSeguimiento = async (db, { estados = null, oportunidadIds
 /**
  * Cambia la etapa de una oportunidad siguiendo las reglas del contrato CRM:
  * perdida exige motivo; ganada/perdida fijan cerrada_en y una etapa abierta lo limpia;
- * el cambio actualiza etapa_desde. Devuelve true si cambió algo.
+ * el cambio actualiza etapa_desde. Si cambió, deriva el estado de sus cotizaciones
+ * (best-effort: un fallo ahí no deshace el cambio de etapa). Devuelve true si cambió algo.
  */
 const cambiarEtapa = async (db, oportunidadId, etapa, motivo = null) => {
   if (etapa === 'perdida' && !motivo) throw new Error('pasar a perdida exige motivo');
@@ -96,6 +107,7 @@ const cambiarEtapa = async (db, oportunidadId, etapa, motivo = null) => {
       WHERE id = $1 AND etapa <> $2::text`,
     [Number(oportunidadId), etapa, motivo]
   );
+  if (rowCount > 0) await derivarEstadoSinFallar(db, Number(oportunidadId));
   return rowCount > 0;
 };
 
@@ -127,7 +139,7 @@ const abiertasMasGrandes = async (db, n = 5) => {
     `SELECT o.id, o.titulo, o.etapa, e.nombre AS empresa_nombre, ${MONTO_SQL} AS monto
        FROM crm_oportunidades o
        LEFT JOIN crm_empresas e ON e.id = o.empresa_id
-      WHERE o.etapa IN ('nueva', 'cotizada', 'negociacion')
+      WHERE o.etapa IN ('nueva', 'cotizada', 'negociacion') AND o.archivada_en IS NULL
       ORDER BY monto DESC, o.id
       LIMIT $1`,
     [n]

@@ -78,15 +78,55 @@ describe('marca y etapa', () => {
     expect(n.combinarMarcas('AXIS', 'QNAP')).toBe('MIXTA');
   });
 
+  // Tabla de equivalencias del dueno del producto: una cotizacion en revision es una
+  // oportunidad "nueva" (antes se caracterizaba como "cotizada").
   test.each([
-    ['revision', 'cotizada'],
-    ['pendiente', 'cotizada'],
+    ['revision', 'nueva'],
+    ['pendiente', 'nueva'],
     ['enviada', 'cotizada'],
     ['aprobada', 'ganada'],
     ['rechazada', 'perdida'],
-    [null, 'cotizada']
+    [null, 'nueva'],
+    ['  APROBADA ', 'ganada'],
+    ['otra cosa', 'nueva']
   ])('estado %p -> etapa %p', (estado, etapa) => {
     expect(n.etapaDesdeEstado(estado)).toBe(etapa);
+  });
+});
+
+describe('equivalencias estado <-> etapa', () => {
+  test.each([
+    ['nueva', 'revision'],
+    ['cotizada', 'enviada'],
+    ['negociacion', 'enviada'],
+    ['ganada', 'aprobada'],
+    ['perdida', 'rechazada']
+  ])('etapa %p -> estado %p', (etapa, estado) => {
+    expect(n.estadoDesdeEtapa(etapa)).toBe(estado);
+  });
+
+  test('las tablas cubren las 5 etapas y los 5 estados heredados', () => {
+    expect(Object.keys(n.ESTADO_POR_ETAPA).sort()).toEqual([...n.ETAPAS].sort());
+    expect([...n.ESTADOS_COTIZACION].sort()).toEqual(['aprobada', 'enviada', 'pendiente', 'rechazada', 'revision']);
+    for (const etapa of Object.values(n.ETAPA_POR_ESTADO)) expect(n.ETAPAS).toContain(etapa);
+  });
+
+  test('ida y vuelta: la etapa de un estado derivado vuelve a la misma etapa (salvo negociacion -> cotizada)', () => {
+    for (const etapa of n.ETAPAS) {
+      const vuelta = n.etapaDesdeEstado(n.estadoDesdeEtapa(etapa));
+      expect(vuelta).toBe(etapa === 'negociacion' ? 'cotizada' : etapa);
+    }
+  });
+
+  test('las expresiones SQL salen de las mismas tablas', () => {
+    const sqlEtapa = n.etapaDesdeEstadoSql('c.estado');
+    expect(sqlEtapa).toContain("WHEN c.estado = 'enviada' THEN 'cotizada'");
+    expect(sqlEtapa).toContain("WHEN c.estado = 'revision' THEN 'nueva'");
+    expect(sqlEtapa).toMatch(/ELSE 'nueva' END\)$/);
+    const sqlEstado = n.estadoDesdeEtapaSql('o.etapa');
+    expect(sqlEstado).toContain("WHEN o.etapa = 'negociacion' THEN 'enviada'");
+    expect(sqlEstado).toContain("WHEN o.etapa = 'perdida' THEN 'rechazada'");
+    expect(sqlEstado).toMatch(/ELSE 'revision' END\)$/);
   });
 });
 

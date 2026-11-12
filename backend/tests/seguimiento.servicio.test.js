@@ -58,9 +58,16 @@ describe('servicio de seguimiento: ciclo completo', () => {
     const t1 = await agente((tarea) => {
       expect(tarea.tipo).toBe('buscar_envios');
       expect(tarea.items).toEqual([
-        { cotizacion_id: 101, numero: 65430, pdf_nombre: 'COT-65430_Proyecto CCTV.pdf', cliente_email: 'ana1@cliente.cl', cliente_empresa: 'Sonda', creada_en: cl('2026-11-02 10:00').toISOString() }
+        // pdfNombre da la base sin versión: el agente acepta cualquier `_vN.pdf` (la cotización
+        // pudo editarse después de enviarla); pdf_nombre queda como el de la v1 por compatibilidad.
+        {
+          cotizacion_id: 101, numero: 65430, pdf_nombre: 'COT-65430_Proyecto CCTV_v1.pdf', pdf_nombre_base: 'COT-65430_Proyecto CCTV',
+          cliente_email: 'ana1@cliente.cl', cliente_empresa: 'Sonda', creada_en: cl('2026-11-02 10:00').toISOString()
+        }
       ]);
       expect(tarea.instrucciones).toMatch(/enviados/i);
+      expect(tarea.instrucciones).toMatch(/pdf_nombre_base/);
+      expect(tarea.instrucciones).toMatch(/_v<N>\.pdf/);
       return { ok: true, items: [{ cotizacion_id: 101, encontrado: true, message_id: 'msg-1', conversation_id: 'conv-1', enviado_en: cl('2026-11-02 11:00').toISOString(), para: ['ana1@cliente.cl'] }] };
     });
     expect(t1.r.status).toBe(204);
