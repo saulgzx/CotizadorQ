@@ -355,8 +355,22 @@ enlace, cambio de etapa y derivación del estado, rutas, fusión y archivado, y 
 
 ## Órdenes como oportunidades ganadas
 
-Código: `backend/src/crm/ordenes.js`. Endpoint: `POST /api/crm/oportunidades/sincronizar-ordenes`
-(admin, como todo el CRM). En el frontend lo dispara el botón «Traer órdenes» del embudo.
+Código: `backend/src/crm/ordenes.js`.
+
+**Corre sola.** Se dispara en dos momentos, los dos en segundo plano y sin bloquear nada:
+
+1. Después de cada lectura de `GET /api/oso/orders` que haya refrescado `bo_meta` (es decir,
+   cada vez que se abre la vista de Órdenes y el caché estaba vencido). Se lanza **después**
+   de responder, así que no demora la pantalla.
+2. Al arrancar el backend, junto a `iniciarCrm`, por si no se abre la vista de Órdenes en
+   todo el día.
+
+Un fallo en la sincronización nunca tumba la lectura de órdenes ni el arranque: queda en el
+log como `crm_ordenes_auto_fallo` o `crm_ordenes_boot_fallo`.
+
+Además está el disparo manual: `POST /api/crm/oportunidades/sincronizar-ordenes` (admin, como
+todo el CRM), que en el frontend es el botón «Traer órdenes» del embudo. Sirve para no esperar,
+y para ver el resumen de lo que hizo.
 
 Las órdenes **no son cotizaciones**: viven en la pestaña OSO de Google Sheets y
 `GET /api/oso/orders` ya las persiste en `bo_meta` (cliente, PO, borrado lógico) y en

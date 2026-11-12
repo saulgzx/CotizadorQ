@@ -3011,6 +3011,20 @@ app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, asy
     cacheSet(CACHE_KEY_OSO_ORDERS, payload, OSO_ORDERS_CACHE_TTL_MS);
     res.set('X-Cache', 'MISS');
     res.json(payload);
+    // Acabamos de refrescar bo_meta, que es de donde lee el embudo: lo ponemos al
+    // dia aqui mismo, despues de responder, para que las ordenes aparezcan como
+    // ganadas sin que nadie apriete nada. Es idempotente y nunca tumba la lectura
+    // de ordenes: un fallo queda en el log.
+    if (orders.length > 0) {
+      crm
+        .sincronizarOrdenes(pool, { log: logger })
+        .catch((error) =>
+          logger.warn(
+            { event: 'crm_ordenes_auto_fallo', err: compactErrorForLog(error) },
+            'No se pudo reflejar las ordenes en el CRM'
+          )
+        );
+    }
   } catch (error) {
     logger.error({ event: 'oso_read_failed', err: compactErrorForLog(error) }, 'Error leyendo OSO');
     res.status(500).json({ error: getExternalErrorMessage(error, 'Error leyendo ordenes OSO') });
@@ -4898,6 +4912,16 @@ const startServer = async (port = PORT, options = {}) => {
     await ensureCotizacionEdicion(pool);
     // CRM: esquema (rapido) y migracion de cotizaciones en segundo plano (no se espera).
     await crm.iniciarCrm(pool);
+    // Y el embudo al dia con las ordenes ya conocidas (bo_meta), por si nadie abre
+    // la vista de Ordenes en todo el dia. En segundo plano: no se espera.
+    crm
+      .sincronizarOrdenes(pool, { log: logger })
+      .catch((error) =>
+        logger.warn(
+          { event: 'crm_ordenes_boot_fallo', msg: error?.message },
+          'No se pudo reflejar las ordenes en el CRM al arrancar'
+        )
+      );
     // Seguimiento: esquema idempotente y planificador en segundo plano (unref). Con
     // SEGUIMIENTO_ACTIVO=false el planificador no crea tareas ni manda resúmenes.
     try {
