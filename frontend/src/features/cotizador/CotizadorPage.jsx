@@ -71,6 +71,7 @@ import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
 import NumeroInput from '../ui/NumeroInput';
 import { precioSistemaDe, useMargenSistema } from './precioSistema';
+import { productoFueraDeLista } from './fueraDeLista';
 import Resaltado from '../ui/Resaltado';
 import Icono from '../ui/Icono';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
@@ -6223,12 +6224,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                         {canViewCotizador && (
                           <td className="whitespace-nowrap px-3 py-3 text-right" data-html2canvas-ignore="true">
                             {(() => {
-                              const producto = productoDeStock(item);
+                              const enLista = productoDeStock(item);
+                              // En stock pero fuera de la lista de precios: el admin lo cotiza igual,
+                              // con el costo real de stock como base del precio.
+                              const producto = enLista || (isFullAdmin
+                                ? productoFueraDeLista(item, {
+                                    gpPorDefecto: String(item.origin || item.brand || '').toUpperCase().includes('AXIS') ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap
+                                  })
+                                : null);
                               if (!producto) return <span className="text-xs text-slate-500" title="No está en tu lista de precios">Sin precio</span>;
                               const enCarrito = cotizacion.find(x => x.id === producto.id);
                               return (
                                 <button
                                   type="button"
+                                  title={enLista ? undefined : 'No está en la lista de precios: se cotiza con el costo real de stock'}
                                   onClick={() => {
                                     addToCotizacion(producto);
                                     notify(`Agregado ${producto.sku || producto.mpn} al cotizador`, {
@@ -6238,7 +6247,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   }}
                                   className="mq-btn mq-btn-sm mq-btn-secundario"
                                 >
-                                  {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : 'Agregar'}
+                                  {enCarrito ? `En carrito (${enCarrito.cant}) · +1` : (enLista ? 'Agregar' : 'Agregar · fuera de lista')}
                                 </button>
                               );
                             })()}
