@@ -1845,12 +1845,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const handleLogin = async () => {
+  // Recibe lo que hay escrito en los campos al enviar: un gestor de contraseñas
+  // puede rellenarlos sin avisar a React y el estado quedaría vacío.
+  const handleLogin = async (usuarioCampo = usuario, passwordCampo = password) => {
+    const usuarioFinal = String(usuarioCampo || '').trim();
+    const passwordFinal = String(passwordCampo || '');
+    if (!usuarioFinal || !passwordFinal) {
+      setLoginError('Escribe tu usuario y tu contraseña.');
+      return;
+    }
     try {
       setLoginError('');
+      setUsuario(usuarioFinal);
+      setPassword(passwordFinal);
       getOrCreateSessionId();
       getOrCreateDeviceId();
-      const data = await authAPI.login(usuario, password);
+      const data = await authAPI.login(usuarioFinal, passwordFinal);
       registerSessionForUser(data.user);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
@@ -1868,7 +1878,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       loadProductos(data.user?.role);
       loadStock();
     } catch (error) {
-      setLoginError(error.message || 'Error de autenticacin');
+      const mensaje = error.message || 'Error de autenticación';
+      setLoginError(/payload invalido/i.test(mensaje)
+        ? 'Usuario o contraseña con formato no válido: el usuario tiene al menos 3 caracteres y la contraseña al menos 8.'
+        : mensaje);
     }
   };
 
@@ -4975,7 +4988,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         <main className="flex-1 flex items-center justify-center px-6 pb-24">
           <form
             className="stagger-children w-full max-w-[340px] flex flex-col gap-7"
-            onSubmit={e => { e.preventDefault(); handleLogin(); }}
+            onSubmit={e => {
+              e.preventDefault();
+              const campos = new FormData(e.currentTarget);
+              handleLogin(campos.get('usuario'), campos.get('password'));
+            }}
           >
             <div className="space-y-2">
               <div className="mq-sobre">Acceso</div>
@@ -4987,8 +5004,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 Usuario
                 <input
                   id="login-usuario"
+                  name="usuario"
                   type="text"
                   autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={usuario}
                   onChange={e => setUsuario(e.target.value)}
                   className={campoLogin}
@@ -5000,6 +5021,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 <span className="relative">
                   <input
                     id="login-password"
+                    name="password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     value={password}
