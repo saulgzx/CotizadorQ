@@ -8,6 +8,28 @@
 const QNAP_CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12 };
 const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
 
+/**
+ * Cadena de costo por origen. costo Chile = precio_disty * INBOUND_FREIGHT / IC * (1 + INT).
+ * - AXIS y QNAP: precio_disty viene de la lista de precios del disty (flete de entrada,
+ *   factor IC y transporte/arancel).
+ * - ISS, NEURAL, MILESTONE y MILESTONE_HW (fabricantes SIN lista de precios): precio_disty
+ *   guarda el COSTO DEL QUOTE del fabricante (lo que Intcomex le paga), asi que no lleva
+ *   flete de entrada ni factor IC (1 y 1): solo transporte y arancel (INT).
+ *   MILESTONE = licencias (INT 0); MILESTONE_HW = servidores (INT 0.12).
+ * Rebates y partner_category son SOLO de AXIS.
+ */
+const CADENA_POR_ORIGEN = Object.freeze({
+  AXIS: AXIS_CONSTANTS,
+  QNAP: QNAP_CONSTANTS,
+  ISS: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
+  NEURAL: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
+  MILESTONE: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0 }),
+  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 })
+});
+
+/** Origenes validos de una linea de cotizacion. */
+const ORIGENES_VALIDOS = Object.freeze(Object.keys(CADENA_POR_ORIGEN));
+
 const ITEM_CAMPOS_CLIENTE = Object.freeze([
   'id',
   'cotizacion_id',
@@ -42,14 +64,24 @@ const numeroONull = (valor) => {
 
 const normalizarOrigen = (origen, item = {}) => {
   const valor = String(origen || '').trim().toUpperCase();
-  if (valor === 'AXIS' || valor === 'QNAP') return valor;
+  // Se respeta cualquiera de los origenes de la tabla (sin importar mayusculas ni espacios).
+  const valorSinEspacios = valor.replace(/\s+/g, '');
+  if (ORIGENES_VALIDOS.includes(valorSinEspacios)) return valorSinEspacios;
+  // Sin origen reconocible (datos antiguos): se deduce del texto, como siempre.
   const texto = `${item.marca || ''} ${item.sku || ''} ${item.mpn || ''} ${item.descripcion || ''}`.toLowerCase();
   return texto.includes('axis') ? 'AXIS' : 'QNAP';
 };
 
-/** Costo puesto en Chile antes de rebates: la misma cadena que usa el cotizador. */
+/**
+ * Costo puesto en Chile antes de rebates: la cadena del origen (CADENA_POR_ORIGEN).
+ * Un origen fuera de la tabla LANZA un error: no se cae en silencio a QNAP, porque
+ * costearia con las constantes de otro fabricante. Quien tenga un origen dudoso
+ * (datos antiguos) debe pasarlo antes por normalizarOrigen.
+ */
 const costoXCL = (origen, precioDisty) => {
-  const c = origen === 'AXIS' ? AXIS_CONSTANTS : QNAP_CONSTANTS;
+  const clave = String(origen ?? '').trim().toUpperCase();
+  const c = Object.prototype.hasOwnProperty.call(CADENA_POR_ORIGEN, clave) ? CADENA_POR_ORIGEN[clave] : null;
+  if (!c) throw new Error(`Origen sin cadena de costo: "${origen}"`);
   return ((numero(precioDisty) * c.INBOUND_FREIGHT) / c.IC) * (1 + c.INT);
 };
 
@@ -249,6 +281,8 @@ const ensureCotizacionEdicion = async (pool) => {
 };
 
 module.exports = {
+  CADENA_POR_ORIGEN,
+  ORIGENES_VALIDOS,
   QNAP_CONSTANTS,
   AXIS_CONSTANTS,
   ITEM_CAMPOS_CLIENTE,

@@ -3885,7 +3885,8 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
           rebate_partner: partnerRebate,
           partner_category: origenValue === 'AXIS' ? partnerCategory : null,
           // Mismo calculo que el precio: el costo queda guardado para el margen del admin.
-          costo_unitario: costoFinal({ origen: origenValue, precio_disty: precioDisty, rebate_partner: partnerRebate, costo_xcl: costoReal }),
+          // El precio de arriba solo distingue AXIS/otro (=QNAP); el costo usa la misma regla.
+          costo_unitario: costoFinal({ origen: origenValue === 'AXIS' ? 'AXIS' : 'QNAP', precio_disty: precioDisty, rebate_partner: partnerRebate, costo_xcl: costoReal }),
           gp: gpUsed,
           cantidad,
           precio_unitario: Number(precioUnitario.toFixed(2)),

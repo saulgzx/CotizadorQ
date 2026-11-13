@@ -1,15 +1,8 @@
 import React, { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import ProtectedRoute from './features/auth/ProtectedRoute';
+import PaginaProtegida, { RUTAS_PROTEGIDAS } from './features/navegacion/PaginaProtegida';
 
 const LoginPage = lazy(() => import('./features/auth/LoginPage'));
-const DashboardRoute = lazy(() => import('./features/dashboard/DashboardRoute'));
-const CotizadorRoute = lazy(() => import('./features/cotizador/CotizadorRoute'));
-const HistorialRoute = lazy(() => import('./features/historial/HistorialRoute'));
-const UsuariosRoute = lazy(() => import('./features/usuarios/UsuariosRoute'));
-const OrdenesRoute = lazy(() => import('./features/ordenes/OrdenesRoute'));
-const IaRoute = lazy(() => import('./features/ia/IaRoute'));
-const CrmRoute = lazy(() => import('./features/crm/CrmRoute'));
 
 const loadingFallback = (
   <div className="min-h-screen w-full flex items-center justify-center bg-slate-50">
@@ -23,62 +16,11 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/dashboard"
-          element={(
-            <ProtectedRoute>
-              <DashboardRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/cotizador"
-          element={(
-            <ProtectedRoute>
-              <CotizadorRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/historial"
-          element={(
-            <ProtectedRoute>
-              <HistorialRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/ia"
-          element={(
-            <ProtectedRoute>
-              <IaRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/crm"
-          element={(
-            <ProtectedRoute requireAdmin>
-              <CrmRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/admin/usuarios"
-          element={(
-            <ProtectedRoute requireAdmin>
-              <UsuariosRoute />
-            </ProtectedRoute>
-          )}
-        />
-        <Route
-          path="/admin/ordenes"
-          element={(
-            <ProtectedRoute requireAdmin>
-              <OrdenesRoute />
-            </ProtectedRoute>
-          )}
-        />
+        {/* Una sola ruta contenedora: al navegar entre estas rutas la página es la misma
+            instancia (no se desmonta), así que no se vuelve a pedir lo que ya tiene. */}
+        <Route element={<PaginaProtegida />}>
+          {RUTAS_PROTEGIDAS.map(({ path }) => <Route key={path} path={path} element={null} />)}
+        </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>

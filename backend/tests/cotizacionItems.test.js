@@ -1,5 +1,11 @@
 const {
+  AXIS_CONSTANTS,
+  CADENA_POR_ORIGEN,
+  ORIGENES_VALIDOS,
+  QNAP_CONSTANTS,
   costoFinal,
+  costoXCL,
+  normalizarOrigen,
   normalizarLineaAdmin,
   serializarItems,
   resumen,
@@ -107,5 +113,92 @@ describe('normalizarLineaAdmin', () => {
   test('el rebate solo aplica a AXIS', () => {
     const linea = normalizarLineaAdmin({ origen: 'QNAP', rebate_partner: 99, precio_unitario: 10, cantidad: 1 });
     expect(linea.rebate_partner).toBeNull();
+  });
+});
+
+describe('origenes y cadena de costo', () => {
+  const NUEVOS = ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW'];
+
+  test('la tabla tiene los 6 origenes', () => {
+    expect([...ORIGENES_VALIDOS].sort()).toEqual(['AXIS', 'ISS', 'MILESTONE', 'MILESTONE_HW', 'NEURAL', 'QNAP']);
+    expect(Object.keys(CADENA_POR_ORIGEN)).toEqual(ORIGENES_VALIDOS);
+  });
+
+  test.each(ORIGENES_VALIDOS)('normalizarOrigen respeta %s (minusculas y espacios incluidos)', (origen) => {
+    expect(normalizarOrigen(origen)).toBe(origen);
+    expect(normalizarOrigen(origen.toLowerCase())).toBe(origen);
+    expect(normalizarOrigen(`  ${origen.toLowerCase()} `)).toBe(origen);
+  });
+
+  test('ISS con descripcion que menciona AXIS sigue siendo ISS', () => {
+    expect(normalizarOrigen('ISS', { descripcion: 'integración con cámaras AXIS' })).toBe('ISS');
+    expect(normalizarOrigen('milestone_hw', { marca: 'Axis' })).toBe('MILESTONE_HW');
+  });
+
+  test.each([undefined, null, '', '  ', 'OTRO'])('origen %p sin texto conserva el fallback QNAP', (origen) => {
+    expect(normalizarOrigen(origen, { descripcion: 'NAS 4 bahias' })).toBe('QNAP');
+    expect(normalizarOrigen(origen)).toBe('QNAP');
+  });
+
+  test.each([undefined, '', 'OTRO'])('origen %p con "axis" en el texto conserva el fallback AXIS', (origen) => {
+    expect(normalizarOrigen(origen, { marca: 'Axis', sku: '0123' })).toBe('AXIS');
+    expect(normalizarOrigen(origen, { descripcion: 'Camara AXIS P1375' })).toBe('AXIS');
+  });
+
+  test('costoXCL de los fabricantes sin lista: costo del quote + transporte y arancel', () => {
+    expect(costoXCL('ISS', 100)).toBeCloseTo(115, 10);
+    expect(costoXCL('NEURAL', 100)).toBeCloseTo(115, 10);
+    expect(costoXCL('MILESTONE', 100)).toBeCloseTo(100, 10);
+    expect(costoXCL('MILESTONE_HW', 100)).toBeCloseTo(112, 10);
+  });
+
+  test('AXIS y QNAP dan exactamente lo de siempre', () => {
+    expect(AXIS_CONSTANTS).toEqual({ INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 });
+    expect(QNAP_CONSTANTS).toEqual({ INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12 });
+    expect(costoXCL('AXIS', 1000)).toBe(((1000 * 1.015) / 0.97) * (1 + 0.12));
+    expect(costoXCL('QNAP', 1000)).toBe(((1000 * 1.011) / 0.95) * (1 + 0.12));
+    expect(costoXCL('AXIS', 1000)).toBeCloseTo(1171.96, 2);
+    expect(costoXCL('QNAP', 1000)).toBeCloseTo(1191.92, 2);
+  });
+
+  test('costoXCL con un origen fuera de la tabla lanza, no cae a QNAP', () => {
+    expect(() => costoXCL('OTRO', 100)).toThrow(/Origen sin cadena/);
+    expect(() => costoXCL(undefined, 100)).toThrow(/Origen sin cadena/);
+    expect(() => costoXCL('', 100)).toThrow(/Origen sin cadena/);
+  });
+
+  test.each([
+    ['ISS', 115],
+    ['MILESTONE', 100],
+    ['MILESTONE_HW', 112]
+  ])('linea %s sin producto_id: conserva origen, sin rebates y respeta el costo enviado', (origen, esperado) => {
+    const base = {
+      origen,
+      marca: origen,
+      sku: 'LIC-1',
+      descripcion: 'Integracion con camaras Axis',
+      precio_disty: 100,
+      rebate_partner: 30,
+      rebate_proyecto: 20,
+      partner_category: 'Partner Gold',
+      precio_unitario: 200,
+      cantidad: 2
+    };
+    const enviado = normalizarLineaAdmin({ ...base, costo_unitario: 140 });
+    expect(enviado).toMatchObject({ origen, producto_id: null, rebate_partner: null, rebate_proyecto: null, partner_category: null });
+    expect(enviado.costo_unitario).toBe(140);
+    expect(enviado.gp).toBe(0.3);
+
+    // Sin costo ni gp: se calcula con la cadena del origen y el gp se deriva.
+    const calculada = normalizarLineaAdmin(base);
+    expect(calculada.origen).toBe(origen);
+    expect(calculada.costo_unitario).toBe(esperado);
+    expect(calculada.rebate_partner).toBeNull();
+    expect(calculada.partner_category).toBeNull();
+    expect(calculada.gp).toBe(Math.round((1 - esperado / 200) * 10000) / 10000);
+  });
+
+  test.each(NUEVOS)('costoFinal de %s ignora rebates', (origen) => {
+    expect(costoFinal({ origen, precio_disty: 100, rebate_partner: 0 })).toBe(costoXCL(origen, 100));
   });
 });

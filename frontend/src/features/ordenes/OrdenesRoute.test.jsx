@@ -7,7 +7,6 @@ vi.mock('../../api', async () => (await import('./arnesOrdenes.testutil.jsx')).c
 
 import {
   precalentar,
-  irARuta,
   api, prepararApi, renderApp, mesActual,
   abrirDetalle, inputsDeLinea, escribir, irAVista, botonBo
 } from './arnesOrdenes.testutil.jsx';
@@ -246,20 +245,19 @@ describe('Órdenes: borradores sin guardar al cambiar de vista', () => {
     expect(api.boLineMetaAPI.save).not.toHaveBeenCalled();
   });
 
-  it('un monto sin guardar SE PIERDE al ir al Dashboard y volver (comportamiento actual)', async () => {
+  it('un monto sin guardar SE PIERDE al ir al Dashboard y volver (decisión del dueño)', async () => {
     renderApp();
     await esperarOrdenes();
     abrirDetalle(0);
     escribir(inputsDeLinea('MPN-A1').intcomex, '777');
-    // Dashboard es otra RUTA: hoy cada ruta monta su propia página, y el estado de la
-    // anterior (borradores incluidos) se descarta.
-    await irARuta('Dashboard');
+    // Órdenes es una vista que se desmonta al salir de ella (es decisión del dueño):
+    // lo no guardado, borradores incluidos, se descarta aunque la página siga montada.
+    await irAVista('Dashboard');
     await screen.findByText('Facturación estimada y reportada');
-    await irARuta('Órdenes activas');
+    await irAVista('Órdenes activas');
     await esperarOrdenes();
     abrirDetalle(0);
-    // PENDIENTE de decisión: si la mudanza a un proveedor de estado lo conserva,
-    // este test tiene que cambiar (y avisarlo: es un cambio de comportamiento).
+    // Decidido por el dueño: se mantiene que lo no guardado se pierde al salir de Órdenes.
     await waitFor(() => expect(inputsDeLinea('MPN-A1').intcomex).toHaveValue(null));
     expect(api.boLineMetaAPI.save).not.toHaveBeenCalled();
   });

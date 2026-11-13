@@ -42,7 +42,13 @@ const JOB_TTL_MS = 30 * 60 * 1000;
 // Puede ser una imagen o el PDF de la OC completa (con capa de texto y varias paginas).
 const MIME_PDF = 'application/pdf';
 const MIMES_PANTALLAZO = ['image/png', 'image/jpeg', 'image/webp', MIME_PDF];
-const CAMPOS_PANTALLAZO = ['axis', 'intcomex'];
+const CAMPOS_PANTALLAZO = ['axis', 'intcomex', 'quote'];
+// Fabricantes cuyo quote (PDF o imagen) se lee para cargar sus lineas: sin lista de precios.
+const FABRICANTES_QUOTE = {
+  ISS: 'ISS',
+  NEURAL: 'Neural Labs',
+  MILESTONE: 'Milestone'
+};
 const MAX_BYTES_IMAGEN = 6 * 1024 * 1024;
 // Una OC escaneada de varias paginas pasa de 6 MB sin problema.
 const MAX_BYTES_PDF = 12 * 1024 * 1024;
@@ -192,6 +198,7 @@ const TIPOS_PANTALLAZO = {
  * carpeta y devuelve los montos por linea. Es lectura, no cotizacion: no lleva skill.
  */
 const construirPromptPantallazo = ({ pantallazo }) => {
+  if (pantallazo.campo === 'quote') return construirPromptQuote({ pantallazo });
   const tipo = TIPOS_PANTALLAZO[pantallazo.campo];
   const esPdf = pantallazo.mime === MIME_PDF;
   // Como se nombra el archivo dentro del prompt, segun sea imagen o PDF.
@@ -237,6 +244,59 @@ const construirPromptPantallazo = ({ pantallazo }) => {
     '<lineas_orden>',
     lineas.length ? lineas.join('\n') : '(la orden no trae líneas)',
     '</lineas_orden>'
+  ].join('\n');
+};
+
+/**
+ * Prompt de lectura del quote de un fabricante (ISS, Neural Labs, Milestone): por linea,
+ * MPN, cantidad, descripcion y el costo unitario NETO que paga el distribuidor.
+ * Es plata: todo se pide tal cual aparece, sin calcular ni convertir.
+ */
+const construirPromptQuote = ({ pantallazo }) => {
+  const esPdf = pantallazo.mime === MIME_PDF;
+  const un = esPdf ? 'un PDF' : 'una imagen';
+  const el = esPdf ? 'el PDF' : 'la imagen';
+  const El = esPdf ? 'El PDF' : 'La imagen';
+  const archivo = `./${archivoPantallazo(pantallazo.mime)}`;
+  const fabricante = FABRICANTES_QUOTE[pantallazo.fabricante] || pantallazo.fabricante;
+  const paginas = esPdf
+    ? [
+        'El PDF puede tener varias páginas: léelas TODAS, de la primera a la última, antes de responder. Las líneas del quote pueden seguir de una página a la siguiente.',
+        'Si tiene más de 10 páginas, Read exige el parámetro pages: léelo por tramos seguidos ("1-10", "11-20", ...) hasta llegar al final, sin saltarte ninguno.'
+      ]
+    : [];
+  return [
+    '<instrucciones_myquote>',
+    `Esta es una tarea de lectura de ${un} para MyQuote (Intcomex Chile). No es una cotización: no uses ninguna skill de preventa.`,
+    `Lee con la herramienta Read ${el} del archivo ${archivo} (ruta relativa a la carpeta en la que estás).`,
+    `${El} es un quote (cotización) que el fabricante ${fabricante} le envió a Intcomex, que es el distribuidor. Extrae, por cada línea, el MPN, la cantidad, la descripción y el costo unitario: lo que Intcomex le paga a ${fabricante} por unidad.`,
+    ...paginas,
+    `Solo lee ${el}: no uses las herramientas del conector MyQuote, no busques en la web (ni WebSearch ni WebFetch), no ejecutes comandos ni modifiques archivos.`,
+    '',
+    'Reglas:',
+    '- "costo_unitario" es el precio UNITARIO NETO que paga el distribuidor. Si la línea muestra un precio de lista y otro con descuento o neto, va el NETO. Nunca pongas en "costo_unitario" el total de la línea.',
+    '- "total_linea" es el total de esa línea tal como aparece (sirve para verificar unitario × cantidad). Si no aparece, déjalo vacío ("").',
+    `- Todos los valores van TAL CUAL aparecen en ${el}, como texto, con sus mismos separadores y símbolos: sin convertir, sin redondear y sin calcular nada.`,
+    '- Si la línea solo trae el total y no el unitario, "costo_unitario" queda vacío (""): no dividas tú.',
+    '- Si al pie del documento hay un descuento global que NO está aplicado en los precios por línea, ponlo como número en "descuento_global_pct" (por ejemplo 10 o 12.5) y NO lo apliques a los precios. Si no hay, deja null.',
+    '- "moneda" es el código de la moneda del documento (USD, EUR...), según se deduce de él. Si no se puede saber, "".',
+    '- Incluye TODAS las líneas de producto, licencia o servicio que tengan precio. No incluyas subtotales, impuestos, fletes ni totales como líneas; si aparecen fletes u otros cargos aparte, menciónalos en "notas".',
+    '- "mpn" es el código o part number del fabricante, tal cual. Si una línea no trae código, déjalo vacío (""): no lo inventes.',
+    `- Si un valor no se lee con certeza, déjalo vacío ("") en vez de adivinar. No inventes líneas.`,
+    `- Si ${el} no es un quote, devuelve "lineas": [] y explica en "notas" qué es.`,
+    '',
+    'Responde ÚNICAMENTE con un bloque de código ```json que contenga un objeto con esta forma, sin texto antes ni después:',
+    '```json',
+    '{',
+    '  "moneda": "USD",',
+    '  "descuento_global_pct": null,',
+    '  "lineas": [',
+    '    { "mpn": "", "descripcion": "", "cantidad": "", "costo_unitario": "", "total_linea": "" }',
+    '  ],',
+    '  "notas": ""',
+    '}',
+    '```',
+    '</instrucciones_myquote>'
   ].join('\n');
 };
 
@@ -295,7 +355,11 @@ const validarPantallazo = (p) => {
   if (!MIMES_PANTALLAZO.includes(p.mime))
     throw errorValidacion('Solo se aceptan PDF o imágenes PNG, JPG o WEBP');
   if (!CAMPOS_PANTALLAZO.includes(p.campo))
-    throw errorValidacion('Campo del pantallazo invalido: usa axis o intcomex');
+    throw errorValidacion('Campo del pantallazo invalido: usa axis o intcomex (o quote con fabricante)');
+  const esQuote = p.campo === 'quote';
+  const fabricante = esQuote ? String(p.fabricante || '').trim().toUpperCase() : null;
+  if (esQuote && !FABRICANTES_QUOTE[fabricante])
+    throw errorValidacion('Fabricante invalido para el quote: usa ISS, NEURAL o MILESTONE');
   const esPdf = p.mime === MIME_PDF;
   const datos = p.datos;
   if (typeof datos !== 'string' || !datos)
@@ -313,6 +377,8 @@ const validarPantallazo = (p) => {
     throw errorValidacion(
       `${esPdf ? 'El PDF' : 'La imagen'} no viene en base64 valido (sin el prefijo data:)`
     );
+  // El quote no usa las lineas de una orden: si vienen, se ignoran.
+  if (esQuote) return { datos, mime: p.mime, campo: p.campo, fabricante };
   const lineas = p.lineas ?? [];
   if (!Array.isArray(lineas))
     throw errorValidacion('Las lineas del pantallazo deben ser una lista');
