@@ -278,16 +278,32 @@ const crearApi = (config, fetchImpl = fetch, version = null) => {
 
 // --- Resolver una consulta ------------------------------------------------------
 
-// Nombre fijo de la imagen de una consulta, sea cual sea su formato: a Claude Code le
-// importa el contenido, no la extension, y el prompt del backend la nombra asi.
-export const ARCHIVO_IMAGEN = 'pantallazo.png';
+// Archivo de una consulta de lectura: un pantallazo (imagen) o el PDF de la OC completa.
+// Claude Code decide como leer un archivo por su extension, asi que el nombre sigue al
+// mime: un PDF guardado como .png no se lee. MISMA REGLA que archivoPantallazo en
+// backend/src/services/asistenteIA.js, que es quien nombra el archivo en el prompt.
+const ARCHIVO_PDF = 'pantallazo.pdf';
+const ARCHIVO_PNG = 'pantallazo.png';
 
-/** Borra la imagen de la consulta. No falla si no existe: se llama desde varios lados. */
+/** Todos los nombres con que puede quedar el archivo: la limpieza los barre siempre. */
+export const ARCHIVOS_IMAGEN = [ARCHIVO_PNG, ARCHIVO_PDF];
+
+/** Nombre del archivo segun su mime: PDF -> pantallazo.pdf; cualquier otro (las imagenes) -> pantallazo.png. */
+export const archivoDeImagen = (mime) => (mime === 'application/pdf' ? ARCHIVO_PDF : ARCHIVO_PNG);
+
+/**
+ * Borra el archivo de la consulta, con TODOS sus nombres posibles y no solo el de esta:
+ * si quedara un pantallazo.pdf de una consulta anterior y la siguiente trae un PNG,
+ * Claude Code podria leer el PDF viejo y devolver los montos de otro cliente.
+ * No falla si no existe: se llama desde varios lados.
+ */
 const borrarImagen = (config, log = () => {}) => {
-  try {
-    rmSync(path.join(config.carpetaTrabajo, ARCHIVO_IMAGEN), { force: true });
-  } catch (error) {
-    log(`No se pudo borrar la imagen de la consulta: ${error.message}`);
+  for (const nombre of ARCHIVOS_IMAGEN) {
+    try {
+      rmSync(path.join(config.carpetaTrabajo, nombre), { force: true });
+    } catch (error) {
+      log(`No se pudo borrar ${nombre} de la consulta: ${error.message}`);
+    }
   }
 };
 
@@ -299,7 +315,10 @@ export const resolver = ({ config, trabajo, api, spawnImpl = spawn, log = consol
     if (trabajo.imagen) {
       try {
         if (typeof trabajo.imagen.datos !== 'string' || !trabajo.imagen.datos) throw new Error('la imagen llegó vacía');
-        writeFileSync(path.join(config.carpetaTrabajo, ARCHIVO_IMAGEN), Buffer.from(trabajo.imagen.datos, 'base64'));
+        // Si la limpieza no pudo con un sobrante, no se sigue: Claude Code podria leer el archivo de otra consulta.
+        const sobrante = ARCHIVOS_IMAGEN.find((nombre) => existsSync(path.join(config.carpetaTrabajo, nombre)));
+        if (sobrante) throw new Error(`no se pudo borrar ${sobrante} de una consulta anterior`);
+        writeFileSync(path.join(config.carpetaTrabajo, archivoDeImagen(trabajo.imagen.mime)), Buffer.from(trabajo.imagen.datos, 'base64'));
       } catch (e) {
         // Sin la imagen en disco no tiene sentido lanzar Claude Code: diria que no la encuentra.
         borrarImagen(config, log);

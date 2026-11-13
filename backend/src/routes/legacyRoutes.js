@@ -77,6 +77,27 @@ app.use((err, req, res, next) => {
 // /api/login solo recibe usuario y contrasena: limite chico para no parsear cuerpos
 // grandes en una ruta publica. El parser global de abajo no vuelve a parsear (req._body).
 app.use('/api/login', express.json({ limit: '2kb' }));
+// Una consulta del asistente puede traer el PDF de la OC en base64 (hasta 12 MB, unos 16 MB
+// de cuerpo): no cabe en los 10 MB del parser global. Solo el POST; el peso real por tipo
+// lo valida asistenteIA.validarEntrada.
+// Sin cabecera Authorization no se parsea el cuerpo grande: el 401 de verdad lo da
+// requireAuth mas abajo (consulta la sesion en la BD), pero eso ocurre DESPUES del
+// parser, y no queremos que un anonimo haga parsear 17 MB. Esto no valida el token
+// —seria otra consulta a la BD en cada consulta del asistente—, solo corta el caso
+// evidente antes de leer el cuerpo.
+app.post(
+  '/api/ia/consultas',
+  (req, res, next) => {
+    const cabecera = req.headers.authorization || '';
+    if (!cabecera.startsWith('Bearer ') || cabecera.length < 20) {
+      return res.status(401).json({ error: 'Token requerido' });
+    }
+    return next();
+  },
+  express.json({
+    limit: require('../services/asistenteIA').LIMITE_CUERPO_CONSULTA
+  })
+);
 app.use(
   express.json({
     limit: '10mb',

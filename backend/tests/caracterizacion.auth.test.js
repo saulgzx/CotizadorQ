@@ -316,6 +316,41 @@ describe('POST /api/login', () => {
     expect(otra.status).toBe(401);
   });
 
+  test('una consulta al asistente admite el PDF de la OC (mas de 10 MB de cuerpo); el resto de las rutas no', async () => {
+    // El parser grande va detras de una cabecera Authorization, para que un anonimo no
+    // haga parsear 17 MB. El token no se valida ahi (eso es requireAuth, con su consulta
+    // a la BD): basta con que venga.
+    const conToken = (peticion) => peticion.set('authorization', `Bearer ${'t'.repeat(40)}`);
+
+    // 12 MB en base64 son 16 MB de cuerpo: pasa el parser y llega a la autenticacion (401).
+    const datos = 'A'.repeat(16 * 1024 * 1024);
+    const consulta = await conToken(request(app).post('/api/ia/consultas')).send({ pantallazo: { datos } });
+    expect(consulta.status).toBe(401);
+    // Pasado el margen, se corta antes de autenticar.
+    const enorme = await conToken(request(app).post('/api/ia/consultas')).send({
+      pantallazo: { datos: 'A'.repeat(18 * 1024 * 1024) }
+    });
+    expect(enorme.status).toBe(413);
+    // El mismo cuerpo en otra ruta lo sigue cortando el parser global.
+    const otra = await conToken(request(app).post('/api/logout')).send({ relleno: datos });
+    expect(otra.status).toBe(413);
+  });
+
+  test('sin cabecera Authorization, una consulta grande se corta antes de parsearla', async () => {
+    // 401 y no 413: ni siquiera se leyo el cuerpo.
+    const sinToken = await request(app)
+      .post('/api/ia/consultas')
+      .send({ pantallazo: { datos: 'A'.repeat(16 * 1024 * 1024) } });
+    expect(sinToken.status).toBe(401);
+
+    // Una cabecera que no es Bearer tampoco abre el parser grande.
+    const rara = await request(app)
+      .post('/api/ia/consultas')
+      .set('authorization', 'Basic abc')
+      .send({ pantallazo: { datos: 'A'.repeat(16 * 1024 * 1024) } });
+    expect(rara.status).toBe(401);
+  });
+
   test('error de BD durante el login: 500 generico', async () => {
     mockQuery.mockImplementation(() => Promise.reject(new Error('db caida')));
 
