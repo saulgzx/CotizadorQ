@@ -18,7 +18,6 @@ import {
   STOCK_DELIVERY_SUFFIX,
   SESSION_STORAGE_KEY,
   SESSION_HEARTBEAT_MS,
-  MONTH_LABEL_FORMATTER,
   DEFAULT_AXIS_PARTNER,
   COTIZADOR_STOCK_ADMIN_ROLE,
   COLUMN_MAP,
@@ -103,6 +102,30 @@ import {
   resumirLectura,
   valorMonto
 } from './montosOrden';
+import {
+  calcularEstadisticasOso,
+  claveMes,
+  contarEstadosOrdenes,
+  empresasOso,
+  estadoOrden,
+  estadoSAndD,
+  filasReporteLineas,
+  filtrarOrdenarOrdenesOso,
+  htmlSAndD,
+  mesFacturacionDeBo,
+  metaDeOrden,
+  metaSucia,
+  nombreClienteOrden,
+  normalizarMesFacturacion,
+  normalizarSemanaFacturacion,
+  opcionesMesFacturacion,
+  ordenarFacturadas,
+  ordenesFacturadasFueraDeLista,
+  porcentajeAsignadoOrden,
+  semanaFacturacionDeBo,
+  totalesOrden,
+  tramoAsignacion
+} from '../ordenes/ordenesOso';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
 const margenCotizacion = (cot) => {
@@ -567,243 +590,63 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return () => window.removeEventListener('scroll', handler);
   }, [currentView, expandedBo, osoOrders]);
 
-  const invoicedBos = useMemo(() => {
-    const existing = new Set(osoOrders.map(order => order.bo));
-    return Object.entries(boMeta)
-      .filter(([bo, meta]) => meta?.invoiced && !meta?.deleted && !existing.has(bo))
-      .map(([bo, meta]) => ({ bo, ...meta }))
-      .sort((a, b) => new Date(b.invoicedAt || 0).getTime() - new Date(a.invoicedAt || 0).getTime());
-  }, [boMeta, osoOrders]);
+  const invoicedBos = useMemo(
+    () => ordenesFacturadasFueraDeLista(boMeta, osoOrders),
+    [boMeta, osoOrders]
+  );
 
-  const getOrderStatus = (order) => {
-    const totalOrderQty = (order.lines || []).reduce((acc, line) => acc + (Number(line.orderQty) || 0), 0);
-    const totalShippedQty = (order.lines || []).reduce((acc, line) => acc + (Number(line.shippedQty) || 0), 0);
-    return totalOrderQty > 0
-      ? (totalShippedQty >= totalOrderQty ? 'Completa' : (totalShippedQty > 0 ? 'Parcial' : 'Activa'))
-      : 'Activa';
-  };
+  const getOrderStatus = (order) => estadoOrden(order);
 
-  const sortedInvoicedBos = useMemo(() => {
-    const query = (invoicedFilter || '').trim().toLowerCase();
-    let list = [...invoicedBos];
-    if (query) {
-      list = list.filter(item =>
-        (item.bo || '').toLowerCase().includes(query) ||
-        (item.customerName || '').toLowerCase().includes(query) ||
-        (item.projectName || '').toLowerCase().includes(query) ||
-        (item.poAxis || '').toLowerCase().includes(query)
-      );
-    }
-    if (invoicedSort === 'cliente') {
-      return list.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
-    }
-    if (invoicedSort === 'bo') {
-      return list.sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
-    }
-    if (invoicedSort === 'lastSeen') {
-      return list.sort((a, b) => new Date(b.lastSeenAt || 0).getTime() - new Date(a.lastSeenAt || 0).getTime());
-    }
-    return list.sort((a, b) => new Date(b.invoicedAt || 0).getTime() - new Date(a.invoicedAt || 0).getTime());
-  }, [invoicedBos, invoicedSort, invoicedFilter]);
+  const sortedInvoicedBos = useMemo(
+    () => ordenarFacturadas(invoicedBos, invoicedSort, invoicedFilter),
+    [invoicedBos, invoicedSort, invoicedFilter]
+  );
 
-  const osoStats = useMemo(() => {
-    const stats = { total: osoOrders.length, activa: 0, parcial: 0, completa: 0 };
-    osoOrders.forEach(order => {
-      const status = getOrderStatus(order).toLowerCase();
-      if (status === 'parcial') stats.parcial += 1;
-      else if (status === 'completa') stats.completa += 1;
-      else stats.activa += 1;
-    });
-    return stats;
-  }, [osoOrders]);
+  const osoStats = useMemo(() => contarEstadosOrdenes(osoOrders), [osoOrders]);
 
   const safePinnedBos = useMemo(() => (Array.isArray(pinnedBos) ? pinnedBos : []), [pinnedBos]);
 
-  const getOsoMeta = (bo) => {
-    const meta = boMeta[bo] || {};
-    const draft = boDraft[bo] || {};
-    return { ...meta, ...draft };
-  };
+  const getOsoMeta = (bo) => metaDeOrden(boMeta, boDraft, bo);
 
-  const normalizeInvoiceMonthValue = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return '';
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  };
+  const normalizeInvoiceMonthValue = normalizarMesFacturacion;
 
-  const normalizeInvoiceWeekValue = (value) => {
-    if (value === undefined || value === null || value === '') return '';
-    const parsed = parseInt(String(value), 10);
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) return '';
-    return String(parsed);
-  };
+  const normalizeInvoiceWeekValue = normalizarSemanaFacturacion;
 
-  const getBoInvoiceMonth = (bo) => {
-    const meta = getOsoMeta(bo);
-    return normalizeInvoiceMonthValue(meta.estimatedInvoiceMonth) || normalizeInvoiceMonthValue(meta.estimatedInvoiceDate);
-  };
+  const getBoInvoiceMonth = (bo) => mesFacturacionDeBo(boMeta, boDraft, bo);
 
-  const getBoInvoiceWeek = (bo) => normalizeInvoiceWeekValue(getOsoMeta(bo).estimatedInvoiceWeek);
+  const getBoInvoiceWeek = (bo) => semanaFacturacionDeBo(boMeta, boDraft, bo);
 
-  const invoiceMonthOptions = useMemo(() => {
-    const options = new Set();
-    const now = new Date();
-    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const monthKeyToIndex = (key) => {
-      if (!/^\d{4}-\d{2}$/.test(key || '')) return Number.NEGATIVE_INFINITY;
-      const [year, month] = String(key).split('-').map(Number);
-      return (year * 12) + (month - 1);
-    };
-    const currentIndex = monthKeyToIndex(currentKey);
+  const invoiceMonthOptions = useMemo(
+    () => opcionesMesFacturacion(boMeta, boDraft),
+    [boMeta, boDraft]
+  );
 
-    // Estimación de facturación: solo meses actuales/futuros.
-    // Igual incluimos meses pasados si ya están guardados, para que se vean y puedan corregirse.
-    for (let i = 0; i < 36; i += 1) {
-      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      options.add(key);
-    }
-    Object.values(boMeta || {}).forEach(meta => {
-      const key = normalizeInvoiceMonthValue(meta?.estimatedInvoiceMonth || meta?.estimatedInvoiceDate);
-      if (key) options.add(key);
-    });
-    Object.values(boDraft || {}).forEach(draft => {
-      const key = normalizeInvoiceMonthValue(draft?.estimatedInvoiceMonth);
-      if (key) options.add(key);
-    });
-    return Array.from(options)
-      .sort((a, b) => monthKeyToIndex(a) - monthKeyToIndex(b))
-      .map((key) => {
-        const [year, month] = key.split('-');
-        const d = new Date(Number(year), Number(month) - 1, 1);
-        const idx = monthKeyToIndex(key);
-        const isPast = idx < currentIndex;
-        return {
-          value: key,
-          label: `${MONTH_LABEL_FORMATTER.format(d).replace('.', '')}${isPast ? ' (pasado)' : ''}`,
-          disabled: isPast
-        };
-      });
-  }, [boMeta, boDraft]);
+  const isBoMetaDirty = (bo) => metaSucia(boMeta, boDraft, bo);
 
-  const isBoMetaDirty = (bo) => {
-    const draft = boDraft[bo] || {};
-    return (
-      (draft.projectName !== undefined && draft.projectName !== (boMeta[bo]?.projectName ?? '')) ||
-      (draft.poAxis !== undefined && draft.poAxis !== (boMeta[bo]?.poAxis ?? '')) ||
-      (draft.estimatedInvoiceMonth !== undefined &&
-        normalizeInvoiceMonthValue(draft.estimatedInvoiceMonth) !== normalizeInvoiceMonthValue(boMeta[bo]?.estimatedInvoiceMonth || boMeta[bo]?.estimatedInvoiceDate)) ||
-      (draft.estimatedInvoiceWeek !== undefined &&
-        normalizeInvoiceWeekValue(draft.estimatedInvoiceWeek) !== normalizeInvoiceWeekValue(boMeta[bo]?.estimatedInvoiceWeek))
-    );
-  };
+  const getOsoCustomerName = (order) => nombreClienteOrden(order, boMeta, boDraft);
 
-  const getOsoCustomerName = (order) =>
-    (order?.customerName || getOsoMeta(order?.bo)?.customerName || 'Sin cliente').toString().trim() || 'Sin cliente';
+  const filteredOsoOrders = useMemo(() => filtrarOrdenarOrdenesOso(osoOrders, {
+    boMeta,
+    boDraft,
+    texto: osoFilter,
+    esAdmin: isAdmin,
+    empresa: osoCompanyFilter,
+    estado: osoStatusFilter,
+    filtroRapido: osoQuickFilter,
+    mesFacturacion: osoInvoiceMonth,
+    orden: osoSort,
+    busquedaGlobal: globalQuery
+  }), [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta, boDraft, osoCompanyFilter, globalQuery, isAdmin]);
 
-  const filteredOsoOrders = useMemo(() => {
-    const query = isAdmin ? '' : (osoFilter || '').trim().toLowerCase();
-    const companyFilter = (osoCompanyFilter || '').trim().toLowerCase();
-    const list = osoOrders.filter(order => {
-      const bo = (order.bo || '').toString().toLowerCase();
-      const customer = (order.customerName || '').toString().toLowerCase();
-      // El proyecto y el PO Axis no vienen en la orden: viven en la meta del BO (lo que
-      // se ve en la tarjeta, borrador incluido). Antes se buscaba en order.projectName /
-      // order.poAxis, que no existen, y la búsqueda nunca encontraba por esos dos campos.
-      const metaBusqueda = globalQuery ? getOsoMeta(order.bo) : null;
-      const globalMatch = !globalQuery || [
-        order.bo,
-        order.customerName,
-        metaBusqueda.projectName,
-        metaBusqueda.poAxis,
-        ...(order.lines || []).map(line => `${line.sku || ''} ${line.mpn || ''}`)
-      ].some(v => (v || '').toString().toLowerCase().includes(globalQuery));
-      const matchesText = (!query || bo.includes(query) || customer.includes(query)) && globalMatch;
-      if (!matchesText) return false;
-      if (companyFilter) {
-        const name = getOsoCustomerName(order).toLowerCase();
-        if (name !== companyFilter) return false;
-      }
-      if (!osoStatusFilter || osoStatusFilter === 'all') return true;
-      const status = getOrderStatus(order);
-      return status.toLowerCase() === osoStatusFilter;
-    });
-    const filteredByQuick = list.filter(order => {
-      const meta = getOsoMeta(order.bo);
-      const projectName = (meta.projectName || '').trim();
-      const poAxis = (meta.poAxis || '').trim();
-      const invoiceMonth = normalizeInvoiceMonthValue(meta.estimatedInvoiceMonth) || normalizeInvoiceMonthValue(meta.estimatedInvoiceDate);
-      if (osoInvoiceMonth && invoiceMonth !== osoInvoiceMonth) return false;
-      const allowedQuickFilters = new Set(['all', 'sd-pending', 'missing-project', 'missing-po']);
-      const quickFilter = allowedQuickFilters.has(osoQuickFilter) ? osoQuickFilter : 'all';
-      if (!quickFilter || quickFilter === 'all') return true;
-      if (quickFilter === 'sd-pending') return getSAndDStatus(order.bo) !== 'aplicado';
-      if (quickFilter === 'missing-project') return !projectName;
-      if (quickFilter === 'missing-po') return !poAxis;
-      return true;
-    });
-    if (osoSort === 'empresa') {
-      return [...filteredByQuick].sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
-    }
-    if (osoSort === 'porcentaje') {
-      return [...filteredByQuick].sort((a, b) => (Number(b.allocPct) || 0) - (Number(a.allocPct) || 0));
-    }
-    if (osoSort === 'fact-month') {
-      return [...filteredByQuick].sort((a, b) => {
-        const monthA = getBoInvoiceMonth(a.bo) || '9999-99';
-        const monthB = getBoInvoiceMonth(b.bo) || '9999-99';
-        if (monthA !== monthB) return monthA.localeCompare(monthB);
-        const weekA = Number(getBoInvoiceWeek(a.bo) || 99);
-        const weekB = Number(getBoInvoiceWeek(b.bo) || 99);
-        if (weekA !== weekB) return weekA - weekB;
-        return (a.bo || '').localeCompare(b.bo || '');
-      });
-    }
-    if (osoSort === 'eta') {
-      const toTs = (value) => {
-        if (!value) return Number.POSITIVE_INFINITY;
-        const d = new Date(value);
-        return Number.isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime();
-      };
-      return [...filteredByQuick].sort((a, b) => toTs(a.etaEstimated) - toTs(b.etaEstimated));
-    }
-    return [...filteredByQuick].sort((a, b) => (a.bo || '').localeCompare(b.bo || ''));
-  }, [osoOrders, osoFilter, osoStatusFilter, osoSort, osoQuickFilter, osoInvoiceMonth, boMeta, boDraft, osoCompanyFilter, globalQuery, isAdmin]);
+  const osoCompanies = useMemo(
+    () => empresasOso(osoOrders, boMeta, boDraft),
+    [osoOrders, boMeta, boDraft]
+  );
 
-  const osoCompanies = useMemo(() => {
-    const map = new Map();
-    osoOrders.forEach(order => {
-      const name = getOsoCustomerName(order);
-      map.set(name, (map.get(name) || 0) + 1);
-    });
-    return Array.from(map.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [osoOrders, boMeta, boDraft]);
+  const getOsoOrderTotals = (order) => totalesOrden(order);
 
-  const getOsoOrderTotals = (order) => {
-    const totals = { orderQty: 0, shippedQty: 0, allocQty: 0 };
-    (order?.lines || []).forEach(line => {
-      totals.orderQty += Number(line.orderQty) || 0;
-      totals.shippedQty += Number(line.shippedQty) || 0;
-      totals.allocQty += Number(line.allocQty) || 0;
-    });
-    return totals;
-  };
-
-  const getOsoAllocPct = (order, totals) => {
-    const meta = getOsoMeta(order?.bo);
-    const raw = order?.allocPct ?? meta?.allocPct;
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) return parsed;
-    if (totals?.orderQty > 0) {
-      return Math.round((totals.allocQty / totals.orderQty) * 1000) / 10;
-    }
-    return 0;
-  };
+  const getOsoAllocPct = (order, totals) =>
+    porcentajeAsignadoOrden(order, totals, getOsoMeta(order?.bo));
 
   const normalizeAxisAmount = normalizarMontoLinea;
 
@@ -920,113 +763,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return true;
   };
 
-  const toMonthKey = (value) => {
-    if (!value) return 'Sin fecha';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return 'Sin fecha';
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+  const toMonthKey = claveMes;
 
-  const addDaysToIso = (isoDate, days) => {
-    if (!isoDate) return '';
-    const d = new Date(isoDate);
-    if (Number.isNaN(d.getTime())) return '';
-    d.setUTCDate(d.getUTCDate() + days);
-    return d.toISOString().slice(0, 10);
-  };
+  const getAllocBucket = tramoAsignacion;
 
-  const getAllocBucket = (pct) => {
-    if (!Number.isFinite(pct)) return 'Sin %';
-    if (pct < 25) return '0-24%';
-    if (pct < 50) return '25-49%';
-    if (pct < 75) return '50-74%';
-    if (pct < 100) return '75-99%';
-    return '>=100%';
-  };
+  const computeOsoStats = (orders) => calcularEstadisticasOso(orders, boMeta, boDraft);
 
-  const computeOsoStats = (orders) => {
-    const stats = {
-      total: orders.length,
-      activa: 0,
-      parcial: 0,
-      completa: 0,
-      totalOrderQty: 0,
-      totalAllocQty: 0,
-      totalShippedQty: 0,
-      avgAllocPct: 0,
-      etaOverdue: 0,
-      etaSoon: 0
-    };
-    const today = new Date();
-    const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-    let allocPctSum = 0;
-    orders.forEach(order => {
-      const status = getOrderStatus(order).toLowerCase();
-      if (status === 'parcial') stats.parcial += 1;
-      else if (status === 'completa') stats.completa += 1;
-      else stats.activa += 1;
-      const totals = getOsoOrderTotals(order);
-      stats.totalOrderQty += totals.orderQty;
-      stats.totalAllocQty += totals.allocQty;
-      stats.totalShippedQty += totals.shippedQty;
-      allocPctSum += getOsoAllocPct(order, totals);
-      if (order.etaEstimated) {
-        const eta = new Date(order.etaEstimated);
-        if (!Number.isNaN(eta.getTime())) {
-          const etaUtc = Date.UTC(eta.getFullYear(), eta.getMonth(), eta.getDate());
-          const diffDays = Math.round((etaUtc - todayUtc) / 86400000);
-          if (diffDays < 0) stats.etaOverdue += 1;
-          else if (diffDays <= 7) stats.etaSoon += 1;
-        }
-      }
-    });
-    stats.avgAllocPct = orders.length ? Math.round((allocPctSum / orders.length) * 10) / 10 : 0;
-    return stats;
-  };
-
-  const buildOsoLineReportRows = (orders) => {
-    const rows = [];
-    orders.forEach(order => {
-      const bo = order?.bo || '';
-      const cliente = getOsoCustomerName(order);
-      const invoiceMonth = getBoInvoiceMonth(order?.bo);
-      const invoiceWeek = getBoInvoiceWeek(order?.bo);
-      const customerPo = order?.customerPO || getOsoMeta(order?.bo)?.customerPO || '';
-      const poAxis = getOsoMeta(order?.bo)?.poAxis || '';
-      const projectName = getOsoMeta(order?.bo)?.projectName || '';
-      (order.lines || []).forEach((line, idx) => {
-        const entregaOor = line.tiempoEntrega || '';
-        const montoAxis = getAxisMontoNumber(order?.bo, line);
-        const montoIntcomex = getIntcomexMontoNumber(order?.bo, line);
-        rows.push({
-          key: `${bo}-${line.lineIndex ?? idx}-${line.sku || ''}-${line.mpn || ''}`.trim(),
-          lineIndex: line.lineIndex ?? idx,
-          bo,
-          customerPo,
-          poAxis,
-          projectName,
-          cliente,
-          empresa: cliente,
-          sku: line.sku || '',
-          mpn: line.mpn || '',
-          desc: line.desc || '',
-          entregaOor,
-          etaEstimado: entregaOor ? addDaysToIso(entregaOor, 15) : '',
-          invoiceMonth,
-          invoiceWeek: invoiceWeek ? Number(invoiceWeek) : '',
-          allocQty: line.allocQty ?? 0,
-          orderQty: line.orderQty ?? 0,
-          shippedQty: line.shippedQty ?? 0,
-          montoAxis,
-          montoFacturar: montoAxis * (Number(line.orderQty) || 0),
-          montoIntcomex,
-          montoFacturarIntcomex: montoIntcomex * (Number(line.orderQty) || 0),
-          notas: ''
-        });
-      });
-    });
-    return rows;
-  };
+  const buildOsoLineReportRows = (orders) =>
+    filasReporteLineas(orders, { boMeta, boDraft, axisDraft, intcomexDraft });
 
   const updateOsoReportEdit = (key, patch) => {
     if (!key) return;
@@ -4365,50 +4109,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   };
 
-  const normalizeBrand = (value) => {
-    const raw = (value || '').toString().toLowerCase();
-    if (raw.includes('axis')) return 'Axis';
-    if (raw.includes('qnap')) return 'QNAP';
-    if (raw.includes('iss')) return 'ISS';
-    if (raw.includes('neural')) return 'Neural Labs';
-    if (raw.includes('milestone')) return 'Milestone';
-    return (value || '').toString().trim();
-  };
+  const buildSAndDHtml = (order) => htmlSAndD(order, boMeta, boDraft);
 
-  const getOrderBrand = (order) => {
-    const candidate =
-      order?.brand ||
-      order?.marca ||
-      order?.manufBrand ||
-      order?.manufacturer ||
-      order?.lines?.[0]?.brand ||
-      order?.lines?.[0]?.marca ||
-      '';
-    return normalizeBrand(candidate);
-  };
-
-  const buildSAndDHtml = (order) => {
-    const bo = order?.bo || '';
-    const po = boDraft[order?.bo]?.projectName ?? boMeta[order?.bo]?.projectName ?? '';
-    const brand = getOrderBrand(order) || '';
-    return [
-      `<p>Estimados.</p>`,
-      `<p>Favor su apoyo gestionando la siguiente protección</p>`,
-      `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">`,
-      `<tr><th>Orden de Venta</th><td>${bo}</td></tr>`,
-      `<tr><th>Usuario Final</th><td></td></tr>`,
-      `<tr><th>País</th><td>XCL</td></tr>`,
-      `<tr><th>Marca</th><td>${brand}</td></tr>`,
-      `<tr><th>Número de proyecto</th><td>${po}</td></tr>`,
-      `</table>`,
-      `<p>Muchas gracias<br>Quedo atento<br>Saludos.</p>`
-    ].join('');
-  };
-
-  const getSAndDStatus = (bo) => {
-    const status = boMeta[bo]?.sAndDStatus;
-    return status === 'aplicado' ? 'aplicado' : 'pendiente';
-  };
+  const getSAndDStatus = (bo) => estadoSAndD(boMeta, bo);
 
   const setSAndDStatus = (bo, status) => {
     updateBoMetaLocal(bo, { sAndDStatus: status });
