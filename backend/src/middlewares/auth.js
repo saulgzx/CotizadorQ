@@ -74,20 +74,6 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
   };
 
 
-  const requireAdminOrIntcomexCompras = async (req, res, next) => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) return res.status(403).json({ error: 'Permiso denegado' });
-      const access = await getUserAccess(userId);
-      if (!access) return res.status(403).json({ error: 'Permiso denegado' });
-      if (access.role === 'admin') return next();
-      if (access.empresa === 'intcomex' && access.intcomexProfile === 'compras') return next();
-      return res.status(403).json({ error: 'Permiso denegado' });
-    } catch (error) {
-      return res.status(500).json({ error: 'Error del servidor' });
-    }
-  };
-
   const requireOwnerOrAdmin = (resolveOwnerId, notFoundMessage = 'Recurso no encontrado') => async (req, res, next) => {
     try {
       const userId = req.user?.id;
@@ -111,7 +97,6 @@ const buildAuthMiddlewares = ({ pool, jwtSecret, getSessionHeaders, validateSess
     requireAuth,
     requireAdmin,
     requireCotizadorStockAdmin,
-    requireAdminOrIntcomexCompras,
     requireOwnerOrAdmin
   };
 };

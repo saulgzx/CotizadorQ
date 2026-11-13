@@ -747,7 +747,8 @@ const parseGpValue = (value, fallback = 0.15) => {
 
 const normalizeIntcomexProfile = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'ventas' || normalized === 'compras') return normalized;
+  // El perfil 'compras' se eliminó: Órdenes y Compras son solo para admin. Solo 'ventas' es válido.
+  if (normalized === 'ventas') return normalized;
   return null;
 };
 
@@ -1524,6 +1525,36 @@ const initDB = async () => {
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS intcomex_profile VARCHAR(20);`);
     // Cuentas desactivables por el admin. Las existentes quedan activas (DEFAULT true).
     await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true;`);
+    // Perfil 'compras' eliminado (Órdenes/Compras ahora solo admin). Migración de una sola
+    // pasada: al quedar el perfil en NULL no vuelve a calzar en arranques siguientes.
+    // Las cuentas NO admin de Intcomex con ese perfil se DESACTIVAN (si solo se les quitara
+    // el perfil quedarían como usuarios comunes con acceso al cotizador: más acceso del que
+    // tenían). Sus sesiones abiertas dejan de valer en la siguiente petición (validateSession).
+    // El admin puede reactivarlas desde Usuarios. No debe tumbar el arranque.
+    try {
+      const desactivadas = await pool.query(
+        `UPDATE usuarios
+         SET activo = false, intcomex_profile = NULL
+         WHERE LOWER(TRIM(COALESCE(intcomex_profile, ''))) = 'compras'
+           AND LOWER(TRIM(COALESCE(empresa, ''))) = 'intcomex'
+           AND LOWER(COALESCE(role, '')) <> 'admin'`
+      );
+      const limpiadas = await pool.query(
+        `UPDATE usuarios
+         SET intcomex_profile = NULL
+         WHERE LOWER(TRIM(COALESCE(intcomex_profile, ''))) = 'compras'`
+      );
+      const nDesactivadas = Number(desactivadas?.rowCount) || 0;
+      const nLimpiadas = Number(limpiadas?.rowCount) || 0;
+      if (nDesactivadas > 0 || nLimpiadas > 0) {
+        logger.info(
+          { event: 'perfil_compras_eliminado', desactivadas: nDesactivadas, perfil_limpiado: nLimpiadas },
+          'Perfil compras eliminado: cuentas desactivadas / perfil limpiado'
+        );
+      }
+    } catch (error) {
+      logger.error({ event: 'perfil_compras_eliminado_failed', message: error.message }, 'No se pudo migrar el perfil compras');
+    }
     // Sin usuarios sembrados desde el codigo: las cuentas se crean por SQL o desde
     // /api/usuarios (ver SECURITY.md). Las cuentas ya existentes en la BD no se tocan.
 
@@ -1873,7 +1904,7 @@ const validateSession = async (userId, sessionId, req) => {
   return { ok: true, role };
 };
 
-const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireAdminOrIntcomexCompras, requireOwnerOrAdmin } = buildAuthMiddlewares({
+const { requireAuth, requireAdmin, requireCotizadorStockAdmin, requireOwnerOrAdmin } = buildAuthMiddlewares({
   pool,
   jwtSecret: JWT_SECRET,
   getSessionHeaders,
@@ -2828,7 +2859,7 @@ app.get('/api/sheets/analyze', authenticateToken, requireAdmin, async (req, res)
 
 
 // OSO - Ordenes activas (admin)
-app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
+app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const cached = cacheGet(CACHE_KEY_OSO_ORDERS);
     if (cached) {
@@ -3039,7 +3070,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, asy
 });
 
 // BO Meta - Obtener todos (admin)
-app.get('/api/bo-meta', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
+app.get('/api/bo-meta', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM bo_meta ORDER BY bo ASC');
     res.json(result.rows);
@@ -3059,7 +3090,7 @@ const ensureBoMetaSchema = async () => {
   boMetaSchemaReady = true;
 };
 
-app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
+app.put('/api/bo-meta/:bo', authenticateToken, requireAdmin, async (req, res) => {
   try {
     await ensureBoMetaSchema();
     const bo = String(req.params.bo || '').trim();
@@ -3137,7 +3168,7 @@ app.put('/api/bo-meta/:bo', authenticateToken, requireAdminOrIntcomexCompras, as
 });
 
 // BO Line Meta - Guardar montos axis por linea (admin)
-  app.put('/api/bo-lines/:bo', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
+  app.put('/api/bo-lines/:bo', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const bo = String(req.params.bo || '').trim();
     if (!bo) return res.status(400).json({ error: 'BO requerido' });
@@ -3330,7 +3361,7 @@ app.get('/api/stock/catalog', authenticateToken, async (req, res) => {
 });
 
 // BO Meta - Eliminar (admin) con comentario
-app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdminOrIntcomexCompras, async (req, res) => {
+app.post('/api/bo-meta/:bo/delete', authenticateToken, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const bo = String(req.params.bo || '').trim();
