@@ -55,7 +55,7 @@ describe('CargarQuoteModal', () => {
     const dialogo = screen.getByRole('dialog', { name: 'Cargar quote de fabricante' });
     expect(dialogo).toHaveAttribute('aria-modal', 'true');
     const radios = within(screen.getByRole('radiogroup')).getAllByRole('radio');
-    expect(radios.map((r) => r.textContent)).toEqual(['ISS', 'Neural Labs', 'Milestone']);
+    expect(radios.map((r) => r.textContent)).toEqual(['ISS', 'Neural Labs', 'Milestone', 'Velasea']);
     radios.forEach((r) => expect(r).toHaveAttribute('aria-checked', 'false'));
     expect(agregarBtn()).toBeDisabled();
   });
@@ -68,6 +68,36 @@ describe('CargarQuoteModal', () => {
     expect(screen.getByText('Transporte y arancel 15 %')).toBeInTheDocument();
     elegirFab('Milestone');
     expect(screen.getByText('Licencias 0 % · Servidores 12 %')).toBeInTheDocument();
+    elegirFab('Velasea');
+    expect(screen.getByText('Flete de entrada 1,1 % · Transporte y arancel 12 % · sin IC')).toBeInTheDocument();
+  });
+
+  test('Velasea: costo como QNAP sin IC y precio de referencia con el margen de QNAP', async () => {
+    const { onAgregar } = montar();
+    elegirFab('Velasea');
+    subir(pdf());
+    await screen.findByLabelText('MPN línea 1');
+    // costo 100 -> 100 x 1,011 x 1,12 = 113,23 -> 113,23 / 0,85 = 133,21 (15 %, no 8 %)
+    expect(screen.getByText('113,23')).toBeInTheDocument();
+    expect(screen.getByText('133,21')).toBeInTheDocument();
+    expect(screen.getByText('Precio cliente 15 %')).toBeInTheDocument();
+    expect(screen.getByText(/Venta total al 15 %/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Tipo línea 1')).not.toBeInTheDocument();
+    fireEvent.click(agregarBtn());
+    expect(onAgregar.mock.calls[0][0][0]).toMatchObject({ origen: 'VELASEA', marca: 'Velasea', precio: 100, costoChile: 113.23, sku: 'To Create' });
+  });
+
+  test('Velasea: el precio de referencia sigue al margen global de QNAP que venga de la página', async () => {
+    montar({ gpQnap: 0.2 });
+    elegirFab('Velasea');
+    subir(pdf());
+    await screen.findByLabelText('MPN línea 1');
+    expect(screen.getByText('Precio cliente 20 %')).toBeInTheDocument();
+    expect(screen.getByText('141,54')).toBeInTheDocument(); // 113,23 / 0,80
+    // Los demás fabricantes no dependen de ese margen: siguen al 8 %.
+    elegirFab('ISS');
+    expect(screen.getByText('Precio cliente 8 %')).toBeInTheDocument();
+    expect(screen.getByText('125,00')).toBeInTheDocument();
   });
 
   test('sin fabricante no se lee el archivo y se pide elegirlo', () => {

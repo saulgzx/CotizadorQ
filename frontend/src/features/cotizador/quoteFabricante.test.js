@@ -13,13 +13,17 @@ import {
   ORIGENES_QUOTE,
   esOrigenQuote,
   origenDeQuote,
-  productoDeQuoteGuardado
+  productoDeQuoteGuardado,
+  fleteEntradaQuote,
+  usaMargenQnap
 } from './quoteFabricante';
+import { CADENA_POR_ORIGEN } from './cotizadorConstants';
 import { productoFueraDeLista } from './fueraDeLista';
 
 describe('configuración', () => {
   test('fabricantes, nombres y margen por defecto', () => {
-    expect(Object.keys(FABRICANTES)).toEqual(['ISS', 'NEURAL', 'MILESTONE']);
+    expect(Object.keys(FABRICANTES)).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'VELASEA']);
+    expect(FABRICANTES.VELASEA.nombre).toBe('Velasea');
     expect(FABRICANTES.ISS.nombre).toBe('ISS');
     expect(FABRICANTES.NEURAL.nombre).toBe('Neural Labs');
     expect(FABRICANTES.MILESTONE.nombre).toBe('Milestone');
@@ -427,7 +431,7 @@ describe('productoDeQuote', () => {
     expect(origenDeQuote('MILESTONE', 'licencia')).toBe('MILESTONE');
     expect(origenDeQuote('MILESTONE')).toBe('MILESTONE');
     expect(origenDeQuote('QNAP')).toBeNull();
-    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']);
+    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
     expect(esOrigenQuote('milestone_hw')).toBe(true);
     expect(esOrigenQuote('AXIS')).toBe(false);
     expect(esOrigenQuote(null)).toBe(false);
@@ -561,3 +565,66 @@ describe('productoDeQuoteGuardado', () => {
   });
 });
 
+describe('Velasea: igual que QNAP pero sin IC', () => {
+  const linea = { mpn: 'VS-4U-RACK', descripcion: 'Servidor de grabación 4U', cantidad: 2, costoUnitario: 100 };
+
+  test('costo Chile = costo del quote x 1,011 (flete de entrada) x 1,12, sin dividir por IC', () => {
+    expect(fleteEntradaQuote('VELASEA')).toBe(1.011);
+    expect(porcentajeInternacion('VELASEA')).toBe(0.12);
+    expect(costoChileQuote(100, 'VELASEA')).toBe(113.23); // 113,232
+    expect(costoChileQuote(1000, 'velasea')).toBe(1132.32);
+    // Es exactamente el costo Chile de QNAP sin el factor IC (0,95).
+    const qnap = (100 * 1.011) / 0.95 * 1.12;
+    expect(costoChileQuote(100, 'VELASEA')).toBe(Math.round(qnap * 0.95 * 100) / 100);
+    // Medio centavo exacto: 31,25 x 1,13232 = 35,385 -> 35,39
+    expect(costoChileQuote(31.25, 'VELASEA')).toBe(35.39);
+  });
+
+  test('los demás fabricantes no llevan flete de entrada', () => {
+    for (const f of ['ISS', 'NEURAL', 'MILESTONE']) expect(fleteEntradaQuote(f)).toBe(1);
+    expect(fleteEntradaQuote('OTRO')).toBeNull();
+  });
+
+  test('usa el margen de QNAP, no el 8 % de los quotes', () => {
+    expect(usaMargenQnap('VELASEA')).toBe(true);
+    expect(usaMargenQnap(' velasea ')).toBe(true);
+    for (const o of ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'QNAP', 'AXIS', '', null]) expect(usaMargenQnap(o)).toBe(false);
+  });
+
+  test('el producto sale con origen VELASEA, SKU por crear y el costo del quote como precio', () => {
+    const p = productoDeQuote(linea, { fabricante: 'VELASEA' });
+    expect(p).toMatchObject({
+      origen: 'VELASEA', marca: 'Velasea', sku: 'To Create', mpn: 'VS-4U-RACK',
+      precio: 100, costoChile: 113.23, gp: 0.15, deQuote: true, tipoQuote: null, cantidadSugerida: 2
+    });
+    expect(precioClienteQuote(p.costoChile, 0.15)).toBe(133.21);
+    expect(esOrigenQuote('VELASEA')).toBe(true);
+    expect(origenDeQuote('velasea')).toBe('VELASEA');
+  });
+
+  test('una línea Velasea guardada se rearma igual (duplicar)', () => {
+    expect(productoDeQuoteGuardado({ origen: 'VELASEA', mpn: 'VS-4U-RACK', descripcion: 'Servidor', cantidad: 2, precio_disty: 100 }))
+      .toMatchObject({ origen: 'VELASEA', marca: 'Velasea', precio: 100, costoChile: 113.23, cantidadSugerida: 2 });
+  });
+});
+
+describe('la lógica de quotes y la tabla de cadenas de costo dicen lo mismo', () => {
+  test.each([
+    ['ISS', undefined, 'ISS'],
+    ['NEURAL', undefined, 'NEURAL'],
+    ['MILESTONE', 'licencia', 'MILESTONE'],
+    ['MILESTONE', 'servidor', 'MILESTONE_HW'],
+    ['VELASEA', undefined, 'VELASEA']
+  ])('%s %s -> cadena de %s', (fabricante, tipo, origen) => {
+    expect(origenDeQuote(fabricante, tipo)).toBe(origen);
+    const c = CADENA_POR_ORIGEN[origen];
+    for (const costo of [1, 31.25, 80.5, 100, 999.99, 4300.5, 12345.67]) {
+      const porCadena = ((costo * c.INBOUND_FREIGHT) / c.IC) * (1 + c.INT);
+      expect(Math.abs(costoChileQuote(costo, fabricante, tipo) - porCadena)).toBeLessThanOrEqual(0.005 + 1e-9);
+    }
+  });
+
+  test('todo origen de quote tiene su cadena y viceversa (salvo AXIS y QNAP)', () => {
+    expect(Object.keys(CADENA_POR_ORIGEN).filter((o) => o !== 'AXIS' && o !== 'QNAP').sort()).toEqual([...ORIGENES_QUOTE].sort());
+  });
+});

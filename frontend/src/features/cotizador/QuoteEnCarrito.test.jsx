@@ -17,6 +17,7 @@ vi.mock('./CargarQuoteModal', async () => {
     'Agregar Neural 100': [[{ mpn: 'NL-1', descripcion: 'Licencia Neural', costoUnitario: 100, cantidad: 1 }, { fabricante: 'NEURAL', indice: 2 }]],
     'Agregar Milestone servidor 100': [[{ mpn: 'MS-SRV', descripcion: 'Servidor Milestone', costoUnitario: 100, cantidad: 1 }, { fabricante: 'MILESTONE', tipo: 'servidor', indice: 3 }]],
     'Agregar Milestone licencia 100': [[{ mpn: 'MS-LIC', descripcion: 'Licencia Milestone', costoUnitario: 100, cantidad: 1 }, { fabricante: 'MILESTONE', tipo: 'licencia', indice: 4 }]],
+    'Agregar Velasea 100 x2': [[{ mpn: 'VS-4U', descripcion: 'Servidor Velasea 4U', costoUnitario: 100, cantidad: 2 }, { fabricante: 'VELASEA', indice: 7 }]],
     'Agregar dos ISS mismo MPN': [
       [{ mpn: 'REPETIDO', descripcion: 'Primera', costoUnitario: 100, cantidad: 1 }, { fabricante: 'ISS', indice: 5 }],
       [{ mpn: 'REPETIDO', descripcion: 'Segunda', costoUnitario: 100, cantidad: 2 }, { fabricante: 'ISS', indice: 6 }]
@@ -75,7 +76,7 @@ describe('Quote en el carrito', () => {
     const admin = renderApp({ user: ADMIN, ruta: '/cotizador' });
     await esperarCotizador();
     const boton = await screen.findByRole('button', { name: /Cargar quote/ });
-    expect(boton).toHaveAttribute('title', 'Cargar el quote de ISS, Neural Labs o Milestone');
+    expect(boton).toHaveAttribute('title', 'Cargar el quote de ISS, Neural Labs, Milestone o Velasea');
     admin.unmount();
 
     renderApp({ user: CLIENTE, ruta: '/cotizador' });
@@ -175,6 +176,35 @@ describe('Quote en el carrito', () => {
     expect(linea.costo_unitario).toBeCloseTo(115, 6);
     expect(linea.precio_total).toBeCloseTo(375, 6);
     expect(Number.isFinite(Number(linea.producto_id))).toBe(false);
+  });
+
+  it('Velasea: costo como QNAP sin IC y margen global de QNAP (15 %), también al guardar', async () => {
+    renderApp({ user: ADMIN, ruta: '/cotizador' });
+    await esperarCotizador();
+    await cargar('Agregar Velasea 100 x2');
+    await cargar('Agregar ISS 100 x3');
+
+    const [velasea, iss] = filasDelCarrito();
+    expect(within(velasea).getByLabelText('Cantidad')).toHaveValue('2');
+    // 100 x 1,011 x 1,12 = 113,23 de costo Chile; 113,23 / 0,85 = 133,21 (no 123,08, que sería al 8 %)
+    expect(within(velasea).getByLabelText('Precio unitario')).toHaveValue('133.21');
+    expect(within(velasea).getByLabelText('GP %')).toHaveAttribute('placeholder', '15.0');
+    expect(within(velasea).getByText('global')).toBeInTheDocument();
+    expect(within(velasea).getByText('Quote Velasea')).toBeInTheDocument();
+    expect(within(velasea).getByText(/Costo fabricante \$100\.00 \+ flete 1,1 % \+ 12 %/)).toBeInTheDocument();
+    // La línea ISS del mismo carrito sigue con su 8 %.
+    expect(within(iss).getByLabelText('Precio unitario')).toHaveValue('125.00');
+    expect(within(iss).getByText('base quote')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generar cotización' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generar igual' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Guardar cotización' }));
+    await waitFor(() => expect(api.cotizacionesAPI.create).toHaveBeenCalledTimes(1));
+    const { items } = api.cotizacionesAPI.create.mock.calls[0][0];
+    expect(items[0]).toMatchObject({ origen: 'VELASEA', marca: 'Velasea', sku: 'To Create', precio_disty: 100, gp: 0.15, cantidad: 2, rebate_partner: null, partner_category: null });
+    expect(items[0].costo_unitario).toBeCloseTo(113.23, 6);
+    expect(items[0].precio_unitario).toBeCloseTo(113.23 / 0.85, 6);
+    expect(items[1]).toMatchObject({ origen: 'ISS', gp: 0.08 });
   });
 
   it('el modal se cierra al cambiar de vista', async () => {

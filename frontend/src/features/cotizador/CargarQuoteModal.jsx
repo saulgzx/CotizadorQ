@@ -8,6 +8,7 @@ import {
   esPdf
 } from './PantallazoMontos';
 import { normalizarMonto } from './pantallazoMontos';
+import { CONSTANTS } from './cotizadorConstants';
 import { leerQuote } from './leerQuote';
 import {
   FABRICANTES,
@@ -15,13 +16,15 @@ import {
   TIPOS_MILESTONE,
   costoChileQuote,
   precioClienteQuote,
+  fleteEntradaQuote,
   porcentajeInternacion,
   productoDeQuote,
+  usaMargenQnap,
   tipoEsDudoso,
   tipoMilestoneSugerido
 } from './quoteFabricante';
 
-// Carga de un quote de fabricante (ISS, Neural Labs, Milestone): se lee el PDF o la imagen,
+// Carga de un quote de fabricante (ISS, Neural Labs, Milestone, Velasea): se lee el PDF o la imagen,
 // se muestra una tabla editable y recién cuando la persona confirma las líneas pasan al carrito.
 // No hace llamadas de red propias: todo pasa por `leer`.
 
@@ -80,23 +83,31 @@ export const textoNumero = (n) => {
   return numero.toFixed(fijos).replace('.', ',');
 };
 
-const pctTexto = (decimal) => `${Math.round(decimal * 100)} %`;
+// 0.15 -> "15 %"; 0.011 -> "1,1 %" (hasta dos decimales, con coma).
+const pctTexto = (decimal) => `${String(Math.round(decimal * 10000) / 100).replace('.', ',')} %`;
 
 const textoRecargo = (fabricante) => {
   if (!fabricante) return '';
   if (fabricante === 'MILESTONE') {
     return `Licencias ${pctTexto(porcentajeInternacion('MILESTONE', 'licencia'))} · Servidores ${pctTexto(porcentajeInternacion('MILESTONE', 'servidor'))}`;
   }
-  return `Transporte y arancel ${pctTexto(porcentajeInternacion(fabricante))}`;
+  const arancel = `Transporte y arancel ${pctTexto(porcentajeInternacion(fabricante))}`;
+  const flete = fleteEntradaQuote(fabricante);
+  // Velasea: como QNAP pero sin IC, o sea con flete de entrada además del arancel.
+  return flete !== 1 ? `Flete de entrada ${pctTexto(flete - 1)} · ${arancel} · sin IC` : arancel;
 };
 
+// Margen con que se muestra el precio de referencia: 8 % en los quotes; el global de QNAP en
+// los fabricantes que se cotizan como QNAP (Velasea).
+const gpDeReferencia = (fabricante, gpQnap) => (usaMargenQnap(fabricante) ? gpQnap : GP_QUOTE_POR_DEFECTO);
+
 // Valores derivados de una línea según lo que hay escrito y el fabricante elegido.
-const derivar = (linea, fabricante) => {
+const derivar = (linea, fabricante, gp) => {
   const cantidad = cantidadValida(linea.cantidad);
   const costo = linea.costoFijo ?? normalizarMonto(linea.costo);
   const tipo = fabricante === 'MILESTONE' ? linea.tipo ?? tipoMilestoneSugerido(linea) : null;
   const costoChile = fabricante && costo !== null ? costoChileQuote(costo, fabricante, tipo) : null;
-  const precio = costoChile !== null ? precioClienteQuote(costoChile, GP_QUOTE_POR_DEFECTO) : null;
+  const precio = costoChile !== null ? precioClienteQuote(costoChile, gp) : null;
   const valida = cantidad !== null && costo !== null && costoChile !== null;
   const problemas = [
     ...linea.problemas.filter((p) => !PROBLEMAS_RECALCULADOS.includes(p)),
@@ -119,7 +130,7 @@ const derivar = (linea, fabricante) => {
 const inputCls =
   'w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
 
-export default function CargarQuoteModal({ abierto, onCerrar, onAgregar, leer = leerQuote }) {
+export default function CargarQuoteModal({ abierto, onCerrar, onAgregar, leer = leerQuote, gpQnap = CONSTANTS.DEFAULT_GP }) {
   const [fabricante, setFabricante] = useState(null);
   const [lineas, setLineas] = useState([]);
   const [avisos, setAvisos] = useState([]);
@@ -266,7 +277,8 @@ export default function CargarQuoteModal({ abierto, onCerrar, onAgregar, leer = 
     setConTabla(true);
   };
 
-  const filas = lineas.map((l) => ({ linea: l, d: derivar(l, fabricante) }));
+  const gpRef = gpDeReferencia(fabricante, gpQnap);
+  const filas = lineas.map((l) => ({ linea: l, d: derivar(l, fabricante, gpRef) }));
   const incluidas = filas.filter(({ d }) => d.incluida);
   const totales = incluidas.reduce(
     (acc, { d }) => ({
@@ -468,7 +480,7 @@ export default function CargarQuoteModal({ abierto, onCerrar, onAgregar, leer = 
                     <th className='px-1'>Mi costo USD</th>
                     {esMilestone && <th className='px-1'>Tipo</th>}
                     <th className='px-1 text-right'>Costo Chile</th>
-                    <th className='px-1 text-right'>Precio cliente {pctTexto(GP_QUOTE_POR_DEFECTO)}</th>
+                    <th className='px-1 text-right'>Precio cliente {pctTexto(gpRef)}</th>
                     <th className='px-1'>Revisar</th>
                     <th className='px-1'>
                       <span className='sr-only'>Quitar</span>
@@ -609,7 +621,7 @@ export default function CargarQuoteModal({ abierto, onCerrar, onAgregar, leer = 
               Costo Chile total <strong className='tabular-nums'>US$ {formatoUSD(totales.chile)}</strong>
             </span>
             <span>
-              Venta total al {pctTexto(GP_QUOTE_POR_DEFECTO)} <strong className='tabular-nums'>US$ {formatoUSD(totales.venta)}</strong>
+              Venta total al {pctTexto(gpRef)} <strong className='tabular-nums'>US$ {formatoUSD(totales.venta)}</strong>
             </span>
           </div>
           <div className='flex gap-2'>

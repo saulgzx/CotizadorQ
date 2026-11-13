@@ -23,6 +23,13 @@ describe('gpBaseDeOrigen', () => {
     }
   });
 
+  test('Velasea es "igual que QNAP": usa el margen global de QNAP, no el 8 %', () => {
+    expect(gpBaseDeOrigen('VELASEA', globales)).toBe(globales.gpQnap);
+    expect(gpBaseDeOrigen(' velasea ', { gpQnap: 0.2, gpAxis: 0.3 })).toBe(0.2);
+    expect(gpDeLinea({ origen: 'VELASEA', gpOverride: null }, { gpQnap: 0.2, gpAxis: 0.3 })).toBe(0.2);
+    expect(gpDeLinea({ origen: 'VELASEA', gpOverride: 0.1 }, { gpQnap: 0.2, gpAxis: 0.3 })).toBe(0.1);
+  });
+
   test('no distingue mayúsculas ni espacios en el origen', () => {
     expect(gpBaseDeOrigen(' iss ', globales)).toBe(0.08);
     expect(gpBaseDeOrigen('axis', globales)).toBe(0.13);

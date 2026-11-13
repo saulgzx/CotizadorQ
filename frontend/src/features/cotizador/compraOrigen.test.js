@@ -15,6 +15,11 @@ describe('etiquetaCompraOrigen', () => {
     expect(etiquetaCompraOrigen([{ origen: 'MILESTONE' }, { origen: 'MILESTONE_HW' }])).toBe('Milestone');
   });
 
+  test('Velasea se nombra como fabricante, sola o en una mixta', () => {
+    expect(etiquetaCompraOrigen([{ origen: 'VELASEA', marca: 'Velasea' }])).toBe('Velasea');
+    expect(etiquetaCompraOrigen([{ origen: 'QNAP' }, { origen: 'velasea' }])).toBe('QNAP / Velasea');
+  });
+
   test('varios fabricantes de quote se listan todos', () => {
     expect(etiquetaCompraOrigen([{ origen: 'ISS' }, { origen: 'MILESTONE' }])).toBe('ISS / Milestone');
   });

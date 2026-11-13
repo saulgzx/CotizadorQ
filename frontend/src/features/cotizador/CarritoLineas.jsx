@@ -6,7 +6,7 @@ import { formatCurrency } from './cotizadorHelpers';
 import { partesEntrega } from './entregaStock';
 import { esFueraDeLista } from './fueraDeLista';
 import { CADENA_POR_ORIGEN, ETIQUETA_ORIGEN_QUOTE } from './cotizadorConstants';
-import { esOrigenQuote } from './quoteFabricante';
+import { esOrigenQuote, usaMargenQnap } from './quoteFabricante';
 
 // Carrito del cotizador con el mismo formato que el editor de cotizaciones:
 // una fila por producto, costo ⇄ GP ⇄ precio enlazados y margen a la vista.
@@ -137,15 +137,20 @@ const CostoDeQuote = ({ item }) => {
   const costoFabricante = Number(item.costoFabricante ?? item.precio) || 0;
   // El porcentaje sale de la cadena del origen: dividir los montos ya redondeados daba "15,01 %".
   const cadena = CADENA_POR_ORIGEN[origen];
-  const recargo = cadena && costoFabricante > 0 && costoChile > 0 ? Math.round(cadena.INT * 10000) / 100 : null;
+  const pct = (factor) => `${String(Math.round((factor - 1) * 10000) / 100).replace('.', ',')} %`;
+  // "+ 15 %" o, si el origen lleva flete de entrada (Velasea), "+ flete 1,1 % + 12 %".
+  const recargo =
+    cadena && costoFabricante > 0 && costoChile > 0
+      ? `${cadena.INBOUND_FREIGHT / cadena.IC !== 1 ? ` + flete ${pct(cadena.INBOUND_FREIGHT / cadena.IC)}` : ''} + ${pct(1 + cadena.INT)}`
+      : null;
   const detalle =
     recargo === null
       ? `Costo fabricante ${formatCurrency(costoFabricante)}`
-      : `Costo fabricante ${formatCurrency(costoFabricante)} + ${String(recargo).replace('.', ',')} % = ${formatCurrency(costoChile)}`;
+      : `Costo fabricante ${formatCurrency(costoFabricante)}${recargo} = ${formatCurrency(costoChile)}`;
   return (
     <div className='rounded-md bg-violet-50 px-2 py-1 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300' title={detalle}>
       <div className='font-semibold'>{ETIQUETA_ORIGEN_QUOTE[origen] || 'Quote'}</div>
-      <span>Costo fabricante {formatCurrency(costoFabricante)}{recargo !== null && ` + ${String(recargo).replace('.', ',')} %`}</span>
+      <span>Costo fabricante {formatCurrency(costoFabricante)}{recargo}</span>
     </div>
   );
 };
@@ -238,7 +243,7 @@ const CampoGp = ({ item, gpGlobal, onCambio }) => {
         ariaLabel='GP %'
       />
       {!tieneGpPropio && (
-        <div className='mt-0.5 text-right text-[11px] text-slate-400'>{esOrigenQuote(item.origen) ? 'base quote' : 'global'}</div>
+        <div className='mt-0.5 text-right text-[11px] text-slate-400'>{esOrigenQuote(item.origen) && !usaMargenQnap(item.origen) ? 'base quote' : 'global'}</div>
       )}
     </>
   );
