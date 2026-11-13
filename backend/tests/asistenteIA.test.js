@@ -7,7 +7,9 @@ const {
   leerConfig,
   modo,
   usuarioPermitido,
-  construirPromptAgente
+  construirPromptAgente,
+  archivoPantallazo,
+  LIMITE_CUERPO_CONSULTA
 } = require('../src/services/asistenteIA');
 
 const config = leerConfig({
@@ -509,10 +511,10 @@ describe('asistente IA', () => {
     });
 
     test('rechaza un mime no soportado', () => {
-      ['image/gif', 'application/pdf', '', undefined].forEach((mime) =>
+      ['image/gif', 'application/msword', 'text/plain', '', undefined].forEach((mime) =>
         expect(() =>
           validarEntrada({ pantallazo: { ...pantallazo, mime } })
-        ).toThrow('Solo se aceptan imágenes PNG, JPG o WEBP')
+        ).toThrow('Solo se aceptan PDF o imágenes PNG, JPG o WEBP')
       );
     });
 
@@ -545,12 +547,109 @@ describe('asistente IA', () => {
       ).toHaveLength(Math.ceil(justo / 3) * 4);
       expect(() =>
         validarEntrada({ pantallazo: { ...pantallazo, datos: de(justo + 1) } })
-      ).toThrow(/pesa 6\.0 MB y el máximo es 6\.0 MB/);
+      ).toThrow(/pesa 6\.0 MB y el máximo para imágenes es 6\.0 MB/);
       expect(() =>
         validarEntrada({
           pantallazo: { ...pantallazo, datos: de(7.5 * 1024 * 1024) }
         })
-      ).toThrow(/pesa 7\.5 MB y el máximo es 6\.0 MB/);
+      ).toThrow(/pesa 7\.5 MB y el máximo para imágenes es 6\.0 MB/);
+    });
+
+    // --- PDF de la OC completa ---
+    const MB = 1024 * 1024;
+    const deBytes = (bytes) => Buffer.alloc(bytes, 1).toString('base64');
+    const pdf = { ...pantallazo, mime: 'application/pdf' };
+
+    test('acepta application/pdf', () => {
+      expect(validarEntrada({ pantallazo: pdf }).pantallazo).toEqual(pdf);
+    });
+
+    test('un PDF de 10 MB pasa y uno de 13 MB se rechaza con el maximo de 12 MB', () => {
+      expect(
+        validarEntrada({ pantallazo: { ...pdf, datos: deBytes(10 * MB) } })
+          .pantallazo.mime
+      ).toBe('application/pdf');
+      // Justo en el limite tambien pasa.
+      expect(() =>
+        validarEntrada({ pantallazo: { ...pdf, datos: deBytes(12 * MB) } })
+      ).not.toThrow();
+      let error;
+      try {
+        validarEntrada({ pantallazo: { ...pdf, datos: deBytes(13 * MB) } });
+      } catch (e) {
+        error = e;
+      }
+      expect(error?.status).toBe(400);
+      expect(error.message).toBe(
+        'El PDF pesa 13.0 MB y el máximo para PDF es 12.0 MB'
+      );
+    });
+
+    test('una imagen de 7 MB se rechaza con el maximo de 6 MB, no con el del PDF', () => {
+      ['image/png', 'image/jpeg', 'image/webp'].forEach((mime) =>
+        expect(() =>
+          validarEntrada({
+            pantallazo: { ...pantallazo, mime, datos: deBytes(7 * MB) }
+          })
+        ).toThrow('La imagen pesa 7.0 MB y el máximo para imágenes es 6.0 MB')
+      );
+    });
+
+    test('el cuerpo de la consulta admite el PDF mas grande en base64', () => {
+      const cuerpo = JSON.stringify({
+        pantallazo: { ...pdf, datos: deBytes(12 * MB), lineas: Array(300).fill(lineas[0]) }
+      });
+      expect(Buffer.byteLength(cuerpo)).toBeLessThan(LIMITE_CUERPO_CONSULTA);
+    });
+
+    test('el archivo sigue al mime: pdf para el PDF, png para las imagenes', () => {
+      expect(archivoPantallazo('application/pdf')).toBe('pantallazo.pdf');
+      ['image/png', 'image/jpeg', 'image/webp'].forEach((mime) =>
+        expect(archivoPantallazo(mime)).toBe('pantallazo.png')
+      );
+    });
+
+    test('el prompt de un PDF nombra ./pantallazo.pdf, pide leer todas las paginas y mantiene las reglas duras', () => {
+      const p = construirPromptAgente({ marca: null, mensajes: [], pantallazo: pdf });
+      expect(p).toContain('./pantallazo.pdf');
+      expect(p).not.toContain('pantallazo.png');
+      expect(p).not.toMatch(/imagen/i);
+      expect(p).toMatch(/varias páginas: léelas TODAS/);
+      expect(p).toContain('parámetro pages');
+      expect(p).toContain('líneas de producto que no están en la lista de la orden');
+      // Reglas duras, las mismas que para la imagen.
+      expect(p).toMatch(/déjalo vacío.*en vez de adivinar/);
+      expect(p).toContain('No inventes SKU ni MPN');
+      expect(p).toContain('No los copies de la lista de la orden');
+      expect(p).toContain('No calcules ni conviertas montos');
+      expect(p).toContain('devuelve un array vacío');
+      expect(p).toContain('sin reformatear');
+      expect(p).toContain('no uses las herramientas del conector MyQuote');
+      expect(p).toContain('no busques en la web');
+      expect(p).toContain('[ { "sku": "", "mpn": "", "descripcion": "", "monto": "" } ]');
+      lineas.forEach((l) => expect(p).toContain(l.sku));
+    });
+
+    test('el prompt de una imagen sigue nombrando ./pantallazo.png y no habla de paginas', () => {
+      ['image/png', 'image/jpeg', 'image/webp'].forEach((mime) => {
+        const p = construirPromptAgente({
+          marca: null,
+          mensajes: [],
+          pantallazo: { ...pantallazo, mime }
+        });
+        expect(p).toContain('./pantallazo.png');
+        expect(p).not.toContain('pantallazo.pdf');
+        expect(p).not.toMatch(/p[áa]gina|PDF|pages/i);
+      });
+    });
+
+    test('el trabajo de un PDF lleva su mime al agente y el prompt con el mismo nombre de archivo', async () => {
+      const gestor = crearGestorConsultas({ config: configAgente });
+      const c = gestor.iniciar({ usuarioId: 1, entrada: validarEntrada({ pantallazo: pdf }) });
+      const trabajo = await gestor.tomarTrabajo({ esperaMs: 10 });
+      expect(trabajo.imagen).toEqual({ datos: PNG_B64, mime: 'application/pdf' });
+      expect(trabajo.prompt).toContain(`./${archivoPantallazo(trabajo.imagen.mime)}`);
+      gestor.cancelar({ usuarioId: 1, id: c.id });
     });
 
     test('rechaza un campo distinto de axis o intcomex, y lineas mal formadas', () => {

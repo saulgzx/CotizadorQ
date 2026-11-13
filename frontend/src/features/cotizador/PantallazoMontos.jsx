@@ -4,19 +4,25 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 // Es agnóstico del transporte: no sabe quién lee la imagen. Recibe `onLeer`
 // (async, inyectado) y entrega su resultado por `onListo`.
 
-export const TIPOS_ACEPTADOS = ['image/png', 'image/jpeg', 'image/webp'];
-export const TAMANO_MAXIMO = 10 * 1024 * 1024; // 10 MB
+export const TIPO_PDF = 'application/pdf';
+export const TIPOS_IMAGEN = ['image/png', 'image/jpeg', 'image/webp'];
+export const TIPOS_ACEPTADOS = [TIPO_PDF, ...TIPOS_IMAGEN];
+
+// El PDF de una OC escaneada de varias páginas pesa más que un pantallazo.
+export const TAMANO_MAXIMO_PDF = 12 * 1024 * 1024;
+export const TAMANO_MAXIMO_IMAGEN = 6 * 1024 * 1024;
+export const esPdf = (file) => file?.type === TIPO_PDF;
 
 const TEXTOS = {
   intcomex: {
-    etiqueta: 'Cargar pantallazo para Monto Intcomex',
-    instruccion: 'Pega el pantallazo de la OC del cliente',
-    listo: 'Pantallazo leído. Revisa los montos Intcomex.'
+    etiqueta: 'Cargar la OC del cliente para Monto Intcomex',
+    instruccion: 'Adjunta la OC del cliente, o pega un pantallazo',
+    listo: 'Leído. Revisa los montos Intcomex.'
   },
   axis: {
-    etiqueta: 'Cargar pantallazo para Monto Axis',
-    instruccion: 'Pega el pantallazo de la planilla de costos de Axis',
-    listo: 'Pantallazo leído. Revisa los montos Axis.'
+    etiqueta: 'Cargar los costos de Axis para Monto Axis',
+    instruccion: 'Adjunta la planilla de costos de Axis, o pega un pantallazo',
+    listo: 'Leído. Revisa los montos Axis.'
   }
 };
 
@@ -28,8 +34,13 @@ export const formatearTamano = (bytes) => {
 
 // Devuelve el mensaje de error, o null si el archivo sirve.
 export const validarPantallazo = (file) => {
-  if (!file || !TIPOS_ACEPTADOS.includes(file.type)) return 'Solo se aceptan imágenes PNG, JPG o WEBP';
-  if (file.size > TAMANO_MAXIMO) return `La imagen pesa ${formatearTamano(file.size)} y el máximo es 10 MB`;
+  if (!file || !TIPOS_ACEPTADOS.includes(file.type))
+    return 'Solo se aceptan PDF o imágenes PNG, JPG o WEBP';
+  const maximo = esPdf(file) ? TAMANO_MAXIMO_PDF : TAMANO_MAXIMO_IMAGEN;
+  if (file.size > maximo) {
+    const que = esPdf(file) ? 'El PDF' : 'La imagen';
+    return `${que} pesa ${formatearTamano(file.size)} y el máximo es ${formatearTamano(maximo)}`;
+  }
   return null;
 };
 
@@ -58,7 +69,8 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
 
   // La miniatura vive mientras viva el archivo: se libera al cambiarlo, quitarlo o desmontar.
   useEffect(() => {
-    if (!archivo) return undefined;
+    // Solo las imágenes tienen miniatura; el PDF se muestra con su nombre.
+    if (!archivo || esPdf(archivo)) return undefined;
     const url = URL.createObjectURL(archivo);
     setMiniatura(url);
     return () => {
@@ -178,17 +190,30 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
       >
         {archivo ? (
           <>
-            {miniatura && (
+            {miniatura ? (
               <img
                 src={miniatura}
                 alt='Miniatura del pantallazo'
                 className='h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover dark:border-slate-700'
               />
-            )}
+            ) : esPdf(archivo) ? (
+              <div
+                aria-hidden='true'
+                className='grid h-12 w-12 shrink-0 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] font-semibold tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+              >
+                PDF
+              </div>
+            ) : null}
             <div className='min-w-0 flex-1'>
-              <div className='truncate font-medium text-slate-900 dark:text-slate-100'>{archivo.name || 'Pantallazo pegado'}</div>
+              <div className='truncate font-medium text-slate-900 dark:text-slate-100'>
+                {archivo.name || 'Pantallazo pegado'}
+              </div>
               <div className='text-xs text-slate-500 dark:text-slate-400'>
-                {leyendo ? 'Leyendo el pantallazo…' : formatearTamano(archivo.size)}
+                {leyendo
+                  ? esPdf(archivo)
+                    ? 'Leyendo el PDF…'
+                    : 'Leyendo el pantallazo…'
+                  : formatearTamano(archivo.size)}
               </div>
             </div>
           </>
@@ -196,7 +221,8 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
           <div className='min-w-0 flex-1 text-center'>
             <div className='font-medium text-slate-700 dark:text-slate-200'>{textos.instruccion}</div>
             <div className='text-xs text-slate-500 dark:text-slate-400'>
-              Ctrl+V, arrastra la imagen o haz clic para elegirla. PNG, JPG o WEBP, hasta 10 MB.
+              Arrastra el archivo, haz clic para elegirlo o pega con Ctrl+V. PDF hasta 12 MB; PNG,
+              JPG o WEBP hasta 6 MB.
             </div>
           </div>
         )}

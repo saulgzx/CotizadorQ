@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  ARCHIVO_IMAGEN,
+  ARCHIVOS_IMAGEN,
+  archivoDeImagen,
   argumentosClaude,
   cerrarMetricas,
   crearMetricas,
@@ -143,8 +144,11 @@ const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPh
 // Corre una consulta en una carpeta propia y anota que habia en disco al lanzar Claude Code.
 const correrConImagen = async (trabajo, { preparar } = {}) => {
   const carpeta = mkdtempSync(path.join(os.tmpdir(), 'agente-ia-img-'));
-  const archivo = path.join(carpeta, ARCHIVO_IMAGEN);
-  if (preparar) preparar(archivo);
+  // El archivo de este trabajo sigue a su mime; sin imagen se mira el nombre de siempre.
+  const archivo = path.join(carpeta, archivoDeImagen(trabajo.imagen?.mime));
+  const rutas = Object.fromEntries(ARCHIVOS_IMAGEN.map((n) => [n, path.join(carpeta, n)]));
+  const cuales = () => ARCHIVOS_IMAGEN.filter((n) => existsSync(rutas[n]));
+  if (preparar) preparar(archivo, rutas);
   const api = apiFalsa([trabajo]);
   const alLanzar = { veces: 0, existia: null, bytes: null };
   try {
@@ -156,12 +160,13 @@ const correrConImagen = async (trabajo, { preparar } = {}) => {
       spawnImpl: (cmd, args, opts) => {
         alLanzar.veces += 1;
         alLanzar.existia = existsSync(archivo);
+        alLanzar.archivos = cuales();
         if (alLanzar.existia) alLanzar.bytes = readFileSync(archivo);
         alLanzar.cwd = opts.cwd;
         return spawn(cmd, [path.join(AQUI, 'claude-falso.mjs'), ...args], opts);
       }
     });
-    return { r, api, alLanzar, carpeta, quedo: existsSync(archivo) };
+    return { r, api, alLanzar, carpeta, quedo: existsSync(archivo), quedaron: cuales() };
   } finally {
     rmSync(carpeta, { recursive: true, force: true });
   }
@@ -179,8 +184,8 @@ test('un trabajo con imagen la deja en la carpeta de trabajo antes de lanzar Cla
   assert.equal(alLanzar.veces, 1);
   assert.equal(alLanzar.existia, true, 'la imagen tiene que estar antes de lanzar el proceso');
   assert.equal(alLanzar.cwd, carpeta, 'Claude Code corre en la carpeta donde quedó la imagen');
-  // Nombre fijo aunque el mime sea otro, y los bytes tal cual venian.
-  assert.equal(ARCHIVO_IMAGEN, 'pantallazo.png');
+  // Las tres imagenes comparten nombre aunque el mime sea otro, y los bytes llegan tal cual venian.
+  assert.deepEqual(alLanzar.archivos, ['pantallazo.png']);
   assert.deepEqual(alLanzar.bytes, Buffer.from(PNG_B64, 'base64'));
 });
 
@@ -223,4 +228,73 @@ test('si no se puede guardar la imagen, la consulta termina con error y no se la
   assert.match(r.error, /no pudo guardar la imagen/);
   assert.equal(api.llamadas.fin.length, 1);
   assert.match(api.llamadas.fin[0].error, /no pudo guardar la imagen/);
+});
+
+// --- PDF de la OC: el nombre del archivo sigue al mime ----------------------------
+
+// No hace falta un PDF de verdad: lo que importa es el nombre y que los bytes lleguen intactos.
+const PDF_B64 = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n').toString('base64');
+const trabajoPdf = (id) => ({ id, canal: 'web', marca: null, prompt: 'lee ./pantallazo.pdf', imagen: { datos: PDF_B64, mime: 'application/pdf' } });
+const trabajoPng = (id) => ({ id, canal: 'web', marca: null, prompt: 'lee ./pantallazo.png', imagen: { datos: PNG_B64, mime: 'image/png' } });
+
+test('archivoDeImagen: el PDF va a pantallazo.pdf y todo lo demás a pantallazo.png', () => {
+  assert.equal(archivoDeImagen('application/pdf'), 'pantallazo.pdf');
+  for (const mime of ['image/png', 'image/jpeg', 'image/webp', '', undefined]) assert.equal(archivoDeImagen(mime), 'pantallazo.png');
+  // La limpieza barre exactamente los nombres que la regla puede producir.
+  assert.deepEqual([...ARCHIVOS_IMAGEN].sort(), ['pantallazo.pdf', 'pantallazo.png']);
+});
+
+test('un trabajo con mime pdf escribe pantallazo.pdf', async () => {
+  const { r, alLanzar } = await correrConImagen(trabajoPdf('pdf1'));
+  assert.equal(r.error, null);
+  assert.deepEqual(alLanzar.archivos, ['pantallazo.pdf'], 'solo el PDF, con extensión .pdf');
+  assert.deepEqual(alLanzar.bytes, Buffer.from(PDF_B64, 'base64'));
+});
+
+test('un trabajo con mime png escribe pantallazo.png', async () => {
+  const { r, alLanzar } = await correrConImagen(trabajoPng('pdf2'));
+  assert.equal(r.error, null);
+  assert.deepEqual(alLanzar.archivos, ['pantallazo.png']);
+  assert.deepEqual(alLanzar.bytes, Buffer.from(PNG_B64, 'base64'));
+});
+
+test('la limpieza previa borra un pantallazo.pdf sobrante aunque el trabajo nuevo traiga un PNG', async () => {
+  const { r, alLanzar } = await correrConImagen(trabajoPng('pdf3'), {
+    preparar: (archivo, rutas) => writeFileSync(rutas['pantallazo.pdf'], 'OC de otro cliente')
+  });
+  assert.equal(r.error, null);
+  assert.deepEqual(alLanzar.archivos, ['pantallazo.png'], 'el PDF viejo no puede estar cuando corre Claude Code');
+});
+
+test('la limpieza previa borra un pantallazo.png sobrante aunque el trabajo nuevo traiga un PDF', async () => {
+  const { r, alLanzar } = await correrConImagen(trabajoPdf('pdf4'), {
+    preparar: (archivo, rutas) => writeFileSync(rutas['pantallazo.png'], 'pantallazo de otro cliente')
+  });
+  assert.equal(r.error, null);
+  assert.deepEqual(alLanzar.archivos, ['pantallazo.pdf']);
+});
+
+test('un trabajo sin imagen limpia los dos sobrantes', async () => {
+  const { alLanzar } = await correrConImagen(
+    { id: 'pdf5', canal: 'web', marca: 'AXIS', prompt: 'cotizar P1475-LE' },
+    { preparar: (archivo, rutas) => Object.values(rutas).forEach((ruta) => writeFileSync(ruta, 'vieja')) }
+  );
+  assert.deepEqual(alLanzar.archivos, []);
+});
+
+test('los dos archivos se borran al terminar, bien o con error', async () => {
+  for (const trabajo of [trabajoPdf('pdf6'), trabajoPng('pdf7'), { ...trabajoPdf('pdf8'), prompt: 'FALLAR' }]) {
+    const { alLanzar, quedaron } = await correrConImagen(trabajo);
+    assert.equal(alLanzar.veces, 1);
+    assert.deepEqual(quedaron, [], `no queda nada después de ${trabajo.id}`);
+  }
+});
+
+test('si un sobrante no se puede borrar, la consulta con imagen no se lanza', async () => {
+  // Una carpeta con el nombre del PDF: rmSync sin recursive no la borra.
+  const { r, alLanzar } = await correrConImagen(trabajoPng('pdf9'), {
+    preparar: (archivo, rutas) => mkdirSync(rutas['pantallazo.pdf'])
+  });
+  assert.equal(alLanzar.veces, 0);
+  assert.match(r.error, /no se pudo borrar pantallazo\.pdf de una consulta anterior/);
 });

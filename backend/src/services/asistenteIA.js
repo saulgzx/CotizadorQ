@@ -39,12 +39,27 @@ const MAX_CHARS_MENSAJE = 30000;
 const MAX_CONTINUACIONES = 6;
 const JOB_TTL_MS = 30 * 60 * 1000;
 // Pantallazo que viaja al agente (solo modo agente): Claude Code lo lee del disco con Read.
-const MIMES_PANTALLAZO = ['image/png', 'image/jpeg', 'image/webp'];
+// Puede ser una imagen o el PDF de la OC completa (con capa de texto y varias paginas).
+const MIME_PDF = 'application/pdf';
+const MIMES_PANTALLAZO = ['image/png', 'image/jpeg', 'image/webp', MIME_PDF];
 const CAMPOS_PANTALLAZO = ['axis', 'intcomex'];
-const MAX_BYTES_PANTALLAZO = 6 * 1024 * 1024;
+const MAX_BYTES_IMAGEN = 6 * 1024 * 1024;
+// Una OC escaneada de varias paginas pasa de 6 MB sin problema.
+const MAX_BYTES_PDF = 12 * 1024 * 1024;
+const maxBytesPantallazo = (mime) =>
+  mime === MIME_PDF ? MAX_BYTES_PDF : MAX_BYTES_IMAGEN;
+// Cuerpo JSON de POST /api/ia/consultas: el PDF mas grande en base64 (4/3) mas holgura
+// para las lineas y la conversacion. El parser global (10 MB) lo cortaria antes de validar.
+const LIMITE_CUERPO_CONSULTA = Math.ceil((MAX_BYTES_PDF * 4) / 3) + 1024 * 1024;
 const MAX_LINEAS_PANTALLAZO = 300;
-// Nombre fijo con que el agente deja la imagen en su carpeta de trabajo (cwd de Claude Code).
-const ARCHIVO_PANTALLAZO = './pantallazo.png';
+/**
+ * Nombre con que el agente deja el archivo en su carpeta de trabajo (cwd de Claude Code).
+ * Sigue al mime porque Claude Code decide como leer un archivo por su extension: un PDF
+ * guardado como .png no se lee. MISMA REGLA que archivoDeImagen en agente-ia/agente.mjs:
+ * PDF -> pantallazo.pdf; cualquier otro (las imagenes) -> pantallazo.png.
+ */
+const archivoPantallazo = (mime) =>
+  mime === MIME_PDF ? 'pantallazo.pdf' : 'pantallazo.png';
 
 const leerConfig = (env = process.env) => ({
   // Sin comillas ni espacios: es comun pegarla asi en Railway.
@@ -173,29 +188,44 @@ const TIPOS_PANTALLAZO = {
 };
 
 /**
- * Prompt de extraccion: Claude Code lee la imagen que el agente dejo en su carpeta
- * y devuelve los montos por linea. Es lectura, no cotizacion: no lleva skill.
+ * Prompt de extraccion: Claude Code lee la imagen o el PDF que el agente dejo en su
+ * carpeta y devuelve los montos por linea. Es lectura, no cotizacion: no lleva skill.
  */
 const construirPromptPantallazo = ({ pantallazo }) => {
   const tipo = TIPOS_PANTALLAZO[pantallazo.campo];
+  const esPdf = pantallazo.mime === MIME_PDF;
+  // Como se nombra el archivo dentro del prompt, segun sea imagen o PDF.
+  const un = esPdf ? 'un PDF' : 'una imagen';
+  const el = esPdf ? 'el PDF' : 'la imagen';
+  const El = esPdf ? 'El PDF' : 'La imagen';
+  const archivo = `./${archivoPantallazo(pantallazo.mime)}`;
   const lineas = (pantallazo.lineas || []).map(
     (l, i) =>
       `${i + 1}. SKU: ${l.sku || '(sin SKU)'} | MPN: ${l.mpn || '(sin MPN)'} | Descripción: ${l.desc || '(sin descripción)'}`
   );
+  // Solo PDF: trae el documento completo, no el recorte que el usuario eligio mostrar.
+  const paginas = esPdf
+    ? [
+        'El PDF puede tener varias páginas: léelas TODAS, de la primera a la última, antes de responder. Las líneas de producto pueden seguir de una página a la siguiente.',
+        'Si tiene más de 10 páginas, Read exige el parámetro pages: léelo por tramos seguidos ("1-10", "11-20", ...) hasta llegar al final, sin saltarte ninguno.',
+        'Es el documento completo, así que puede traer líneas de producto que no están en la lista de la orden: infórmalas igual, con lo que se lea del PDF.'
+      ]
+    : [];
   return [
     '<instrucciones_myquote>',
-    'Esta es una tarea de lectura de una imagen para MyQuote (Intcomex Chile). No es una cotización: no uses ninguna skill de preventa.',
-    `Lee con la herramienta Read la imagen del archivo ${ARCHIVO_PANTALLAZO} (ruta relativa a la carpeta en la que estás).`,
-    `La imagen es ${tipo.que}. Extrae ${tipo.monto}.`,
-    'Solo lee la imagen: no uses las herramientas del conector MyQuote, no busques en la web (ni WebSearch ni WebFetch), no ejecutes comandos ni modifiques archivos.',
+    `Esta es una tarea de lectura de ${un} para MyQuote (Intcomex Chile). No es una cotización: no uses ninguna skill de preventa.`,
+    `Lee con la herramienta Read ${el} del archivo ${archivo} (ruta relativa a la carpeta en la que estás).`,
+    `${El} es ${tipo.que}. Extrae ${tipo.monto}.`,
+    ...paginas,
+    `Solo lee ${el}: no uses las herramientas del conector MyQuote, no busques en la web (ni WebSearch ni WebFetch), no ejecutes comandos ni modifiques archivos.`,
     '',
     'Reglas:',
     '- Si un valor no se lee con certeza, déjalo vacío ("") en vez de adivinar.',
-    '- No inventes SKU ni MPN que no estén en la imagen: si la imagen no muestra uno, déjalo vacío. No los copies de la lista de la orden.',
+    `- No inventes SKU ni MPN que no estén en ${el}: si ${el} no muestra uno, déjalo vacío. No los copies de la lista de la orden.`,
     '- No calcules ni conviertas montos: nada de sumar, multiplicar por la cantidad, cambiar de moneda ni agregar o quitar IVA.',
-    '- "monto" va tal cual aparece en la imagen, con sus mismos separadores y símbolos, sin reformatear.',
-    `- Si la imagen no es ${tipo.documento}, o no trae montos por línea, devuelve un array vacío: []`,
-    '- Un objeto por cada línea de producto que aparezca en la imagen, en el mismo orden.',
+    `- "monto" va tal cual aparece en ${el}, con sus mismos separadores y símbolos, sin reformatear.`,
+    `- Si ${el} no es ${tipo.documento}, o no trae montos por línea, devuelve un array vacío: []`,
+    `- Un objeto por cada línea de producto que aparezca en ${el}, en el mismo orden.`,
     '',
     'Responde ÚNICAMENTE con un bloque de código ```json que contenga un array con esta forma, sin texto antes ni después:',
     '```json',
@@ -203,7 +233,7 @@ const construirPromptPantallazo = ({ pantallazo }) => {
     '```',
     '</instrucciones_myquote>',
     '',
-    'Líneas de la orden (para que sepas qué productos se buscan; lo que no esté en la lista pero sí en la imagen también se informa):',
+    `Líneas de la orden (para que sepas qué productos se buscan; lo que no esté en la lista pero sí en ${el} también se informa):`,
     '<lineas_orden>',
     lineas.length ? lineas.join('\n') : '(la orden no trae líneas)',
     '</lineas_orden>'
@@ -258,27 +288,30 @@ const recortar = (valor, max) =>
     .trim()
     .slice(0, max);
 
-/** Pantallazo opcional: imagen en base64 mas las lineas de la orden que se buscan en ella. */
+/** Pantallazo opcional: imagen o PDF en base64 mas las lineas de la orden que se buscan en ella. */
 const validarPantallazo = (p) => {
   if (!p || typeof p !== 'object' || Array.isArray(p))
     throw errorValidacion('Pantallazo mal formado');
   if (!MIMES_PANTALLAZO.includes(p.mime))
-    throw errorValidacion('Solo se aceptan imágenes PNG, JPG o WEBP');
+    throw errorValidacion('Solo se aceptan PDF o imágenes PNG, JPG o WEBP');
   if (!CAMPOS_PANTALLAZO.includes(p.campo))
     throw errorValidacion('Campo del pantallazo invalido: usa axis o intcomex');
+  const esPdf = p.mime === MIME_PDF;
   const datos = p.datos;
   if (typeof datos !== 'string' || !datos)
-    throw errorValidacion('La imagen esta vacia');
+    throw errorValidacion(esPdf ? 'El PDF esta vacio' : 'La imagen esta vacia');
   // El peso se saca del largo, antes de mirar el contenido: no se recorre algo gigante.
   const relleno = datos.endsWith('==') ? 2 : datos.endsWith('=') ? 1 : 0;
   const bytes = Math.floor((datos.length * 3) / 4) - relleno;
-  if (bytes > MAX_BYTES_PANTALLAZO)
+  // El maximo depende del tipo: el mensaje dice el que le toca a lo que mandaron.
+  const maximo = maxBytesPantallazo(p.mime);
+  if (bytes > maximo)
     throw errorValidacion(
-      `La imagen pesa ${enMB(bytes)} MB y el máximo es ${enMB(MAX_BYTES_PANTALLAZO)} MB`
+      `${esPdf ? 'El PDF' : 'La imagen'} pesa ${enMB(bytes)} MB y el máximo ${esPdf ? 'para PDF' : 'para imágenes'} es ${enMB(maximo)} MB`
     );
   if (datos.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(datos))
     throw errorValidacion(
-      'La imagen no viene en base64 valido (sin el prefijo data:)'
+      `${esPdf ? 'El PDF' : 'La imagen'} no viene en base64 valido (sin el prefijo data:)`
     );
   const lineas = p.lineas ?? [];
   if (!Array.isArray(lineas))
@@ -868,6 +901,8 @@ module.exports = {
   usuarioPermitido,
   textoDeContenido,
   construirPromptAgente,
+  archivoPantallazo,
+  LIMITE_CUERPO_CONSULTA,
   HERRAMIENTAS_MYQUOTE,
   leerConfig,
   faltantes,
