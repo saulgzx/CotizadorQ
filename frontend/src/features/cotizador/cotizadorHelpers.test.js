@@ -2,7 +2,6 @@ import { vi } from 'vitest';
 import {
   buildSearchTokens,
   calcularPrecioCliente,
-  canAccessComprasView,
   canChangeOwnPartnerCategory,
   canManageCotizadorStock,
   clearSessionForUser,
@@ -82,21 +81,14 @@ describe('usuario y roles', () => {
     expect(canManageCotizadorStock(undefined)).toBe(false);
   });
 
-  test('perfil Intcomex: solo ventas/compras son validos', () => {
+  test('perfil Intcomex: solo ventas es valido; compras ya no existe', () => {
     expect(normalizeIntcomexProfile(' Ventas ')).toBe('ventas');
-    expect(normalizeIntcomexProfile('COMPRAS')).toBe('compras');
+    expect(normalizeIntcomexProfile('COMPRAS')).toBe('');
     expect(normalizeIntcomexProfile('otro')).toBe('');
     expect(isIntcomexUser({ empresa: ' Intcomex ' })).toBe(true);
     expect(isIntcomexUser({ empresa: 'Otra' })).toBe(false);
-    expect(getIntcomexProfile({ intcomex_profile: 'Compras' })).toBe('compras');
-  });
-
-  test('canAccessComprasView: admin siempre; Intcomex solo con perfil compras', () => {
-    expect(canAccessComprasView({ role: 'admin' })).toBe(true);
-    expect(canAccessComprasView({ role: 'client', empresa: 'intcomex', intcomex_profile: 'compras' })).toBe(true);
-    expect(canAccessComprasView({ role: 'client', empresa: 'intcomex', intcomex_profile: 'ventas' })).toBe(false);
-    expect(canAccessComprasView({ role: 'client', empresa: 'otra', intcomex_profile: 'compras' })).toBe(false);
-    expect(canAccessComprasView(null)).toBe(false);
+    expect(getIntcomexProfile({ intcomex_profile: 'Compras' })).toBe('');
+    expect(getIntcomexProfile({ intcomex_profile: 'Ventas' })).toBe('ventas');
   });
 
   test('canChangeOwnPartnerCategory: admin o Intcomex ventas; cot_stock_admin NO', () => {

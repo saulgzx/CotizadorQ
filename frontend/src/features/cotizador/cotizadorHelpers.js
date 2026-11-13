@@ -46,17 +46,11 @@ export const normalizeText = (value) => (value || '').toString().trim().toLowerC
 
 export const normalizeIntcomexProfile = (value) => {
   const profile = normalizeText(value);
-  return profile === 'ventas' || profile === 'compras' ? profile : '';
+  return profile === 'ventas' ? profile : '';
 };
 
 export const isIntcomexUser = (user) => normalizeText(user?.empresa) === 'intcomex';
 export const getIntcomexProfile = (user) => normalizeIntcomexProfile(user?.intcomex_profile);
-
-export const canAccessComprasView = (user) => {
-  const role = normalizeRole(user?.role);
-  if (role === 'admin') return true;
-  return isIntcomexUser(user) && getIntcomexProfile(user) === 'compras';
-};
 
 export const isIntcomexVentas = (user) => isIntcomexUser(user) && getIntcomexProfile(user) === 'ventas';
 

@@ -33,9 +33,6 @@ import {
   canManageCotizadorStock,
   normalizeText,
   normalizeIntcomexProfile,
-  isIntcomexUser,
-  getIntcomexProfile,
-  canAccessComprasView,
   isIntcomexVentas,
   canChangeOwnPartnerCategory,
   getOrCreateDeviceId,
@@ -337,18 +334,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const isFullAdmin = user?.role ? userRole === 'admin' : true;
   const isCotizadorStockAdmin = userRole === COTIZADOR_STOCK_ADMIN_ROLE;
   const isAdmin = user?.role ? canManageCotizadorStock(userRole) : true;
-  const isComprasOnlyUser = !isFullAdmin && getIntcomexProfile(user) === 'compras' && isIntcomexUser(user);
   const isVentasUser = !isFullAdmin && isIntcomexVentas(user);
-  const canViewCompras = canAccessComprasView(user);
-  const canViewDashboard = !isVentasUser && !isComprasOnlyUser && !isCotizadorStockAdmin;
-  const canViewCotizador = !isComprasOnlyUser;
-  const canViewStock = !isComprasOnlyUser;
+  const canViewDashboard = !isVentasUser && !isCotizadorStockAdmin;
+  const canViewCotizador = true;
+  const canViewStock = true;
   // Precio de sistema del stock (costo real / (1 - margen), sin rebate): solo admin.
   const { config: margenSistema, cambiar: cambiarMargenSistema, restablecer: restablecerMargenSistema } = useMargenSistema();
-  const canViewHistorial = !isComprasOnlyUser && !isCotizadorStockAdmin;
-  const canViewAccount = !isFullAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
+  const canViewHistorial = !isCotizadorStockAdmin;
+  const canViewAccount = !isFullAdmin && !isCotizadorStockAdmin;
   // Asistente IA: solo personal interno (usa la sesion de IA y las skills de cada usuario).
-  const canViewIA = isAdmin && !isComprasOnlyUser && !isCotizadorStockAdmin;
+  const canViewIA = isAdmin && !isCotizadorStockAdmin;
   const canEditPartnerCategory = canChangeOwnPartnerCategory(user);
   const isClient = !isAdmin;
   const navRestriction = RESTRICTED_NAV_BY_USER[normalizeText(user?.usuario)] || null;
@@ -1724,9 +1719,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       registerSessionForUser(parsedUser);
       setUser(parsedUser);
       applyUserDefaults(parsedUser);
-      if (isIntcomexUser(parsedUser) && getIntcomexProfile(parsedUser) === 'compras') {
-        setCurrentView('compras');
-      }
       setCliente(prev => ({
         ...prev,
         nombre: parsedUser?.nombre || parsedUser?.usuario || prev.nombre || '',
@@ -1856,9 +1848,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         empresa: data.user?.empresa || ''
       }));
       setIsLoggedIn(true);
-      if (isIntcomexUser(data.user) && getIntcomexProfile(data.user) === 'compras') {
-        setCurrentView('compras');
-      }
       loadProductos(data.user?.role);
       loadStock();
     } catch (error) {
@@ -2016,9 +2005,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, [isLoggedIn, isFullAdmin, currentView]);
 
   useEffect(() => {
-    if (!isLoggedIn || (!isFullAdmin && !canViewCompras) || (currentView !== 'ordenes' && currentView !== 'compras')) return;
+    if (!isLoggedIn || !isFullAdmin || (currentView !== 'ordenes' && currentView !== 'compras')) return;
     loadOsoOrders();
-  }, [isLoggedIn, isFullAdmin, canViewCompras, currentView]);
+  }, [isLoggedIn, isFullAdmin, currentView]);
 
 
   useEffect(() => {
@@ -2053,22 +2042,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     if (isFullAdmin) return;
     if (!canViewDashboard && currentView === 'dashboard') {
-      setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
-      return;
-    }
-    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes', 'crm']);
-    if (blockedForClient.has(currentView) || (currentView === 'ia' && !canViewIA)) {
-      setCurrentView(isComprasOnlyUser ? 'compras' : 'cotizador');
-      return;
-    }
-    if (currentView === 'compras' && !canViewCompras) {
       setCurrentView('cotizador');
       return;
     }
-    if (isComprasOnlyUser && (currentView === 'cotizador' || currentView === 'stock' || currentView === 'historial' || currentView === 'cuenta' || currentView === 'dashboard')) {
-      setCurrentView('compras');
+    const blockedForClient = new Set(['admin', 'usuarios', 'ordenes', 'compras', 'crm']);
+    if (blockedForClient.has(currentView) || (currentView === 'ia' && !canViewIA)) {
+      setCurrentView('cotizador');
+      return;
     }
-  }, [isFullAdmin, isCotizadorStockAdmin, currentView, canViewCompras, canViewDashboard, isComprasOnlyUser, canViewIA]);
+  }, [isFullAdmin, isCotizadorStockAdmin, currentView, canViewDashboard, canViewIA]);
 
   useEffect(() => {
     if (isLoggedIn && location.pathname === '/login') {
@@ -2091,30 +2073,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       return;
     }
-    if (!isFullAdmin && nextView === 'compras' && !canViewCompras) {
-      if (location.pathname !== '/cotizador') {
-        navigate('/cotizador', { replace: true });
-      }
-      return;
-    }
-    if (!isFullAdmin && ADMIN_VIEWS.has(nextView) && !(nextView === 'compras' && canViewCompras)) {
+    if (!isFullAdmin && ADMIN_VIEWS.has(nextView)) {
       if (location.pathname !== '/cotizador') {
         navigate('/cotizador', { replace: true });
       }
       if (currentView !== 'cotizador') setCurrentView('cotizador');
       return;
     }
-    if (isComprasOnlyUser && nextView !== 'dashboard') {
-      if (location.pathname !== '/dashboard') {
-        navigate('/dashboard', { replace: true });
-      }
-      if (currentView !== 'compras') setCurrentView('compras');
-      return;
-    }
     if (nextView !== currentView) {
       setCurrentView(nextView);
     }
-  }, [location.pathname, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, navigate]);
+  }, [location.pathname, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewDashboard, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
@@ -2123,26 +2092,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (isFullAdmin && currentView === 'historial') return;
     if (isCotizadorStockAdmin && currentView !== 'cotizador' && currentView !== 'stock' && currentView !== 'cliente') return;
     if (!isFullAdmin && ADMIN_VIEWS.has(currentView)) {
-      if (currentView === 'compras' && canViewCompras) {
-        return;
-      }
       return;
     }
     if (!canViewDashboard && currentView === 'dashboard') return;
-    if (isComprasOnlyUser && currentView !== 'dashboard') return;
     const targetRoute = VIEW_TO_ROUTE[currentView];
     if (location.pathname !== targetRoute) {
       navigate(targetRoute, { replace: true });
     }
-  }, [currentView, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewCompras, canViewDashboard, isComprasOnlyUser, hasRouteSync, location.pathname, navigate]);
+  }, [currentView, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewDashboard, hasRouteSync, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
     const onKeyDown = (event) => {
       if (!event.altKey) return;
       const keyMap = {
-        '1': canViewDashboard ? 'dashboard' : (isComprasOnlyUser ? 'compras' : 'cotizador'),
-        '2': canViewCotizador ? 'cotizador' : (canViewCompras ? 'compras' : null),
+        '1': canViewDashboard ? 'dashboard' : 'cotizador',
+        '2': canViewCotizador ? 'cotizador' : null,
         '3': canViewHistorial ? 'historial' : null,
         '4': canViewStock ? 'stock' : null,
         '5': isFullAdmin ? 'ordenes' : null,
@@ -2155,7 +2120,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isLoggedIn, isFullAdmin, canViewDashboard, isComprasOnlyUser, canViewCotizador, canViewHistorial, canViewCompras, canViewStock]);
+  }, [isLoggedIn, isFullAdmin, canViewDashboard, canViewCotizador, canViewHistorial, canViewStock]);
 
   useEffect(() => {
     if (!user || isAdmin) return;
@@ -5846,7 +5811,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       badgeTone: 'amber'
     },
     isFullAdmin && { key: 'ordenes', grupo: 'operaciones', label: 'Órdenes activas', short: 'Órdenes', icon: 'truck' },
-    (isFullAdmin || (!isAdmin && canViewCompras)) && { key: 'compras', grupo: 'operaciones', label: 'Vista compras', short: 'Compras', icon: 'cart' },
+    isFullAdmin && { key: 'compras', grupo: 'operaciones', label: 'Vista compras', short: 'Compras', icon: 'cart' },
     isFullAdmin && { key: 'admin', grupo: 'admin', label: 'Listas de precio', short: 'Precios', icon: 'tag' },
     isFullAdmin && { key: 'usuarios', grupo: 'admin', label: 'Usuarios', short: 'Usuarios', icon: 'users' },
     canViewAccount && { key: 'cuenta', grupo: 'cuenta', label: 'Mi cuenta', short: 'Cuenta', icon: 'user' }
@@ -6345,7 +6310,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           const usersInEmpresa = usuarios.filter(u => (u.empresa || '').trim() === empresa.nombre);
                           const isIntcomexEmpresa = normalizeText(empresa.nombre) === 'intcomex';
                           const usersVentas = usersInEmpresa.filter(u => normalizeIntcomexProfile(u.intcomex_profile) === 'ventas');
-                          const usersCompras = usersInEmpresa.filter(u => normalizeIntcomexProfile(u.intcomex_profile) === 'compras');
                           const handleUserClick = (userId) => {
                             setSelectedUsuarioId(userId);
                             const target = userCardRefs.current[userId];
@@ -6371,7 +6335,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                               </div>
                               <div className="text-xs text-slate-500">Partner: {empresa.partner_category}</div>
                               {isIntcomexEmpresa && (
-                                <div className="text-xs text-slate-500">Perfiles disponibles: Ventas y Compras</div>
+                                <div className="text-xs text-slate-500">Perfil disponible: Ventas</div>
                               )}
                             </div>
                           </div>
@@ -6389,7 +6353,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           </button>
                         </div>
                         {isIntcomexEmpresa && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 gap-2">
                             <div
                               onDragOver={(e) => e.preventDefault()}
                               onDrop={async (e) => {
@@ -6408,33 +6372,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                                   usersVentas.map(u => (
                                     <button
                                       key={`ventas-${u.id}`}
-                                      onClick={() => handleUserClick(u.id)}
-                                      className="h-7 px-2.5 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                                    >
-                                      {u.nombre || u.usuario}
-                                    </button>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                            <div
-                              onDragOver={(e) => e.preventDefault()}
-                              onDrop={async (e) => {
-                                e.preventDefault();
-                                const userId = e.dataTransfer.getData('text/plain');
-                                if (userId) await assignUserToEmpresa(Number(userId), empresa.nombre, 'compras');
-                              }}
-                              className="rounded-lg border border-slate-200 bg-slate-50 p-2.5"
-                            >
-                              <div className="text-xs font-semibold text-slate-900">Perfil Compras</div>
-                              <div className="text-xs text-slate-500">Acceso exclusivo a Vista compras.</div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                                {usersCompras.length === 0 ? (
-                                  <span className="text-slate-400">Arrastra usuarios aquí.</span>
-                                ) : (
-                                  usersCompras.map(u => (
-                                    <button
-                                      key={`compras-${u.id}`}
                                       onClick={() => handleUserClick(u.id)}
                                       className="h-7 px-2.5 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                     >
@@ -6558,7 +6495,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                           >
                             <option value="">Selecciona perfil Intcomex</option>
                             <option value="ventas">Ventas</option>
-                            <option value="compras">Compras</option>
                           </select>
                         )}
                         <div className="flex items-center gap-2">
@@ -7392,7 +7328,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           </div>
         )}
 
-        {currentView === 'compras' && canViewCompras && (
+        {currentView === 'compras' && isFullAdmin && (
           <div className="space-y-4 view-enter">
             <EncabezadoPagina seccion="Operaciones" titulo="Vista compras" subtitulo="Estado de compra, despacho y vía de cada BO del OSO." />
             <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
