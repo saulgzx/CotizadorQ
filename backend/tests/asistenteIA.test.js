@@ -779,6 +779,90 @@ describe('asistente IA', () => {
       expect(normal.prompt).toContain('<skill nombre="preventa-axis">');
     });
 
+    describe('quote de fabricante', () => {
+      const quote = { datos: PNG_B64, mime: 'image/png', campo: 'quote', fabricante: 'ISS' };
+      const prompt = (p) => construirPromptAgente({ marca: null, mensajes: [], pantallazo: p });
+
+      test('acepta los tres fabricantes, tambien en minusculas, y los normaliza', () => {
+        for (const f of ['ISS', 'NEURAL', 'MILESTONE', 'iss', 'neural', 'Milestone']) {
+          expect(
+            validarEntrada({ pantallazo: { ...quote, fabricante: f } }).pantallazo
+          ).toEqual({ ...quote, fabricante: f.toUpperCase() });
+        }
+      });
+
+      test('rechaza quote sin fabricante o con uno desconocido', () => {
+        const { fabricante: _f, ...sin } = quote;
+        expect(() => validarEntrada({ pantallazo: sin })).toThrow(/Fabricante invalido/);
+        expect(() =>
+          validarEntrada({ pantallazo: { ...quote, fabricante: 'AXIS' } })
+        ).toThrow(/ISS, NEURAL o MILESTONE/);
+      });
+
+      test('no exige lineas y no las propaga', () => {
+        expect(validarEntrada({ pantallazo: quote }).pantallazo).not.toHaveProperty('lineas');
+        expect(
+          validarEntrada({ pantallazo: { ...quote, lineas: lineas } }).pantallazo
+        ).not.toHaveProperty('lineas');
+        expect(
+          validarEntrada({ pantallazo: { ...quote, lineas: 'x' } }).pantallazo.campo
+        ).toBe('quote');
+      });
+
+      test('axis e intcomex generan exactamente el mismo prompt que antes', () => {
+        const hash = (p) => require('crypto').createHash('sha256').update(p).digest('hex');
+        const base = { datos: PNG_B64, lineas: [{ sku: 'a', mpn: 'b', desc: 'c' }] };
+        const esperado = {
+          'axis|image/png': '01d31f476b429c1e847d817d2f449987fa449d7083571276b6c937c28051b699',
+          'axis|application/pdf': 'bd215e7716fc992f22db35fd576044759cf12e46c21ec143727861498b8224a0',
+          'intcomex|image/png': '48d05f05a158708011cfa6ed84052ac8a6fa1f065ce627c0fe4bb8e770726723',
+          'intcomex|application/pdf': '2f3f173fd3bf04d49ee576769aba98dbe766810079d402b41e868c4a9a802c9d'
+        };
+        for (const k of Object.keys(esperado)) {
+          const [campo, mime] = k.split('|');
+          const p = prompt(validarEntrada({ pantallazo: { ...base, mime, campo } }).pantallazo);
+          expect(hash(p)).toBe(esperado[k]);
+        }
+      });
+
+      test('el prompt nombra el archivo, el objeto json, neto vs lista, descuento, moneda y fabricante', () => {
+        const p = prompt({ ...quote, fabricante: 'NEURAL' });
+        expect(p).toContain('./pantallazo.png');
+        expect(p).not.toContain('pantallazo.pdf');
+        for (const clave of ['moneda', 'descuento_global_pct', 'lineas', 'mpn', 'descripcion', 'cantidad', 'costo_unitario', 'total_linea', 'notas'])
+          expect(p).toContain(`"${clave}"`);
+        expect(p).toContain('```json');
+        expect(p).toContain('NETO');
+        expect(p).toContain('precio de lista');
+        expect(p).toContain('descuento global');
+        expect(p).toContain('"moneda"');
+        expect(p).toContain('Neural Labs');
+        expect(p).not.toContain('páginas');
+        expect(p).not.toContain('<lineas_orden>');
+        expect(prompt({ ...quote, fabricante: 'ISS' })).toContain('ISS');
+        expect(prompt({ ...quote, fabricante: 'MILESTONE' })).toContain('Milestone');
+      });
+
+      test('el prompt de un PDF nombra ./pantallazo.pdf y pide todas las paginas', () => {
+        const p = prompt({ ...quote, mime: 'application/pdf' });
+        expect(p).toContain('./pantallazo.pdf');
+        expect(p).not.toContain('pantallazo.png');
+        expect(p).toContain('TODAS');
+        expect(p).toContain('pages');
+      });
+
+      test('el trabajo del agente lleva la imagen y el prompt de quote', async () => {
+        const gestor = crearGestorConsultas({ config: configAgente });
+        const c = gestor.iniciar({ usuarioId: 1, entrada: validarEntrada({ pantallazo: quote }) });
+        const trabajo = await gestor.tomarTrabajo({ esperaMs: 10 });
+        expect(trabajo.id).toBe(c.id);
+        expect(trabajo.imagen).toEqual({ datos: PNG_B64, mime: 'image/png' });
+        expect(trabajo.prompt).toContain('costo_unitario');
+        expect(trabajo.prompt).toContain('ISS');
+        gestor.cancelar({ usuarioId: 1, id: c.id });
+      });
+    });
+
     test('en modo API un pantallazo se rechaza sin llamar a la API', () => {
       const crearCliente = jest.fn();
       const gestor = crearGestorConsultas({ config, crearCliente });
