@@ -457,15 +457,29 @@ describe('Órdenes: filtros y búsqueda', () => {
     expect(await screen.findByText('Sin órdenes activas')).toBeInTheDocument();
   });
 
-  it('la búsqueda NO encuentra por nombre de proyecto ni PO Axis de la meta (comportamiento actual)', async () => {
+  it('la búsqueda encuentra por nombre de proyecto y por PO Axis, que viven en la meta del BO', async () => {
     renderApp();
     await esperarOrdenes();
-    // BO-1001 tiene proyecto "Proyecto Norte" y PO "PO-77" en la meta, pero la búsqueda
-    // mira order.projectName / order.poAxis, que la API de órdenes no trae.
-    escribir(screen.getByRole('textbox', { name: 'Buscar' }), 'Proyecto Norte');
+    const buscar = screen.getByRole('textbox', { name: 'Buscar' });
+    // Solo BO-1001 tiene proyecto "Proyecto Norte" y PO "PO-77" en la meta.
+    escribir(buscar, 'proyecto norte');
+    await waitFor(() => expect(botonBo('BO-1002')).not.toBeInTheDocument());
+    expect(botonBo('BO-1001')).toBeInTheDocument();
+    escribir(buscar, 'PO-77');
+    await waitFor(() => expect(botonBo('BO-1001')).toBeInTheDocument());
+    expect(botonBo('BO-1002')).not.toBeInTheDocument();
+    escribir(buscar, 'PO-que-no-existe');
     expect(await screen.findByText('Sin órdenes activas')).toBeInTheDocument();
-    escribir(screen.getByRole('textbox', { name: 'Buscar' }), 'PO-77');
-    expect(await screen.findByText('Sin órdenes activas')).toBeInTheDocument();
+  });
+
+  it('la búsqueda también encuentra por un proyecto recién escrito y aún sin guardar', async () => {
+    renderApp();
+    await esperarOrdenes();
+    // Se busca por lo que se VE en la tarjeta, borrador incluido.
+    escribir(screen.getAllByPlaceholderText('Nombre del proyecto')[1], 'Licitación Sur');
+    escribir(screen.getByRole('textbox', { name: 'Buscar' }), 'licitación sur');
+    await waitFor(() => expect(botonBo('BO-1001')).not.toBeInTheDocument());
+    expect(botonBo('BO-1002')).toBeInTheDocument();
   });
 
   it('el filtro rápido "Proyecto vacío" deja solo los BO sin proyecto', async () => {
