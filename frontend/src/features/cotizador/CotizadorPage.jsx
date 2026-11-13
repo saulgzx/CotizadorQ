@@ -94,6 +94,18 @@ import { contarPorEtapa, etapaDeCotizacion, textoConteoArchivo } from '../crm/et
 import { nombreEtapa } from '../crm/formato';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
+import {
+  aplicarMontosGuardados,
+  borradorSucio,
+  cambiarBorrador,
+  claveLinea,
+  construirPayloadMontos,
+  fusionarAsignaciones,
+  normalizarMontoLinea,
+  numeroMonto,
+  resumirLectura,
+  valorMonto
+} from './montosOrden';
 
 // Margen de una cotización guardada. Solo el rol admin recibe margen_total por línea.
 const margenCotizacion = (cot) => {
@@ -794,17 +806,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return 0;
   };
 
-  const normalizeAxisAmount = (value) => {
-    if (value === undefined || value === null || value === '') return null;
-    const parsed = parseFloat(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  };
+  const normalizeAxisAmount = normalizarMontoLinea;
 
-  const getAxisLineKey = (line) => {
-    const skuKey = normalizeLookupKey(line?.sku);
-    const mpnKey = normalizeLookupKey(line?.mpn);
-    return `${skuKey}||${mpnKey}`;
-  };
+  const getAxisLineKey = claveLinea;
 
   const getAxisDraftValue = (bo, lineKey) => {
     const draft = axisDraft[bo];
@@ -814,16 +818,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const getAxisMontoValue = (bo, line) => {
     if (!bo || !line) return '';
-    const draftValue = getAxisDraftValue(bo, getAxisLineKey(line));
-    if (draftValue !== undefined) return draftValue;
-    if (line.montoAxis === undefined || line.montoAxis === null || line.montoAxis === '') return '';
-    return String(line.montoAxis);
+    return valorMonto(axisDraft[bo], line, 'montoAxis');
   };
 
   const getAxisMontoNumber = (bo, line) => {
-    const raw = getAxisMontoValue(bo, line);
-    const parsed = parseFloat(raw);
-    return Number.isNaN(parsed) ? 0 : parsed;
+    if (!bo || !line) return 0;
+    return numeroMonto(axisDraft[bo], line, 'montoAxis');
   };
 
   const getIntcomexDraftValue = (bo, lineKey) => {
@@ -834,16 +834,12 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const getIntcomexMontoValue = (bo, line) => {
     if (!bo || !line) return '';
-    const draftValue = getIntcomexDraftValue(bo, getAxisLineKey(line));
-    if (draftValue !== undefined) return draftValue;
-    if (line.montoIntcomex === undefined || line.montoIntcomex === null || line.montoIntcomex === '') return '';
-    return String(line.montoIntcomex);
+    return valorMonto(intcomexDraft[bo], line, 'montoIntcomex');
   };
 
   const getIntcomexMontoNumber = (bo, line) => {
-    const raw = getIntcomexMontoValue(bo, line);
-    const parsed = parseFloat(raw);
-    return Number.isNaN(parsed) ? 0 : parsed;
+    if (!bo || !line) return 0;
+    return numeroMonto(intcomexDraft[bo], line, 'montoIntcomex');
   };
 
   // --- Carga de montos desde un archivo --------------------------------------
@@ -872,119 +868,34 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const aplicarPantallazo = (order, campo) => (resultado) => {
     const asignaciones = resultado?.asignaciones || {};
-    const claves = Object.keys(asignaciones);
-    const plural = (n, una, varias) => `${n} ${n === 1 ? una : varias}`;
-
-    if (claves.length) {
+    if (Object.keys(asignaciones).length) {
       const setDraft = campo === 'axis' ? setAxisDraft : setIntcomexDraft;
-      setDraft(prev => ({
-        ...prev,
-        [order.bo]: {
-          ...(prev[order.bo] || {}),
-          ...Object.fromEntries(claves.map(k => [k, String(asignaciones[k])]))
-        }
-      }));
+      setDraft(prev => fusionarAsignaciones(prev, order.bo, asignaciones));
     }
-
-    // Caso aparte, y el más confuso de todos: el archivo se leyó bien y las líneas
-    // calzaron, pero ninguna traía precio. Pasa con las OC que solo listan producto
-    // y cantidad. Sin decirlo, parece que el lector falló cuando en realidad no
-    // había nada que leer.
-    const leidasSinMonto = resultado?.sinMonto?.length || 0;
-    if (!claves.length && leidasSinMonto) {
-      notify(
-        `Se leyeron ${plural(leidasSinMonto, 'línea', 'líneas')}, pero ninguna trae precio. ` +
-          '¿El archivo incluye montos? Si solo lista producto y cantidad, no hay nada que cargar.',
-        { tipo: 'error' }
-      );
-      return;
-    }
-
-    // Se informa TODO lo que no se llenó: lo peligroso de un autocompletado es
-    // creer que llenó más de lo que llenó.
-    const avisos = [plural(claves.length, 'línea completada', 'líneas completadas')];
-    // De un Excel se dice SIEMPRE qué columna se usó como precio. Si la planilla
-    // trae precio de lista y precio de proyecto, se elige el de proyecto, pero el
-    // que se equivoque ahí llena montos que parecen buenos y no lo son.
-    if (resultado?.origen === 'excel' && resultado?.columnas?.monto)
-      avisos.push(`precio tomado de «${resultado.columnas.monto}»`);
-    if (leidasSinMonto)
-      avisos.push(`${plural(leidasSinMonto, 'línea', 'líneas')} sin precio en el archivo`);
-    if (resultado?.ambiguas?.length)
-      avisos.push(`${plural(resultado.ambiguas.length, 'ambigua', 'ambiguas')} sin llenar`);
-    if (resultado?.lineasSinDato?.length)
-      avisos.push(`${plural(resultado.lineasSinDato.length, 'línea', 'líneas')} sin dato`);
-    if (resultado?.sinCalce?.length)
-      avisos.push(`${plural(resultado.sinCalce.length, 'fila', 'filas')} sin calce`);
-    notify(`${avisos.join(' · ')}. Revisa antes de guardar.`, {
-      tipo: claves.length ? 'ok' : 'error'
-    });
+    const { mensaje, tipo } = resumirLectura(resultado);
+    notify(mensaje, { tipo });
   };
 
   const updateAxisDraft = (bo, lineKey, value) => {
     if (!bo && bo !== 0) return;
-    setAxisDraft(prev => {
-      const next = { ...prev };
-      const current = { ...(next[bo] || {}) };
-      if (value === undefined) {
-        delete current[lineKey];
-      } else {
-        current[lineKey] = value;
-      }
-      if (Object.keys(current).length === 0) {
-        delete next[bo];
-      } else {
-        next[bo] = current;
-      }
-      return next;
-    });
+    setAxisDraft(prev => cambiarBorrador(prev, bo, lineKey, value));
   };
 
   const updateIntcomexDraft = (bo, lineKey, value) => {
     if (!bo && bo !== 0) return;
-    setIntcomexDraft(prev => {
-      const next = { ...prev };
-      const current = { ...(next[bo] || {}) };
-      if (value === undefined) {
-        delete current[lineKey];
-      } else {
-        current[lineKey] = value;
-      }
-      if (Object.keys(current).length === 0) {
-        delete next[bo];
-      } else {
-        next[bo] = current;
-      }
-      return next;
-    });
+    setIntcomexDraft(prev => cambiarBorrador(prev, bo, lineKey, value));
   };
 
   const isAxisDirty = (order) => {
     const bo = order?.bo;
     if (!bo) return false;
-    const draft = axisDraft[bo];
-    if (!draft) return false;
-    return Object.entries(draft).some(([key, value]) => {
-      const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
-      if (!line) return true;
-      const draftAmount = normalizeAxisAmount(value);
-      const currentAmount = normalizeAxisAmount(line.montoAxis);
-      return draftAmount !== currentAmount;
-    });
+    return borradorSucio(order, axisDraft[bo], 'montoAxis');
   };
 
   const isIntcomexDirty = (order) => {
     const bo = order?.bo;
     if (!bo) return false;
-    const draft = intcomexDraft[bo];
-    if (!draft) return false;
-    return Object.entries(draft).some(([key, value]) => {
-      const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
-      if (!line) return true;
-      const draftAmount = normalizeAxisAmount(value);
-      const currentAmount = normalizeAxisAmount(line.montoIntcomex);
-      return draftAmount !== currentAmount;
-    });
+    return borradorSucio(order, intcomexDraft[bo], 'montoIntcomex');
   };
 
   const saveLineAmounts = async (order) => {
@@ -992,50 +903,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!bo) return false;
     const axis = axisDraft[bo] || {};
     const intcomex = intcomexDraft[bo] || {};
-    const keys = Array.from(new Set([...Object.keys(axis), ...Object.keys(intcomex)]));
-    if (!keys.length) return false;
-    const payloadLines = keys
-      .map((key) => {
-        const line = (order.lines || []).find(item => getAxisLineKey(item) === key);
-        if (!line) return null;
-        const hasAxis = Object.prototype.hasOwnProperty.call(axis, key);
-        const hasIntcomex = Object.prototype.hasOwnProperty.call(intcomex, key);
-        return {
-          // IMPORTANT: omit fields not being edited so we don't overwrite the other amount.
-          ...(hasAxis ? { montoAxis: normalizeAxisAmount(axis[key]) } : {}),
-          ...(hasIntcomex ? { montoIntcomex: normalizeAxisAmount(intcomex[key]) } : {}),
-          sku: line.sku || '',
-          mpn: line.mpn || ''
-        };
-      })
-      .filter(Boolean);
+    if (!Object.keys(axis).length && !Object.keys(intcomex).length) return false;
+    const payloadLines = construirPayloadMontos(order, axis, intcomex);
     if (!payloadLines.length) return false;
     await boLineMetaAPI.save(bo, { lines: payloadLines });
-    const updates = payloadLines.reduce((acc, item) => {
-      const lineKey = getAxisLineKey(item);
-      acc[lineKey] = {
-        montoAxis: item.montoAxis,
-        montoIntcomex: item.montoIntcomex
-      };
-      return acc;
-    }, {});
-    setOsoOrders(prev =>
-      prev.map(orderItem => {
-        if (orderItem.bo !== bo) return orderItem;
-        return {
-          ...orderItem,
-          lines: (orderItem.lines || []).map(line => (
-            updates[getAxisLineKey(line)] !== undefined
-              ? {
-                ...line,
-                ...(updates[getAxisLineKey(line)].montoAxis !== undefined ? { montoAxis: updates[getAxisLineKey(line)].montoAxis } : {}),
-                ...(updates[getAxisLineKey(line)].montoIntcomex !== undefined ? { montoIntcomex: updates[getAxisLineKey(line)].montoIntcomex } : {})
-              }
-              : line
-          ))
-        };
-      })
-    );
+    setOsoOrders(prev => aplicarMontosGuardados(prev, bo, payloadLines));
     setAxisDraft(prev => {
       const next = { ...prev };
       delete next[bo];

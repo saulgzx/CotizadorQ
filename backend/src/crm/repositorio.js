@@ -192,13 +192,14 @@ const moverAlias = async (db, origenId, destinoId) => {
 };
 
 /**
- * Montos de oportunidad: monto_manual, o total de la cotizacion vinculada mas reciente
- * (prefiriendo las no archivadas), o 0.
+ * Monto de una oportunidad, en orden de precedencia: monto_manual (lo escribe una persona,
+ * siempre manda), total de la cotizacion vinculada mas reciente (prefiriendo las no
+ * archivadas), monto_orden (total de la orden OSO, lo escribe la sincronizacion) o 0.
  */
 const MONTO_OPORTUNIDAD_SQL = `COALESCE(o.monto_manual, (
   SELECT c.total FROM cotizaciones c WHERE c.oportunidad_id = o.id
    ORDER BY (c.archivada_en IS NULL) DESC, c.created_at DESC NULLS LAST, c.id DESC LIMIT 1
-), 0)`;
+), o.monto_orden, 0)`;
 
 const listarEmpresas = async (
   db,
@@ -365,7 +366,7 @@ const moverContactos = async (db, origenEmpresaId, destinoEmpresaId) => {
 
 // ---------------------------------------------------------------- oportunidades
 
-const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, bo,
+const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, monto_orden, bo,
   to_char(fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, motivo_perdida, etapa_desde, cerrada_en,
   created_at, updated_at`;
 
@@ -398,6 +399,7 @@ const insertarOportunidad = async (db, datos) => {
     marca = null,
     es_proyecto = false,
     monto_manual = null,
+    monto_orden = null,
     fecha_cierre_estimada = null,
     motivo_perdida = null,
     etapa_desde = null,
@@ -408,11 +410,11 @@ const insertarOportunidad = async (db, datos) => {
   const { rows } = await db.query(
     `INSERT INTO crm_oportunidades (
        empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, fecha_cierre_estimada,
-       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at, bo)
+       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at, bo, monto_orden)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              COALESCE($10::timestamp, CURRENT_TIMESTAMP),
              CASE WHEN $13::boolean THEN CURRENT_TIMESTAMP ELSE $11::timestamp END,
-             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, $14)
+             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, $14, $15)
      ON CONFLICT (bo) WHERE bo IS NOT NULL DO NOTHING
      RETURNING ${COLUMNAS_OPORTUNIDAD}`,
     [
@@ -429,7 +431,8 @@ const insertarOportunidad = async (db, datos) => {
       cerrada_en === AHORA ? null : cerrada_en,
       created_at,
       cerrada_en === AHORA,
-      bo
+      bo,
+      monto_orden
     ]
   );
   // undefined = otra transaccion inserto el mismo BO entre medio: lo resuelve quien llama.
@@ -441,6 +444,33 @@ const buscarOportunidadPorBo = async (db, bo) => {
   const { rows } = await db.query(
     `SELECT ${COLUMNAS_OPORTUNIDAD} FROM crm_oportunidades WHERE bo = $1`,
     [bo]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Todas las oportunidades que tienen BO, en una sola consulta, para decidir en memoria
+ * que ordenes necesitan escribir algo.
+ */
+const oportunidadesConBo = async (db) => {
+  const { rows } = await db.query(
+    `SELECT o.id, o.bo, o.etapa, o.monto_orden
+       FROM crm_oportunidades o
+      WHERE o.bo IS NOT NULL`
+  );
+  return rows;
+};
+
+/**
+ * Guarda el total de la orden (monto_orden). Es la unica escritura de esa columna despues
+ * de crear la oportunidad: no es editable por la API del CRM, y nunca toca monto_manual.
+ * No cambia updated_at: cargar precios no debe reordenar el embudo.
+ */
+const guardarMontoOrden = async (db, oportunidadId, monto) => {
+  const { rows } = await db.query(
+    `UPDATE crm_oportunidades SET monto_orden = $2 WHERE id = $1
+      RETURNING ${COLUMNAS_OPORTUNIDAD}`,
+    [oportunidadId, monto]
   );
   return rows[0] || null;
 };
@@ -474,7 +504,8 @@ const asignarBo = async (db, oportunidadId, bo) => {
 
 /**
  * Ordenes vigentes de la pestana OSO, ya persistidas en bo_meta por
- * GET /api/oso/orders, con el monto que suman sus lineas en bo_line_meta.
+ * GET /api/oso/orders. El monto no sale de aqui: bo_line_meta guarda el precio unitario
+ * y la cantidad solo esta en la planilla (ver totalesPorBo en ordenes.js).
  * Se excluyen las borradas logicamente.
  */
 const ordenesVigentes = async (db, { limite = 5000 } = {}) => {
@@ -482,8 +513,7 @@ const ordenesVigentes = async (db, { limite = 5000 } = {}) => {
     `SELECT m.bo,
             NULLIF(TRIM(COALESCE(m.customer_name, '')), '') AS cliente,
             NULLIF(TRIM(COALESCE(m.customer_po, '')), '')   AS customer_po,
-            m.last_seen_at,
-            (SELECT COALESCE(SUM(l.monto_intcomex), 0) FROM bo_line_meta l WHERE l.bo = m.bo) AS monto
+            m.last_seen_at
        FROM bo_meta m
       WHERE m.deleted IS NOT TRUE
       ORDER BY m.bo
@@ -813,6 +843,8 @@ const restaurarCotizaciones = async (db, { ids }) => {
 
 module.exports = {
   buscarOportunidadPorBo,
+  oportunidadesConBo,
+  guardarMontoOrden,
   oportunidadesAbiertasSinBo,
   asignarBo,
   ordenesVigentes,

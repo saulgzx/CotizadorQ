@@ -29,14 +29,16 @@ Montos en USD con 2 decimales (number). Fechas ISO 8601. Errores: `{ error: stri
   (comparado en minúsculas).
 - `crm_oportunidades`: id, empresa_id (FK), contacto_id (FK nullable, set null), titulo, etapa
   (`nueva` | `cotizada` | `negociacion` | `ganada` | `perdida`), marca (`AXIS` | `QNAP` | `MIXTA` | null),
-  es_proyecto (bool), monto_manual (nullable), bo (nullable, único parcial: el BO de la orden OSO que
+  es_proyecto (bool), monto_manual (nullable, edición manual), monto_orden (`DECIMAL(14,2)` nullable: total de
+  la orden OSO, lo escribe solo la sincronización de órdenes; no es editable por la API), bo (nullable, único parcial: el BO de la orden OSO que
   ganó esta oportunidad), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
   etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
   created_at, updated_at.
 - `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id` y `archivada_en`.
 
-Monto de una oportunidad: `monto_manual` si existe; si no, el `total` de la cotización vinculada más reciente
-(prefiriendo las no archivadas); si no hay, 0.
+Monto de una oportunidad, en orden de precedencia: `monto_manual` si existe (lo escrito a mano siempre manda);
+si no, el `total` de la cotización vinculada más reciente (prefiriendo las no archivadas); si no, `monto_orden`
+(total de la orden OSO); si no hay, 0. (`MONTO_OPORTUNIDAD_SQL` en `repositorio.js`.)
 
 Normalización de nombre de empresa: minúsculas, sin tildes, sin puntuación, espacios colapsados y sin sufijos
 legales al final (`s a`, `sa`, `spa`, `ltda`, `limitada`, `eirl`, `s a c`, `inc`, `llc`, `cia`). Ejemplo:
@@ -370,12 +372,14 @@ log como `crm_ordenes_auto_fallo` o `crm_ordenes_boot_fallo`.
 
 Además está el disparo manual: `POST /api/crm/oportunidades/sincronizar-ordenes` (admin, como
 todo el CRM), que en el frontend es el botón «Traer órdenes» del embudo. Sirve para no esperar,
-y para ver el resumen de lo que hizo.
+y para ver el resumen de lo que hizo. **El botón manual y el arranque no traen montos** (ver
+"Monto"): crean oportunidades con monto `null` y no corrigen los existentes; los montos solo los
+aporta la lectura de `GET /api/oso/orders`.
 
 Las órdenes **no son cotizaciones**: viven en la pestaña OSO de Google Sheets y
-`GET /api/oso/orders` ya las persiste en `bo_meta` (cliente, PO, borrado lógico) y en
-`bo_line_meta` (monto por línea). La sincronización lee de esas dos tablas, no de la planilla:
-así no depende de Sheets ni duplica el parseo de 200 líneas del endpoint.
+`GET /api/oso/orders` ya las persiste en `bo_meta` (cliente, PO, borrado lógico). La
+sincronización lee de esa tabla, no de la planilla: así no depende de Sheets ni duplica el parseo
+de 200 líneas del endpoint. El monto, en cambio, no sale de la base (ver "Monto").
 
 Por cada BO vigente (`bo_meta.deleted IS NOT TRUE`):
 
@@ -391,14 +395,47 @@ Por cada BO vigente (`bo_meta.deleted IS NOT TRUE`):
    - si tiene cero o varias, no hay forma de saber cuál cerró: se crea una oportunidad nueva para
      ese BO, titulada `Orden <BO> · OC <customer_po>`.
 
-El monto es la suma de `bo_line_meta.monto_intcomex` de sus líneas; 0 se guarda como `null`, no
-como 0, para no pisar el monto derivado de la cotización.
+### Monto
+
+`bo_line_meta.monto_intcomex` es el precio **unitario** de la línea; la cantidad (`orderQty`)
+vive solo en la planilla. Por eso el total de una orden es Σ(`montoIntcomex` × `orderQty`) y lo
+calcula `totalesPorBo(orders)` (puro, en `ordenes.js`) con las órdenes que `GET /api/oso/orders`
+acaba de leer (ya con `montoIntcomex` fusionado desde `bo_line_meta`). El endpoint pasa ese
+mapa `{ [bo]: total }` a `sincronizarOrdenes(pool, { montos })`. Una línea sin monto o sin
+cantidad válida aporta 0; una orden sin ningún monto no aparece en el mapa (no se escribe 0);
+el total se redondea a 2 decimales.
+
+El total se guarda **solo en `monto_orden`**; la sincronización **nunca toca `monto_manual`**, que es de
+edición manual y siempre manda. Así no pisa lo que escribió una persona, y si después se vincula una cotización
+su total pasa por delante del de la orden (precedencia arriba).
+
+- **Oportunidad nueva:** `monto_orden` = total del mapa, o `null` si no hay; `monto_manual` = `null`.
+- **Orden enganchada** a una oportunidad abierta existente: se le guarda `monto_orden`.
+- **Oportunidad existente con BO:** si hay total (> 0) y difiere de su `monto_orden`, se actualiza y se cuenta
+  en `montosActualizados`, tenga o no cotización vinculada (no pisa nada). Es el flujo normal: la orden llega
+  primero y los precios se cargan días después.
+- Sin mapa (arranque, botón manual) no se escribe ningún monto en oportunidades existentes.
+- **Migración (una sola vez):** al agregar la columna `monto_orden` (`esquema.js`) se limpia el `monto_manual`
+  de las oportunidades con BO y título `Orden %`: una versión previa guardaba ahí la suma de precios unitarios
+  sin multiplicar por cantidad. Solo corre cuando la columna aún no existe; en arranques siguientes no se
+  vuelve a limpiar nada, para no borrar ediciones manuales.
 
 Ganar la oportunidad deriva `cotizaciones.estado = 'aprobada'` en todas sus cotizaciones, como
 cualquier otro cambio de etapa (ver "Estado y etapa").
 
-Cada orden corre en su propia transacción: una que falle se cuenta en `errores` y no arrastra al
-resto. La respuesta es el resumen `{ ordenes, creadas, enlazadas, ganadas, sinCambio, sinCliente,
-errores, ms }`.
+**Costo en la base.** Antes de recorrer las órdenes hay **una sola consulta**,
+`repositorio.oportunidadesConBo` (`{ id, bo, etapa, monto_orden }` de todas las
+oportunidades con BO). Con ella se decide en
+memoria qué órdenes necesitan escribir algo; solo esas abren transacción. Una orden cuya
+oportunidad ya está ganada y sin monto que actualizar se cuenta en `sinCambio` sin tocar la base.
+Si esa consulta falla, se sincroniza orden por orden como antes (la sincronización nunca lanza).
 
-Tests: `backend/tests/crm.ordenes.test.js` (repositorio en memoria, sin PostgreSQL).
+Cada orden que escribe corre en su propia transacción: una que falle se cuenta en `errores` y no
+arrastra al resto. La respuesta es el resumen `{ ordenes, creadas, enlazadas, ganadas,
+montosActualizados, sinCambio, sinCliente, errores, ms }`.
+
+Tests: `backend/tests/crm.ordenes.test.js` (repositorio en memoria, sin PostgreSQL) y dos casos en
+`crm.postgres.test.js` que ejecutan el SQL de verdad: el registro en `bo_meta` (un solo `INSERT` con
+`unnest`, en `backend/src/services/boMeta.js`) y la sincronización de punta a punta con el repositorio
+real. Esos dos solo corren con `CRM_TEST_DATABASE_URL`; conviene correrlos al tocar cualquier SQL de
+órdenes, porque el repositorio en memoria no detecta un error de tipos ni de sintaxis.

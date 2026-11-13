@@ -80,6 +80,27 @@ const SENTENCIAS = [
   // sincronizacion de ordenes.
   `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS bo VARCHAR(100)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS crm_oportunidades_bo_idx ON crm_oportunidades(bo) WHERE bo IS NOT NULL`,
+  // Total de la orden OSO (unitario x cantidad), escrito solo por la sincronizacion de
+  // ordenes. Va aparte de monto_manual, que es de edicion manual y siempre manda: asi la
+  // sincronizacion no pisa lo que escribio una persona ni congela un valor que taparia el
+  // total de una cotizacion vinculada despues. Precedencia: monto_manual, cotizacion,
+  // monto_orden, 0.
+  // Limpieza de UNA sola vez, solo en el momento de agregar la columna: una version previa
+  // guardaba en monto_manual la suma de precios unitarios (sin cantidad) de las
+  // oportunidades que creaba la sincronizacion ('Orden <BO>...'). Si el bloque corriera en
+  // cada arranque borraria ediciones manuales futuras; por eso se condiciona a que la
+  // columna aun no exista. Debe ir despues de agregar `bo`.
+  `DO $$
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'crm_oportunidades' AND column_name = 'monto_orden'
+     ) THEN
+       ALTER TABLE crm_oportunidades ADD COLUMN monto_orden DECIMAL(14,2);
+       UPDATE crm_oportunidades SET monto_manual = NULL
+        WHERE bo IS NOT NULL AND titulo LIKE 'Orden %' AND monto_manual IS NOT NULL;
+     END IF;
+   END $$`,
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_vigentes_idx ON crm_oportunidades(etapa) WHERE archivada_en IS NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES crm_empresas(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS contacto_id INTEGER REFERENCES crm_contactos(id) ON DELETE SET NULL`,
