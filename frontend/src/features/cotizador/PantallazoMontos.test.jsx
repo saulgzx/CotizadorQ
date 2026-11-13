@@ -37,7 +37,7 @@ describe('PantallazoMontos', () => {
 
     rerender(<PantallazoMontos campo='axis' onLeer={vi.fn()} onListo={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Cargar los costos de Axis para Monto Axis' })).toBeInTheDocument();
-    expect(screen.getByText(/planilla de costos de Axis/)).toBeInTheDocument();
+    expect(screen.getByText(/Excel del proyecto Axis/)).toBeInTheDocument();
   });
 
   test('subir un archivo por el input llama a onLeer con el File y luego a onListo con su resultado', async () => {
@@ -95,7 +95,7 @@ describe('PantallazoMontos', () => {
 
     subir(new File(['hola'], 'notas.txt', { type: 'text/plain' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Solo se aceptan PDF o imágenes PNG, JPG o WEBP');
+    expect(screen.getByRole('alert')).toHaveTextContent('Solo se aceptan Excel, PDF o imágenes PNG, JPG o WEBP');
     expect(onLeer).not.toHaveBeenCalled();
   });
 
@@ -231,5 +231,40 @@ describe('PantallazoMontos', () => {
     expect(input()).toBeDisabled();
     fireEvent.paste(zona(), { clipboardData: { files: [png()] } });
     expect(onLeer).not.toHaveBeenCalled();
+  });
+
+  test('un Excel se acepta y se lee', async () => {
+    const onLeer = vi.fn().mockResolvedValue({ asignaciones: {} });
+    render(<PantallazoMontos campo='axis' onLeer={onLeer} onListo={vi.fn()} />);
+
+    const hoja = new File(['x'], 'proyecto.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    subir(hoja);
+
+    await waitFor(() => expect(onLeer).toHaveBeenCalledWith(hoja));
+    expect(await screen.findByText('proyecto.xlsx')).toBeInTheDocument();
+    expect(screen.getByText('XLS')).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  test('un .xlsx sin mime se acepta igual, por la extensión', async () => {
+    const onLeer = vi.fn().mockResolvedValue({});
+    render(<PantallazoMontos campo='axis' onLeer={onLeer} onListo={vi.fn()} />);
+
+    // Arrastrado desde el escritorio, el navegador a veces no pone el type.
+    subir(new File(['x'], 'PID-92934.xlsx', { type: '' }));
+
+    await waitFor(() => expect(onLeer).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('un .csv también entra', async () => {
+    const onLeer = vi.fn().mockResolvedValue({});
+    render(<PantallazoMontos campo='axis' onLeer={onLeer} onListo={vi.fn()} />);
+
+    subir(new File(['a,b'], 'precios.csv', { type: 'text/csv' }));
+
+    await waitFor(() => expect(onLeer).toHaveBeenCalledTimes(1));
   });
 });

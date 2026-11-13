@@ -6,12 +6,30 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 
 export const TIPO_PDF = 'application/pdf';
 export const TIPOS_IMAGEN = ['image/png', 'image/jpeg', 'image/webp'];
-export const TIPOS_ACEPTADOS = [TIPO_PDF, ...TIPOS_IMAGEN];
+export const TIPOS_HOJA = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv'
+];
+export const TIPOS_ACEPTADOS = [TIPO_PDF, ...TIPOS_IMAGEN, ...TIPOS_HOJA];
+export const EXTENSIONES_HOJA = ['.xlsx', '.xls', '.csv'];
 
 // El PDF de una OC escaneada de varias páginas pesa más que un pantallazo.
+// Una planilla es texto comprimido: con 6 MB sobra de lejos.
 export const TAMANO_MAXIMO_PDF = 12 * 1024 * 1024;
 export const TAMANO_MAXIMO_IMAGEN = 6 * 1024 * 1024;
+export const TAMANO_MAXIMO_HOJA = 6 * 1024 * 1024;
+
 export const esPdf = (file) => file?.type === TIPO_PDF;
+
+// Un .xlsx arrastrado desde el escritorio no siempre trae el mime puesto (y un .csv
+// a veces llega como application/vnd.ms-excel), así que la extensión también vale.
+export const esHoja = (file) => {
+  if (!file) return false;
+  if (TIPOS_HOJA.includes(file.type)) return true;
+  const nombre = String(file.name || '').toLowerCase();
+  return EXTENSIONES_HOJA.some((ext) => nombre.endsWith(ext));
+};
 
 const TEXTOS = {
   intcomex: {
@@ -21,7 +39,7 @@ const TEXTOS = {
   },
   axis: {
     etiqueta: 'Cargar los costos de Axis para Monto Axis',
-    instruccion: 'Adjunta la planilla de costos de Axis, o pega un pantallazo',
+    instruccion: 'Adjunta el Excel del proyecto Axis, o pega un pantallazo',
     listo: 'Leído. Revisa los montos Axis.'
   }
 };
@@ -34,11 +52,16 @@ export const formatearTamano = (bytes) => {
 
 // Devuelve el mensaje de error, o null si el archivo sirve.
 export const validarPantallazo = (file) => {
-  if (!file || !TIPOS_ACEPTADOS.includes(file.type))
-    return 'Solo se aceptan PDF o imágenes PNG, JPG o WEBP';
-  const maximo = esPdf(file) ? TAMANO_MAXIMO_PDF : TAMANO_MAXIMO_IMAGEN;
+  if (!file || (!TIPOS_ACEPTADOS.includes(file.type) && !esHoja(file)))
+    return 'Solo se aceptan Excel, PDF o imágenes PNG, JPG o WEBP';
+  const hoja = esHoja(file);
+  const maximo = hoja
+    ? TAMANO_MAXIMO_HOJA
+    : esPdf(file)
+      ? TAMANO_MAXIMO_PDF
+      : TAMANO_MAXIMO_IMAGEN;
   if (file.size > maximo) {
-    const que = esPdf(file) ? 'El PDF' : 'La imagen';
+    const que = hoja ? 'La planilla' : esPdf(file) ? 'El PDF' : 'La imagen';
     return `${que} pesa ${formatearTamano(file.size)} y el máximo es ${formatearTamano(maximo)}`;
   }
   return null;
@@ -69,8 +92,8 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
 
   // La miniatura vive mientras viva el archivo: se libera al cambiarlo, quitarlo o desmontar.
   useEffect(() => {
-    // Solo las imágenes tienen miniatura; el PDF se muestra con su nombre.
-    if (!archivo || esPdf(archivo)) return undefined;
+    // Solo las imágenes tienen miniatura; el PDF y la planilla van con su nombre.
+    if (!archivo || esPdf(archivo) || esHoja(archivo)) return undefined;
     const url = URL.createObjectURL(archivo);
     setMiniatura(url);
     return () => {
@@ -196,12 +219,12 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
                 alt='Miniatura del pantallazo'
                 className='h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover dark:border-slate-700'
               />
-            ) : esPdf(archivo) ? (
+            ) : esPdf(archivo) || esHoja(archivo) ? (
               <div
                 aria-hidden='true'
                 className='grid h-12 w-12 shrink-0 place-items-center rounded-md border border-slate-200 bg-slate-50 text-[10px] font-semibold tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
               >
-                PDF
+                {esHoja(archivo) ? 'XLS' : 'PDF'}
               </div>
             ) : null}
             <div className='min-w-0 flex-1'>
@@ -210,9 +233,11 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
               </div>
               <div className='text-xs text-slate-500 dark:text-slate-400'>
                 {leyendo
-                  ? esPdf(archivo)
-                    ? 'Leyendo el PDF…'
-                    : 'Leyendo el pantallazo…'
+                  ? esHoja(archivo)
+                    ? 'Leyendo la planilla…'
+                    : esPdf(archivo)
+                      ? 'Leyendo el PDF…'
+                      : 'Leyendo el pantallazo…'
                   : formatearTamano(archivo.size)}
               </div>
             </div>
@@ -221,8 +246,8 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
           <div className='min-w-0 flex-1 text-center'>
             <div className='font-medium text-slate-700 dark:text-slate-200'>{textos.instruccion}</div>
             <div className='text-xs text-slate-500 dark:text-slate-400'>
-              Arrastra el archivo, haz clic para elegirlo o pega con Ctrl+V. PDF hasta 12 MB; PNG,
-              JPG o WEBP hasta 6 MB.
+              Arrastra el archivo, haz clic para elegirlo o pega con Ctrl+V. Excel, PDF hasta
+              12 MB, o PNG/JPG/WEBP hasta 6 MB.
             </div>
           </div>
         )}
@@ -232,7 +257,7 @@ export default function PantallazoMontos({ campo = 'intcomex', onLeer, onListo, 
         ref={inputRef}
         id={idInput}
         type='file'
-        accept={TIPOS_ACEPTADOS.join(',')}
+        accept={[...TIPOS_ACEPTADOS, ...EXTENSIONES_HOJA].join(',')}
         onChange={alElegir}
         disabled={bloqueado}
         tabIndex={-1}
