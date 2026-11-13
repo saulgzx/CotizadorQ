@@ -29,14 +29,16 @@ Montos en USD con 2 decimales (number). Fechas ISO 8601. Errores: `{ error: stri
   (comparado en minúsculas).
 - `crm_oportunidades`: id, empresa_id (FK), contacto_id (FK nullable, set null), titulo, etapa
   (`nueva` | `cotizada` | `negociacion` | `ganada` | `perdida`), marca (`AXIS` | `QNAP` | `MIXTA` | null),
-  es_proyecto (bool), monto_manual (nullable), bo (nullable, único parcial: el BO de la orden OSO que
+  es_proyecto (bool), monto_manual (nullable, edición manual), monto_orden (`DECIMAL(14,2)` nullable: total de
+  la orden OSO, lo escribe solo la sincronización de órdenes; no es editable por la API), bo (nullable, único parcial: el BO de la orden OSO que
   ganó esta oportunidad), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
   etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
   created_at, updated_at.
 - `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id` y `archivada_en`.
 
-Monto de una oportunidad: `monto_manual` si existe; si no, el `total` de la cotización vinculada más reciente
-(prefiriendo las no archivadas); si no hay, 0.
+Monto de una oportunidad, en orden de precedencia: `monto_manual` si existe (lo escrito a mano siempre manda);
+si no, el `total` de la cotización vinculada más reciente (prefiriendo las no archivadas); si no, `monto_orden`
+(total de la orden OSO); si no hay, 0. (`MONTO_OPORTUNIDAD_SQL` en `repositorio.js`.)
 
 Normalización de nombre de empresa: minúsculas, sin tildes, sin puntuación, espacios colapsados y sin sufijos
 legales al final (`s a`, `sa`, `spa`, `ltda`, `limitada`, `eirl`, `s a c`, `inc`, `llc`, `cia`). Ejemplo:
@@ -403,20 +405,27 @@ mapa `{ [bo]: total }` a `sincronizarOrdenes(pool, { montos })`. Una línea sin 
 cantidad válida aporta 0; una orden sin ningún monto no aparece en el mapa (no se escribe 0);
 el total se redondea a 2 decimales.
 
-- **Oportunidad nueva:** `monto_manual` = total del mapa, o `null` si no hay.
-- **Oportunidad existente:** si hay total (> 0), la oportunidad **no tiene ninguna cotización
-  vinculada** y su `monto_manual` difiere del total, se actualiza `monto_manual` y se cuenta en
-  `montosActualizados`. Es el flujo normal: la orden llega primero y los precios se cargan días
-  después. Con cotización vinculada el monto sale de la cotización y `monto_manual` no se toca
-  nunca.
+El total se guarda **solo en `monto_orden`**; la sincronización **nunca toca `monto_manual`**, que es de
+edición manual y siempre manda. Así no pisa lo que escribió una persona, y si después se vincula una cotización
+su total pasa por delante del de la orden (precedencia arriba).
+
+- **Oportunidad nueva:** `monto_orden` = total del mapa, o `null` si no hay; `monto_manual` = `null`.
+- **Orden enganchada** a una oportunidad abierta existente: se le guarda `monto_orden`.
+- **Oportunidad existente con BO:** si hay total (> 0) y difiere de su `monto_orden`, se actualiza y se cuenta
+  en `montosActualizados`, tenga o no cotización vinculada (no pisa nada). Es el flujo normal: la orden llega
+  primero y los precios se cargan días después.
 - Sin mapa (arranque, botón manual) no se escribe ningún monto en oportunidades existentes.
+- **Migración (una sola vez):** al agregar la columna `monto_orden` (`esquema.js`) se limpia el `monto_manual`
+  de las oportunidades con BO y título `Orden %`: una versión previa guardaba ahí la suma de precios unitarios
+  sin multiplicar por cantidad. Solo corre cuando la columna aún no existe; en arranques siguientes no se
+  vuelve a limpiar nada, para no borrar ediciones manuales.
 
 Ganar la oportunidad deriva `cotizaciones.estado = 'aprobada'` en todas sus cotizaciones, como
 cualquier otro cambio de etapa (ver "Estado y etapa").
 
 **Costo en la base.** Antes de recorrer las órdenes hay **una sola consulta**,
-`repositorio.oportunidadesConBo` (`{ id, bo, etapa, monto_manual, con_cotizacion }` de todas las
-oportunidades con BO; `con_cotizacion` = `EXISTS` en `cotizaciones`). Con ella se decide en
+`repositorio.oportunidadesConBo` (`{ id, bo, etapa, monto_orden }` de todas las
+oportunidades con BO). Con ella se decide en
 memoria qué órdenes necesitan escribir algo; solo esas abren transacción. Una orden cuya
 oportunidad ya está ganada y sin monto que actualizar se cuenta en `sinCambio` sin tocar la base.
 Si esa consulta falla, se sincroniza orden por orden como antes (la sincronización nunca lanza).

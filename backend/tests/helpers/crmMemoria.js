@@ -61,13 +61,14 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
   const cotizacionPorId = (id) => estado.cotizaciones.find((c) => c.id === Number(id)) || null;
 
   const montoDe = (o) => {
+    // Precedencia: monto_manual, total de la cotizacion vinculada, monto_orden, 0.
     if (o.monto_manual !== null && o.monto_manual !== undefined) return redondear(o.monto_manual);
     const vinculadas = estado.cotizaciones
       .filter((c) => c.oportunidad_id === o.id)
       .sort((a, b) => Number(!b.archivada_en) - Number(!a.archivada_en) || new Date(b.created_at) - new Date(a.created_at) || b.id - a.id);
-    return vinculadas.length ? redondear(vinculadas[0].total) : 0;
+    if (vinculadas.length && vinculadas[0].total !== null && vinculadas[0].total !== undefined) return redondear(vinculadas[0].total);
+    return redondear(o.monto_orden);
   };
-  const tieneCotizacion = (o) => estado.cotizaciones.some((c) => c.oportunidad_id === o.id);
   const vigenteMasReciente = (o) =>
     estado.cotizaciones
       .filter((c) => c.oportunidad_id === o.id && !c.archivada_en)
@@ -262,6 +263,7 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
         marca: datos.marca ?? null,
         es_proyecto: datos.es_proyecto ?? false,
         monto_manual: datos.monto_manual ?? null,
+        monto_orden: datos.monto_orden ?? null,
         bo: datos.bo ?? null,
         fecha_cierre_estimada: datos.fecha_cierre_estimada ?? null,
         motivo_perdida: datos.motivo_perdida ?? null,
@@ -275,10 +277,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       return clonar(fila);
     },
     obtenerOportunidad: async (db, id) => clonar(oportunidadPorId(id)),
-    buscarOportunidadPorBo: async (db, bo) => {
-      const fila = estado.oportunidades.find((o) => o.bo === bo);
-      return fila ? clonar({ ...fila, con_cotizacion: tieneCotizacion(fila) }) : null;
-    },
+    buscarOportunidadPorBo: async (db, bo) =>
+      clonar(estado.oportunidades.find((o) => o.bo === bo) || null),
     oportunidadesConBo: async () =>
       estado.oportunidades
         .filter((o) => o.bo)
@@ -286,8 +286,7 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
           id: o.id,
           bo: o.bo,
           etapa: o.etapa,
-          monto_manual: o.monto_manual,
-          con_cotizacion: tieneCotizacion(o)
+          monto_orden: o.monto_orden
         })),
     oportunidadesAbiertasSinBo: async (db, empresaId) =>
       clonar(
@@ -306,6 +305,12 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       if (!fila || fila.bo) return null;
       fila.bo = bo;
       fila.updated_at = ahora();
+      return clonar(fila);
+    },
+    guardarMontoOrden: async (db, id, monto) => {
+      const fila = oportunidadPorId(id);
+      if (!fila) return null;
+      fila.monto_orden = monto;
       return clonar(fila);
     },
     ordenesVigentes: async () => clonar(estado.ordenes),

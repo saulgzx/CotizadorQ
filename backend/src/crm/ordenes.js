@@ -20,9 +20,10 @@
  * Ganar una oportunidad deriva `cotizaciones.estado = 'aprobada'` en todas sus
  * cotizaciones, igual que cualquier otro cambio de etapa del CRM.
  *
- * Una oportunidad ya ganada sin cotizacion vinculada recibe el total como monto_manual
- * cuando cambia (los precios suelen cargarse dias despues de que llega la orden). Si tiene
- * cotizacion, su monto sale de ella y monto_manual no se toca.
+ * El total de la orden se guarda SOLO en `monto_orden` (al crear, al enganchar y cuando
+ * cambia: los precios suelen cargarse dias despues de que llega la orden), tenga o no
+ * cotizacion vinculada. Nunca se toca `monto_manual`: lo manual siempre manda. El monto
+ * visible es monto_manual, total de la cotizacion, monto_orden, 0.
  *
  * Cada orden que necesita escribir va en su propia transaccion: una que falle no arrastra
  * a las demas. Las que ya estan al dia se cuentan sin tocar la base.
@@ -73,15 +74,15 @@ const totalesPorBo = (orders) => {
 };
 
 /**
- * Una oportunidad ya existente necesita nuevo monto si hay total conocido (> 0), no tiene
- * ninguna cotizacion vinculada (si la tiene, su monto sale de la cotizacion y monto_manual
- * no se toca nunca) y su monto_manual difiere del total.
+ * Una oportunidad con BO necesita guardar el total de la orden si hay total conocido (> 0)
+ * y su monto_orden difiere. Se guarda en monto_orden, nunca en monto_manual, asi que no
+ * importa si tiene cotizacion vinculada: no pisa nada.
  */
 const necesitaMonto = (existente, total) => {
-  if (!existente || existente.con_cotizacion) return false;
+  if (!existente) return false;
   const nuevo = montoDe(total);
   if (nuevo === null) return false;
-  const actual = existente.monto_manual;
+  const actual = existente.monto_orden;
   return (
     actual === null ||
     actual === undefined ||
@@ -122,9 +123,7 @@ const sincronizarOrden = async (
       claves.push('ganadas');
     }
     if (necesitaMonto(existente, total)) {
-      await repo.actualizarOportunidad(db, existente.id, {
-        monto_manual: montoDe(total)
-      });
+      await repo.guardarMontoOrden(db, existente.id, montoDe(total));
       claves.push('montosActualizados');
     }
     return claves.length ? claves : ['sinCambio'];
@@ -140,6 +139,9 @@ const sincronizarOrden = async (
   if (abiertas.length === 1) {
     const enganchada = await repo.asignarBo(db, abiertas[0].id, orden.bo);
     if (enganchada) {
+      if (montoDe(total) !== null) {
+        await repo.guardarMontoOrden(db, enganchada.id, montoDe(total));
+      }
       await aplicarEtapaOportunidad(db, {
         oportunidadId: enganchada.id,
         etapa: 'ganada',
@@ -153,7 +155,7 @@ const sincronizarOrden = async (
     empresa_id: empresa.id,
     titulo: tituloPara(orden),
     etapa: 'ganada',
-    monto_manual: montoDe(total),
+    monto_orden: montoDe(total),
     cerrada_en: AHORA,
     bo: orden.bo
   });
