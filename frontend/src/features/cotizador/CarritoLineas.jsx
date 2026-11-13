@@ -5,6 +5,8 @@ import MargenChip from './MargenChip';
 import { formatCurrency } from './cotizadorHelpers';
 import { partesEntrega } from './entregaStock';
 import { esFueraDeLista } from './fueraDeLista';
+import { CADENA_POR_ORIGEN, ETIQUETA_ORIGEN_QUOTE } from './cotizadorConstants';
+import { esOrigenQuote } from './quoteFabricante';
 
 // Carrito del cotizador con el mismo formato que el editor de cotizaciones:
 // una fila por producto, costo ⇄ GP ⇄ precio enlazados y margen a la vista.
@@ -53,7 +55,7 @@ const CeldaProducto = ({ item, isAdmin, onCambio }) => (
   <div className='min-w-0'>
     <div className='mb-1 flex flex-wrap items-center gap-1.5'>
       <span className={`rounded-md px-1.5 text-[11px] font-bold uppercase tracking-wide ${(item.origen || 'QNAP') === 'AXIS' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'}`}>
-        {item.origen || item.marca}
+        {esOrigenQuote(item.origen) ? item.marca || item.origen : item.origen || item.marca}
       </span>
       <span className='font-mono text-xs text-slate-600 dark:text-slate-300'>{item.sku && item.sku !== 'To Create' ? item.sku : 'SKU por crear'}</span>
       <span className='font-mono text-xs text-slate-400'>{item.mpn}</span>
@@ -127,6 +129,27 @@ const CeldaEntrega = ({ item, editable, onCambio }) => {
 
 // Costo de la línea: disty editable o costo real de stock; en AXIS el detalle
 // de partner y rebate queda plegado para que la fila no crezca.
+// Línea que viene de un quote de fabricante: el costo no se edita aquí (sale del quote) y se
+// deja a la vista cómo se llegó al costo puesto en Chile.
+const CostoDeQuote = ({ item }) => {
+  const origen = String(item.origen || '').trim().toUpperCase();
+  const costoChile = Number(item.costoChile) || 0;
+  const costoFabricante = Number(item.costoFabricante ?? item.precio) || 0;
+  // El porcentaje sale de la cadena del origen: dividir los montos ya redondeados daba "15,01 %".
+  const cadena = CADENA_POR_ORIGEN[origen];
+  const recargo = cadena && costoFabricante > 0 && costoChile > 0 ? Math.round(cadena.INT * 10000) / 100 : null;
+  const detalle =
+    recargo === null
+      ? `Costo fabricante ${formatCurrency(costoFabricante)}`
+      : `Costo fabricante ${formatCurrency(costoFabricante)} + ${String(recargo).replace('.', ',')} % = ${formatCurrency(costoChile)}`;
+  return (
+    <div className='rounded-md bg-violet-50 px-2 py-1 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300' title={detalle}>
+      <div className='font-semibold'>{ETIQUETA_ORIGEN_QUOTE[origen] || 'Quote'}</div>
+      <span>Costo fabricante {formatCurrency(costoFabricante)}{recargo !== null && ` + ${String(recargo).replace('.', ',')} %`}</span>
+    </div>
+  );
+};
+
 const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio }) => {
   const esAxis = (item.origen || 'QNAP') === 'AXIS';
   const partner = item.partnerCategory || partnerDefault;
@@ -138,7 +161,9 @@ const CeldaCosto = ({ item, costoFinal, rebatePartner, partnerDefault, onCambio 
   const pctLinea = descuentoPct(rebatePartner(item, partner) + rebateProyecto);
   return (
     <div className='flex flex-col gap-1 text-xs'>
-      {item.costoChile > 0 ? (
+      {esOrigenQuote(item.origen) || item.deQuote ? (
+        <CostoDeQuote item={item} />
+      ) : item.costoChile > 0 ? (
         <div className='rounded-md bg-emerald-50 px-2 py-1 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300' title='OH Unit USD de la hoja Stock'>
           <div className='font-semibold'>Real stock {formatCurrency(item.costoChile)}</div>
           {esFueraDeLista(item) ? (
@@ -212,7 +237,9 @@ const CampoGp = ({ item, gpGlobal, onCambio }) => {
         onCommit={(v) => onCambio(item.id, 'gpOverride', v === null ? '' : String(v))}
         ariaLabel='GP %'
       />
-      {!tieneGpPropio && <div className='mt-0.5 text-right text-[11px] text-slate-400'>global</div>}
+      {!tieneGpPropio && (
+        <div className='mt-0.5 text-right text-[11px] text-slate-400'>{esOrigenQuote(item.origen) ? 'base quote' : 'global'}</div>
+      )}
     </>
   );
 };

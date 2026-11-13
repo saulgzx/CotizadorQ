@@ -9,7 +9,11 @@ import {
   precioClienteQuote,
   normalizarLineasQuote,
   productoDeQuote,
-  resumenQuote
+  resumenQuote,
+  ORIGENES_QUOTE,
+  esOrigenQuote,
+  origenDeQuote,
+  productoDeQuoteGuardado
 } from './quoteFabricante';
 import { productoFueraDeLista } from './fueraDeLista';
 
@@ -357,10 +361,10 @@ describe('productoDeQuote', () => {
       fueraDeLista: true,
       origen: 'ISS',
       marca: 'ISS',
-      sku: '',
+      sku: 'To Create',
       mpn: 'ABC-1',
       desc: 'Equipo',
-      precio: 0,
+      precio: 100,
       gp: 0.08,
       costoChile: 115,
       tiempo: 'ETA por confirmar',
@@ -388,6 +392,45 @@ describe('productoDeQuote', () => {
     expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'licencia' })).toMatchObject({ costoChile: 100, tipoQuote: 'licencia' });
     expect(productoDeQuote({ ...linea, tipo: 'servidor' }, { fabricante: 'MILESTONE' }).costoChile).toBe(112);
     expect(productoDeQuote({ ...linea, descripcion: 'Husky M30' }, { fabricante: 'MILESTONE' }).tipoQuote).toBe('servidor');
+  });
+
+  test('Milestone: el servidor se guarda como MILESTONE_HW y la licencia como MILESTONE', () => {
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'servidor' }).origen).toBe('MILESTONE_HW');
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'licencia' }).origen).toBe('MILESTONE');
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'servidor' }).marca).toBe('Milestone');
+  });
+
+  test('el costo del fabricante viaja como precio (precio_disty) y el costo Chile aparte', () => {
+    const p = productoDeQuote({ ...linea, costoUnitario: 250.5 }, { fabricante: 'NEURAL' });
+    expect(p.precio).toBe(250.5);
+    expect(p.costoChile).toBe(288.08);
+  });
+
+  test('el costo Chile redondea al centavo como una calculadora, sin ruido de coma flotante', () => {
+    expect(costoChileQuote(80.5, 'ISS')).toBe(92.58);
+    expect(costoChileQuote(1000.5, 'NEURAL')).toBe(1150.58);
+    expect(costoChileQuote(0.3, 'MILESTONE', 'servidor')).toBe(0.34);
+    // Contra aritmética exacta en centavos, para todos los costos de 0,01 a 500,00.
+    for (const [fabricante, tipo, pct] of [['ISS', null, 115], ['MILESTONE', 'servidor', 112], ['MILESTONE', 'licencia', 100]]) {
+      for (let centavos = 1; centavos <= 50000; centavos += 1) {
+        const exacto = Math.floor((centavos * pct + 50) / 100) / 100;
+        if (costoChileQuote(centavos / 100, fabricante, tipo) !== exacto) {
+          throw new Error(`${fabricante} ${centavos / 100}: ${costoChileQuote(centavos / 100, fabricante, tipo)} en vez de ${exacto}`);
+        }
+      }
+    }
+  });
+
+  test('origenDeQuote y esOrigenQuote', () => {
+    expect(origenDeQuote('iss')).toBe('ISS');
+    expect(origenDeQuote('MILESTONE', 'Servidor')).toBe('MILESTONE_HW');
+    expect(origenDeQuote('MILESTONE', 'licencia')).toBe('MILESTONE');
+    expect(origenDeQuote('MILESTONE')).toBe('MILESTONE');
+    expect(origenDeQuote('QNAP')).toBeNull();
+    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']);
+    expect(esOrigenQuote('milestone_hw')).toBe(true);
+    expect(esOrigenQuote('AXIS')).toBe(false);
+    expect(esOrigenQuote(null)).toBe(false);
   });
 
   test('tipo inválido en Milestone -> null (no cae a 0%)', () => {
@@ -491,3 +534,30 @@ describe('resumenQuote', () => {
     expect(resumenQuote({ moneda: 'EUR', descuentoGlobalPct: 5, notas: 'x' }).avisos).toHaveLength(3);
   });
 });
+
+describe('productoDeQuoteGuardado', () => {
+  const guardada = { origen: 'ISS', mpn: 'SOS-LIC', descripcion: 'Licencia SecurOS', cantidad: 4, precio_disty: 100, sku: 'To Create', gp: 0.08 };
+
+  test('rearma la línea con el costo del fabricante guardado', () => {
+    expect(productoDeQuoteGuardado(guardada)).toMatchObject({
+      origen: 'ISS', marca: 'ISS', mpn: 'SOS-LIC', desc: 'Licencia SecurOS', sku: 'To Create',
+      precio: 100, costoChile: 115, deQuote: true, cantidadSugerida: 4
+    });
+  });
+
+  test('Milestone: el tipo sale del origen guardado', () => {
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'MILESTONE_HW' })).toMatchObject({ origen: 'MILESTONE_HW', marca: 'Milestone', costoChile: 112, tipoQuote: 'servidor' });
+    // Aunque la descripción suene a hardware, una línea guardada como licencia sigue siendo licencia.
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'MILESTONE', descripcion: 'Husky M30' })).toMatchObject({ origen: 'MILESTONE', costoChile: 100, tipoQuote: 'licencia' });
+    expect(productoDeQuoteGuardado({ ...guardada, origen: ' neural ' }).origen).toBe('NEURAL');
+  });
+
+  test('no inventa: línea que no es de quote o sin costo devuelve null', () => {
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'QNAP' })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'AXIS' })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, precio_disty: 0 })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, precio_disty: null })).toBeNull();
+    expect(productoDeQuoteGuardado(null)).toBeNull();
+  });
+});
+

@@ -27,9 +27,25 @@ export const FABRICANTES = Object.freeze({
 export const TIPOS_MILESTONE = Object.freeze(['licencia', 'servidor']);
 
 const TIEMPO_QUOTE = 'ETA por confirmar';
+export const SKU_POR_CREAR = 'To Create';
+
+/** Orígenes de línea que salen de un quote (los mismos que conoce el backend). */
+export const ORIGENES_QUOTE = Object.freeze(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']);
+
+export const esOrigenQuote = (origen) => ORIGENES_QUOTE.includes(String(origen ?? '').trim().toUpperCase());
+
+/** Origen con que se guarda la línea: Milestone servidor es MILESTONE_HW; el resto, el fabricante. */
+export const origenDeQuote = (fabricante, tipo) => {
+  const k = String(fabricante ?? '').trim().toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(FABRICANTES, k)) return null;
+  return k === 'MILESTONE' && String(tipo ?? '').trim().toLowerCase() === 'servidor' ? 'MILESTONE_HW' : k;
+};
 const PREFIJO_QUOTE = 'quote:';
 
-const redondear2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+// Redondeo a centavos "como en la calculadora". 80,5 x 1,15 da 92,57499999999999 en coma
+// flotante y un redondeo directo lo dejaba en 92,57 (un centavo menos, en ~0,8% de los costos).
+// toPrecision(12) limpia ese ruido antes de redondear.
+const redondear2 = (n) => Math.round(Number((n * 100).toPrecision(12))) / 100;
 const clave = (valor) => String(valor ?? '').trim().toUpperCase();
 const texto = (valor) => String(valor ?? '').trim();
 
@@ -294,12 +310,17 @@ export const productoDeQuote = (linea, { fabricante, gp = GP_QUOTE_POR_DEFECTO, 
   return {
     id: `${PREFIJO_QUOTE}${k}:${clave(mpn).replace(/\s+/g, '') || 'SINMPN'}#${n}`,
     fueraDeLista: true,
-    origen: k,
+    // El origen decide la cadena de costo al guardar (backend/src/services/cotizacionItems.js):
+    // un servidor Milestone lleva 12% y una licencia 0%, así que son dos orígenes distintos.
+    origen: origenDeQuote(k, tipoQuote),
     marca: FABRICANTES[k].nombre,
-    sku: '',
+    // Estos equipos no tienen SKU Intcomex todavía: se cotizan igual, con el literal "To Create".
+    sku: SKU_POR_CREAR,
     mpn,
     desc: texto(linea?.descripcion) || mpn || 'Línea de quote',
-    precio: 0,
+    // precio = costo del quote del fabricante: es lo que se guarda como precio_disty. El precio
+    // al cliente sale de costoChile (más abajo), que ya trae el transporte y arancel.
+    precio: costoFabricante,
     gp: gpFinal,
     rebate_partner_autorizado: 0,
     rebate_partner_silver: 0,
@@ -312,6 +333,27 @@ export const productoDeQuote = (linea, { fabricante, gp = GP_QUOTE_POR_DEFECTO, 
     tipoQuote,
     cantidadSugerida: cantidadEntera(linea?.cantidad) ?? 1
   };
+};
+
+/**
+ * Línea de quote ya guardada en una cotización -> producto para el carrito (duplicar).
+ * El costo del fabricante es el precio_disty guardado y el tipo de Milestone sale del origen.
+ * null si la línea no es de quote o no trae costo: no se inventa un precio.
+ */
+export const productoDeQuoteGuardado = (item) => {
+  const origen = clave(item?.origen);
+  if (!ORIGENES_QUOTE.includes(origen)) return null;
+  const esServidor = origen === 'MILESTONE_HW';
+  const fabricante = esServidor ? 'MILESTONE' : origen;
+  return productoDeQuote(
+    {
+      mpn: item?.mpn,
+      descripcion: item?.descripcion ?? item?.desc,
+      cantidad: item?.cantidad,
+      costoUnitario: item?.precio_disty
+    },
+    { fabricante, tipo: fabricante === 'MILESTONE' ? (esServidor ? 'servidor' : 'licencia') : undefined }
+  );
 };
 
 // --- Advertencias del quote entero ---------------------------------------------------

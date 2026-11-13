@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { MARGEN_DEFAULTS, useConfigMargen } from './margen';
 import { notify } from '../ui/toast';
 
-const MARCAS = ['QNAP', 'AXIS'];
+const MARCAS = ['QNAP', 'AXIS', 'QUOTE'];
+const NOMBRE_MARCA = { QNAP: 'QNAP', AXIS: 'AXIS', QUOTE: 'Quotes (ISS, Neural Labs, Milestone)' };
 
 const aTexto = (config) =>
   Object.fromEntries(MARCAS.map((m) => [m, { objetivo: String(config[m].objetivo), piso: String(config[m].piso) }]));
@@ -10,16 +11,18 @@ const aTexto = (config) =>
 // Devuelve el mensaje de error, o null si el borrador se puede guardar.
 export const validarBorrador = (borrador) => {
   for (const marca of MARCAS) {
+    // Un borrador sin la fila de esa marca (p. ej. uno armado solo con QNAP y AXIS) no la valida.
+    if (!borrador[marca]) continue;
     const objetivo = Number(String(borrador[marca].objetivo).replace(',', '.'));
     const piso = Number(String(borrador[marca].piso).replace(',', '.'));
     if (String(borrador[marca].objetivo).trim() === '' || !Number.isFinite(objetivo) || objetivo <= 0 || objetivo >= 100) {
-      return `${marca}: el objetivo debe estar entre 0 y 100 %.`;
+      return `${NOMBRE_MARCA[marca]}: el objetivo debe estar entre 0 y 100 %.`;
     }
     if (String(borrador[marca].piso).trim() === '' || !Number.isFinite(piso) || piso < 0 || piso >= 100) {
-      return `${marca}: el mínimo aceptable debe estar entre 0 y 100 %.`;
+      return `${NOMBRE_MARCA[marca]}: el mínimo aceptable debe estar entre 0 y 100 %.`;
     }
     if (piso > objetivo) {
-      return `${marca}: el mínimo aceptable (${piso} %) no puede ser mayor que el objetivo (${objetivo} %).`;
+      return `${NOMBRE_MARCA[marca]}: el mínimo aceptable (${piso} %) no puede ser mayor que el objetivo (${objetivo} %).`;
     }
   }
   return null;
@@ -65,7 +68,8 @@ export default function SemaforoMargenAjustes() {
     setConfig(numerico);
     notify(
       `Semáforo de margen guardado. QNAP: mínimo ${numerico.QNAP.piso} %, objetivo ${numerico.QNAP.objetivo} %. ` +
-        `AXIS: mínimo ${numerico.AXIS.piso} %, objetivo ${numerico.AXIS.objetivo} %.`,
+        `AXIS: mínimo ${numerico.AXIS.piso} %, objetivo ${numerico.AXIS.objetivo} %. ` +
+        `Quotes: mínimo ${numerico.QUOTE.piso} %, objetivo ${numerico.QUOTE.objetivo} %.`,
       { tipo: 'ok' }
     );
   };
@@ -90,8 +94,8 @@ export default function SemaforoMargenAjustes() {
       </div>
       {MARCAS.map((marca) => (
         <fieldset key={marca} className='flex items-end gap-2'>
-          <legend className='sr-only'>{marca}</legend>
-          <span className='pb-1 font-semibold text-slate-700'>{marca}</span>
+          <legend className='sr-only'>{NOMBRE_MARCA[marca]}</legend>
+          <span className='pb-1 font-semibold text-slate-700'>{NOMBRE_MARCA[marca]}</span>
           <label className='flex flex-col gap-0.5' htmlFor={`margen-piso-${marca}`}>
             Mínimo aceptable %
             <input
@@ -142,7 +146,7 @@ export default function SemaforoMargenAjustes() {
             type='button'
             onClick={() => setBorrador(aTexto(MARGEN_DEFAULTS))}
             className='mq-btn mq-btn-sm mq-btn-fantasma'
-            title='Carga 15 % QNAP / 13 % AXIS con mínimo 10 %; luego guarda'
+            title='Carga 15 % QNAP / 13 % AXIS con mínimo 10 %, y 8 % en quotes con mínimo 5 %; luego guarda'
           >
             Valores por defecto
           </button>

@@ -255,3 +255,61 @@ describe('CarritoLineas (admin)', () => {
     expect(filas[1]).not.toHaveAttribute('title');
   });
 });
+
+describe('CarritoLineas (líneas de quote)', () => {
+  const lineaQuote = (extra = {}) => ({
+    id: 'quote:ISS:LIC#1', fueraDeLista: true, deQuote: true, origen: 'ISS', marca: 'ISS', sku: 'To Create', mpn: 'LIC', desc: 'Licencia ISS',
+    cant: 2, precio: 100, costoFabricante: 100, costoChile: 115, tipoQuote: null, tiempo: 'ETA por confirmar', ...extra
+  });
+  const propsQuote = (item) => baseProps({
+    items: [item],
+    isAdmin: true,
+    precioItem: () => 125,
+    margenItem: () => ({ precio: 125, costo: 115, gpPct: 8, margenTotal: 20 }),
+    gpBase: () => 0.08
+  });
+
+  test('en vez de "fuera de lista" dice de qué quote viene y deja visible el costo del fabricante', () => {
+    render(<CarritoLineas {...propsQuote(lineaQuote())} />);
+    const fila = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(fila).getByText('Quote ISS')).toBeInTheDocument();
+    expect(within(fila).getByText(/Costo fabricante \$100\.00 \+ 15 %/)).toBeInTheDocument();
+    expect(within(fila).getByTitle('Costo fabricante $100.00 + 15 % = $115.00')).toBeInTheDocument();
+    expect(within(fila).queryByText('Fuera de lista de precios')).not.toBeInTheDocument();
+    expect(within(fila).queryByText(/Real stock/)).not.toBeInTheDocument();
+    // el costo del quote no se edita desde el carrito
+    expect(within(fila).queryByLabelText('Costo disty')).not.toBeInTheDocument();
+    // el costo puesto en Chile queda como costo final
+    expect(within(fila).getByText('$115.00')).toBeInTheDocument();
+  });
+
+  test.each([
+    ['NEURAL', 'Neural Labs', 'Quote Neural Labs', '15'],
+    ['MILESTONE', 'Milestone', 'Quote Milestone · licencia', '0'],
+    ['MILESTONE_HW', 'Milestone', 'Quote Milestone · servidor', '12']
+  ])('%s se rotula "%s" con su recargo', (origen, marca, texto, pct) => {
+    const costoChile = Math.round(100 * (1 + Number(pct) / 100) * 100) / 100;
+    render(<CarritoLineas {...propsQuote(lineaQuote({ origen, marca, costoChile }))} />);
+    const fila = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(fila).getByText(texto)).toBeInTheDocument();
+    expect(within(fila).getByText(new RegExp(`\\+ ${pct} %`))).toBeInTheDocument();
+  });
+
+  test('el margen base que se muestra como placeholder es el de quote (8 %)', () => {
+    render(<CarritoLineas {...propsQuote(lineaQuote())} />);
+    const fila = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(fila).getByLabelText('GP %')).toHaveAttribute('placeholder', '8.0');
+    expect(within(fila).getByText('base quote')).toBeInTheDocument();
+  });
+
+  test('una línea fuera de lista normal se ve igual que antes', () => {
+    const fuera = { id: 'stock:TS1', fueraDeLista: true, origen: 'QNAP', marca: 'QNAP', sku: 'X', mpn: 'TS1', desc: 'NAS', cant: 1, precio: 0, costoChile: 90, tiempo: '' };
+    render(<CarritoLineas {...baseProps({ items: [fuera], isAdmin: true, gpBase: () => 0.15 })} />);
+    const fila = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(fila).getByText('Fuera de lista de precios')).toBeInTheDocument();
+    expect(within(fila).getByText('Real stock $90.00')).toBeInTheDocument();
+    expect(within(fila).queryByText(/Quote/)).not.toBeInTheDocument();
+    expect(within(fila).getByText('global')).toBeInTheDocument();
+  });
+});
+

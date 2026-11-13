@@ -1,9 +1,10 @@
 // Calculo puro del editor de cotizaciones (solo admin).
 // Misma cadena de costo que el cotizador y que backend/src/services/cotizacionItems.js:
-//   costo XCL = disty * freight / IC * (1 + INT)
+//   costo XCL = disty * freight / IC * (1 + INT)   (cadena por origen: CADENA_POR_ORIGEN)
 //   costo final = max(costo XCL - rebates, 0)          (rebates solo AXIS)
 //   precio = costo final / (1 - gp)
-import { AXIS_CONSTANTS, CONSTANTS, DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
+import { CADENA_POR_ORIGEN, CONSTANTS, DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
+import { GP_QUOTE_POR_DEFECTO, esOrigenQuote } from '../quoteFabricante';
 
 export const redondear = (valor, decimales = 2) => {
   const factor = 10 ** decimales;
@@ -22,15 +23,24 @@ const numeroONull = (valor) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/**
+ * Origen de una línea. Respeta cualquiera de los seis de CADENA_POR_ORIGEN (sin importar
+ * mayúsculas ni espacios) y solo deduce AXIS/QNAP del texto si no es ninguno, igual que
+ * normalizarOrigen del backend.
+ */
 export const inferirOrigen = (item = {}) => {
-  const origen = String(item.origen || '').toUpperCase();
-  if (origen === 'AXIS' || origen === 'QNAP') return origen;
+  const origen = String(item.origen || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (Object.prototype.hasOwnProperty.call(CADENA_POR_ORIGEN, origen)) return origen;
   const texto = `${item.marca || ''} ${item.sku || ''} ${item.mpn || ''} ${item.descripcion || item.desc || ''}`.toLowerCase();
   return texto.includes('axis') ? 'AXIS' : 'QNAP';
 };
 
+// Diferencia con el backend: allá un origen fuera de la tabla LANZA un error (no se costea
+// con las constantes de otro fabricante). Aquí cae a QNAP, como siempre, para que el editor
+// no reviente con datos antiguos; en la práctica inferirOrigen ya devuelve uno de los seis.
 export const costoXCL = (origen, precioDisty) => {
-  const c = origen === 'AXIS' ? AXIS_CONSTANTS : CONSTANTS;
+  const clave = String(origen ?? '').trim().toUpperCase();
+  const c = Object.prototype.hasOwnProperty.call(CADENA_POR_ORIGEN, clave) ? CADENA_POR_ORIGEN[clave] : CADENA_POR_ORIGEN.QNAP;
   return ((numero(precioDisty) * c.INBOUND_FREIGHT) / c.IC) * (1 + c.INT);
 };
 
@@ -121,8 +131,10 @@ export const lineaDesdeItem = (item) => {
 };
 
 /** Producto del catalogo (formato de CotizadorPage para admin) -> linea nueva. */
-export const lineaDesdeProducto = (producto, { gpPct = CONSTANTS.DEFAULT_GP * 100, partnerCategory, tiempoEntrega } = {}) => {
+export const lineaDesdeProducto = (producto, { gpPct, partnerCategory, tiempoEntrega } = {}) => {
   const origen = inferirOrigen({ ...producto, descripcion: producto.desc });
+  // Margen por defecto: 8 % para un origen de quote, el de siempre (15 %) para el resto.
+  if (gpPct === undefined) gpPct = (esOrigenQuote(origen) ? GP_QUOTE_POR_DEFECTO : CONSTANTS.DEFAULT_GP) * 100;
   const categoria = origen === 'AXIS' ? (partnerCategory || DEFAULT_AXIS_PARTNER) : null;
   const rebatePartner = origen === 'AXIS' ? rebatePartnerDeProducto(producto, categoria) : null;
   const base = {

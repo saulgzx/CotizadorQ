@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { esOrigenQuote } from './quoteFabricante';
 
 // Semaforo de margen por marca. El objetivo es el GP con que se cotiza por
 // defecto; el piso es el minimo aceptable antes de pedir confirmacion.
@@ -6,7 +7,9 @@ import { useEffect, useState } from 'react';
 
 export const MARGEN_DEFAULTS = Object.freeze({
   QNAP: { objetivo: 15, piso: 10 },
-  AXIS: { objetivo: 13, piso: 10 }
+  AXIS: { objetivo: 13, piso: 10 },
+  // Líneas de quote de fabricante (ISS, Neural Labs, Milestone): se cotizan al 8 % por defecto.
+  QUOTE: { objetivo: 8, piso: 5 }
 });
 
 const CLAVE = 'margenConfig';
@@ -57,7 +60,15 @@ export const useConfigMargen = () => {
   return [config, (next) => setConfig(guardarConfigMargen(next))];
 };
 
-const marcaDe = (origen) => (String(origen || '').toUpperCase() === 'AXIS' ? 'AXIS' : 'QNAP');
+/** Marca de umbrales de un origen: AXIS, QUOTE (ISS, Neural, Milestone) o QNAP para el resto. */
+export const marcaDe = (origen) => {
+  const clave = String(origen || '').trim().toUpperCase();
+  if (clave === 'AXIS') return 'AXIS';
+  return esOrigenQuote(clave) ? 'QUOTE' : 'QNAP';
+};
+
+// Umbrales de una marca; si la configuración no la trae (guardada antes de que existiera), el default.
+const umbralDe = (config, marca) => config?.[marca] || MARGEN_DEFAULTS[marca];
 
 /**
  * Umbrales para un conjunto de lineas de distintas marcas: se usa el mas
@@ -66,15 +77,15 @@ const marcaDe = (origen) => (String(origen || '').toUpperCase() === 'AXIS' ? 'AX
 export const umbralesPara = (origenes, config = leerConfigMargen()) => {
   const marcas = [...new Set((origenes.length ? origenes : ['QNAP']).map(marcaDe))];
   return {
-    objetivo: Math.max(...marcas.map((m) => config[m].objetivo)),
-    piso: Math.max(...marcas.map((m) => config[m].piso))
+    objetivo: Math.max(...marcas.map((m) => umbralDe(config, m).objetivo)),
+    piso: Math.max(...marcas.map((m) => umbralDe(config, m).piso))
   };
 };
 
 /** 'ok' | 'bajo_objetivo' | 'bajo_piso' | null (sin dato). */
 export const estadoMargen = (gpPct, origen, config = leerConfigMargen()) => {
   if (gpPct === null || gpPct === undefined || !Number.isFinite(Number(gpPct))) return null;
-  const { objetivo, piso } = Array.isArray(origen) ? umbralesPara(origen, config) : config[marcaDe(origen)];
+  const { objetivo, piso } = Array.isArray(origen) ? umbralesPara(origen, config) : umbralDe(config, marcaDe(origen));
   const valor = Number(gpPct);
   // Tolerancia de redondeo: 14,999 % cuenta como 15 %.
   if (valor + 0.005 < piso) return 'bajo_piso';
