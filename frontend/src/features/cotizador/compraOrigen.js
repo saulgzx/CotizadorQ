@@ -7,7 +7,7 @@
 // Milestone puede decir "para cámaras Axis" y no por eso es una compra a Axis.
 import { esOrigenQuote } from './quoteFabricante';
 
-const NOMBRE_FABRICANTE = { ISS: 'ISS', NEURAL: 'Neural Labs', MILESTONE: 'Milestone', MILESTONE_HW: 'Milestone', VELASEA: 'Velasea' };
+const NOMBRE_FABRICANTE = { ISS: 'ISS', NEURAL: 'Neural Labs', VAIDIO: 'Vaidio', MILESTONE: 'Milestone', MILESTONE_HW: 'Milestone', VELASEA: 'Velasea' };
 
 const origenDe = (item) => String(item?.origen ?? '').trim().toUpperCase();
 

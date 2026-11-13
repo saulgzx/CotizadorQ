@@ -57,7 +57,7 @@ describe('semaforo de margen: quotes', () => {
   });
 
   test('marcaDe manda los cuatro orígenes de quote a QUOTE y deja AXIS y QNAP como estaban', () => {
-    for (const origen of ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'iss']) expect(marcaDe(origen)).toBe('QUOTE');
+    for (const origen of ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'iss', ' vaidio ']) expect(marcaDe(origen)).toBe('QUOTE');
     expect(marcaDe('AXIS')).toBe('AXIS');
     expect(marcaDe('QNAP')).toBe('QNAP');
     expect(marcaDe(undefined)).toBe('QNAP');

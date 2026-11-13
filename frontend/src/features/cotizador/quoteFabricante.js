@@ -7,7 +7,7 @@
 //
 // Reglas de negocio (decididas por el dueño):
 //   costo puesto en Chile = costo del quote x (1 + % de transporte y arancel), sin más factores
-//     ISS 15% · Neural Labs 15% · Milestone 0% si es licencia, 12% si es servidor
+//     ISS 15% · Neural Labs 15% · Vaidio 15% · Milestone 0% si es licencia, 12% si es servidor
 //   Velasea es "igual que QNAP pero sin IC": costo del quote x 1,011 (flete de entrada) x 1,12.
 //   precio al cliente = costo Chile / (1 - margen); margen por defecto 8%, editable por línea.
 //   Velasea no usa el 8%: parte del margen global de QNAP, como cualquier línea QNAP.
@@ -20,6 +20,8 @@ export const GP_QUOTE_POR_DEFECTO = 0.08;
 export const FABRICANTES = Object.freeze({
   ISS: Object.freeze({ nombre: 'ISS', internacion: 0.15 }),
   NEURAL: Object.freeze({ nombre: 'Neural Labs', internacion: 0.15 }),
+  // Vaidio: exactamente igual que ISS (15 %, margen 8 %).
+  VAIDIO: Object.freeze({ nombre: 'Vaidio', internacion: 0.15 }),
   // Milestone depende del tipo de línea.
   MILESTONE: Object.freeze({
     nombre: 'Milestone',
@@ -35,7 +37,7 @@ const TIEMPO_QUOTE = 'ETA por confirmar';
 export const SKU_POR_CREAR = 'To Create';
 
 /** Orígenes de línea que salen de un quote (los mismos que conoce el backend). */
-export const ORIGENES_QUOTE = Object.freeze(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
+export const ORIGENES_QUOTE = Object.freeze(['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
 
 export const esOrigenQuote = (origen) => ORIGENES_QUOTE.includes(String(origen ?? '').trim().toUpperCase());
 

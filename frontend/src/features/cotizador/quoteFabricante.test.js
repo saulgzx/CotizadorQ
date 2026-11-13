@@ -22,7 +22,8 @@ import { productoFueraDeLista } from './fueraDeLista';
 
 describe('configuración', () => {
   test('fabricantes, nombres y margen por defecto', () => {
-    expect(Object.keys(FABRICANTES)).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'VELASEA']);
+    expect(Object.keys(FABRICANTES)).toEqual(['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'VELASEA']);
+    expect(FABRICANTES.VAIDIO.nombre).toBe('Vaidio');
     expect(FABRICANTES.VELASEA.nombre).toBe('Velasea');
     expect(FABRICANTES.ISS.nombre).toBe('ISS');
     expect(FABRICANTES.NEURAL.nombre).toBe('Neural Labs');
@@ -431,7 +432,7 @@ describe('productoDeQuote', () => {
     expect(origenDeQuote('MILESTONE', 'licencia')).toBe('MILESTONE');
     expect(origenDeQuote('MILESTONE')).toBe('MILESTONE');
     expect(origenDeQuote('QNAP')).toBeNull();
-    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
+    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
     expect(esOrigenQuote('milestone_hw')).toBe(true);
     expect(esOrigenQuote('AXIS')).toBe(false);
     expect(esOrigenQuote(null)).toBe(false);
@@ -581,14 +582,14 @@ describe('Velasea: igual que QNAP pero sin IC', () => {
   });
 
   test('los demás fabricantes no llevan flete de entrada', () => {
-    for (const f of ['ISS', 'NEURAL', 'MILESTONE']) expect(fleteEntradaQuote(f)).toBe(1);
+    for (const f of ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE']) expect(fleteEntradaQuote(f)).toBe(1);
     expect(fleteEntradaQuote('OTRO')).toBeNull();
   });
 
   test('usa el margen de QNAP, no el 8 % de los quotes', () => {
     expect(usaMargenQnap('VELASEA')).toBe(true);
     expect(usaMargenQnap(' velasea ')).toBe(true);
-    for (const o of ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'QNAP', 'AXIS', '', null]) expect(usaMargenQnap(o)).toBe(false);
+    for (const o of ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'QNAP', 'AXIS', '', null]) expect(usaMargenQnap(o)).toBe(false);
   });
 
   test('el producto sale con origen VELASEA, SKU por crear y el costo del quote como precio', () => {
@@ -612,6 +613,7 @@ describe('la lógica de quotes y la tabla de cadenas de costo dicen lo mismo', (
   test.each([
     ['ISS', undefined, 'ISS'],
     ['NEURAL', undefined, 'NEURAL'],
+    ['VAIDIO', undefined, 'VAIDIO'],
     ['MILESTONE', 'licencia', 'MILESTONE'],
     ['MILESTONE', 'servidor', 'MILESTONE_HW'],
     ['VELASEA', undefined, 'VELASEA']
@@ -626,5 +628,33 @@ describe('la lógica de quotes y la tabla de cadenas de costo dicen lo mismo', (
 
   test('todo origen de quote tiene su cadena y viceversa (salvo AXIS y QNAP)', () => {
     expect(Object.keys(CADENA_POR_ORIGEN).filter((o) => o !== 'AXIS' && o !== 'QNAP').sort()).toEqual([...ORIGENES_QUOTE].sort());
+  });
+});
+
+describe('Vaidio: exactamente igual que ISS', () => {
+  const linea = { mpn: 'VD-CORE-16', descripcion: 'Vaidio Core 16 canales', cantidad: 3, costoUnitario: 100 };
+
+  test('mismo recargo, mismo costo Chile y mismo margen que ISS para cualquier costo', () => {
+    expect(porcentajeInternacion('VAIDIO')).toBe(porcentajeInternacion('ISS'));
+    expect(fleteEntradaQuote('VAIDIO')).toBe(1);
+    expect(usaMargenQnap('VAIDIO')).toBe(false);
+    for (const costo of [0.01, 1, 31.25, 80.5, 100, 999.99, 4300.5, 12345.67]) {
+      expect(costoChileQuote(costo, 'VAIDIO')).toBe(costoChileQuote(costo, 'ISS'));
+    }
+    expect(costoChileQuote(100, 'vaidio')).toBe(115);
+  });
+
+  test('el producto solo se diferencia del de ISS en el origen, la marca y el id', () => {
+    const vaidio = productoDeQuote(linea, { fabricante: 'VAIDIO', indice: 1 });
+    const iss = productoDeQuote(linea, { fabricante: 'ISS', indice: 1 });
+    expect(vaidio).toMatchObject({ origen: 'VAIDIO', marca: 'Vaidio', sku: 'To Create', precio: 100, costoChile: 115, gp: 0.08, cantidadSugerida: 3 });
+    expect({ ...vaidio, origen: 0, marca: 0, id: 0 }).toEqual({ ...iss, origen: 0, marca: 0, id: 0 });
+    expect(precioClienteQuote(vaidio.costoChile, vaidio.gp)).toBe(125);
+    expect(esOrigenQuote('vaidio')).toBe(true);
+  });
+
+  test('una línea Vaidio guardada se rearma igual (duplicar)', () => {
+    expect(productoDeQuoteGuardado({ origen: 'VAIDIO', mpn: 'VD-CORE-16', descripcion: 'Core', cantidad: 3, precio_disty: 100 }))
+      .toMatchObject({ origen: 'VAIDIO', marca: 'Vaidio', costoChile: 115, cantidadSugerida: 3 });
   });
 });

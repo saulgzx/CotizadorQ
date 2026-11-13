@@ -17,7 +17,7 @@ describe('gpBaseDeOrigen', () => {
 
   test('los cuatro orígenes de quote usan 8 % sin importar los márgenes globales', () => {
     expect(GP_QUOTE_POR_DEFECTO).toBe(0.08);
-    for (const origen of ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']) {
+    for (const origen of ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW']) {
       expect(gpBaseDeOrigen(origen, globales)).toBe(0.08);
       expect(gpBaseDeOrigen(origen, { gpQnap: 0.3, gpAxis: 0.3 })).toBe(0.08);
     }

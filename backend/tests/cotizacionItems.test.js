@@ -117,10 +117,10 @@ describe('normalizarLineaAdmin', () => {
 });
 
 describe('origenes y cadena de costo', () => {
-  const NUEVOS = ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA'];
+  const NUEVOS = ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'VELASEA'];
 
-  test('la tabla tiene los 7 origenes', () => {
-    expect([...ORIGENES_VALIDOS].sort()).toEqual(['AXIS', 'ISS', 'MILESTONE', 'MILESTONE_HW', 'NEURAL', 'QNAP', 'VELASEA']);
+  test('la tabla tiene los 8 origenes', () => {
+    expect([...ORIGENES_VALIDOS].sort()).toEqual(['AXIS', 'ISS', 'MILESTONE', 'MILESTONE_HW', 'NEURAL', 'QNAP', 'VAIDIO', 'VELASEA']);
     expect(Object.keys(CADENA_POR_ORIGEN)).toEqual(ORIGENES_VALIDOS);
   });
 
@@ -148,6 +148,9 @@ describe('origenes y cadena de costo', () => {
   test('costoXCL de los fabricantes sin lista: costo del quote + transporte y arancel', () => {
     expect(costoXCL('ISS', 100)).toBeCloseTo(115, 10);
     expect(costoXCL('NEURAL', 100)).toBeCloseTo(115, 10);
+    // Vaidio: exactamente igual que ISS
+    expect(costoXCL('VAIDIO', 100)).toBe(costoXCL('ISS', 100));
+    expect(CADENA_POR_ORIGEN.VAIDIO).toEqual(CADENA_POR_ORIGEN.ISS);
     expect(costoXCL('MILESTONE', 100)).toBeCloseTo(100, 10);
     expect(costoXCL('MILESTONE_HW', 100)).toBeCloseTo(112, 10);
     // Velasea: como QNAP pero sin dividir por IC -> 100 x 1,011 x 1,12

@@ -3,7 +3,7 @@ import { MARGEN_DEFAULTS, useConfigMargen } from './margen';
 import { notify } from '../ui/toast';
 
 const MARCAS = ['QNAP', 'AXIS', 'QUOTE'];
-const NOMBRE_MARCA = { QNAP: 'QNAP', AXIS: 'AXIS', QUOTE: 'Quotes (ISS, Neural Labs, Milestone)' };
+const NOMBRE_MARCA = { QNAP: 'QNAP', AXIS: 'AXIS', QUOTE: 'Quotes (ISS, Neural Labs, Vaidio, Milestone)' };
 
 const aTexto = (config) =>
   Object.fromEntries(MARCAS.map((m) => [m, { objetivo: String(config[m].objetivo), piso: String(config[m].piso) }]));

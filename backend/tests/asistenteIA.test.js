@@ -784,7 +784,7 @@ describe('asistente IA', () => {
       const prompt = (p) => construirPromptAgente({ marca: null, mensajes: [], pantallazo: p });
 
       test('acepta los tres fabricantes, tambien en minusculas, y los normaliza', () => {
-        for (const f of ['ISS', 'NEURAL', 'MILESTONE', 'VELASEA', 'iss', 'neural', 'Milestone', 'velasea']) {
+        for (const f of ['ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'VELASEA', 'iss', 'neural', 'vaidio', 'Milestone', 'velasea']) {
           expect(
             validarEntrada({ pantallazo: { ...quote, fabricante: f } }).pantallazo
           ).toEqual({ ...quote, fabricante: f.toUpperCase() });
@@ -796,7 +796,7 @@ describe('asistente IA', () => {
         expect(() => validarEntrada({ pantallazo: sin })).toThrow(/Fabricante invalido/);
         expect(() =>
           validarEntrada({ pantallazo: { ...quote, fabricante: 'AXIS' } })
-        ).toThrow(/ISS, NEURAL, MILESTONE o VELASEA/);
+        ).toThrow(/ISS, NEURAL, VAIDIO, MILESTONE o VELASEA/);
       });
 
       test('no exige lineas y no las propaga', () => {
@@ -842,6 +842,7 @@ describe('asistente IA', () => {
         expect(prompt({ ...quote, fabricante: 'ISS' })).toContain('ISS');
         expect(prompt({ ...quote, fabricante: 'MILESTONE' })).toContain('Milestone');
         expect(prompt({ ...quote, fabricante: 'VELASEA' })).toContain('Velasea');
+        expect(prompt({ ...quote, fabricante: 'VAIDIO' })).toContain('Vaidio');
       });
 
       test('el prompt de un PDF nombra ./pantallazo.pdf y pide todas las paginas', () => {

@@ -55,7 +55,7 @@ describe('CargarQuoteModal', () => {
     const dialogo = screen.getByRole('dialog', { name: 'Cargar quote de fabricante' });
     expect(dialogo).toHaveAttribute('aria-modal', 'true');
     const radios = within(screen.getByRole('radiogroup')).getAllByRole('radio');
-    expect(radios.map((r) => r.textContent)).toEqual(['ISS', 'Neural Labs', 'Milestone', 'Velasea']);
+    expect(radios.map((r) => r.textContent)).toEqual(['ISS', 'Neural Labs', 'Vaidio', 'Milestone', 'Velasea']);
     radios.forEach((r) => expect(r).toHaveAttribute('aria-checked', 'false'));
     expect(agregarBtn()).toBeDisabled();
   });
@@ -65,6 +65,8 @@ describe('CargarQuoteModal', () => {
     elegirFab('ISS');
     expect(screen.getByText('Transporte y arancel 15 %')).toBeInTheDocument();
     elegirFab('Neural Labs');
+    expect(screen.getByText('Transporte y arancel 15 %')).toBeInTheDocument();
+    elegirFab('Vaidio');
     expect(screen.getByText('Transporte y arancel 15 %')).toBeInTheDocument();
     elegirFab('Milestone');
     expect(screen.getByText('Licencias 0 % · Servidores 12 %')).toBeInTheDocument();

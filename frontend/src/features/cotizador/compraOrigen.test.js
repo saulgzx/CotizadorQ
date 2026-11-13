@@ -17,6 +17,7 @@ describe('etiquetaCompraOrigen', () => {
 
   test('Velasea se nombra como fabricante, sola o en una mixta', () => {
     expect(etiquetaCompraOrigen([{ origen: 'VELASEA', marca: 'Velasea' }])).toBe('Velasea');
+    expect(etiquetaCompraOrigen([{ origen: 'VAIDIO', marca: 'Vaidio' }])).toBe('Vaidio');
     expect(etiquetaCompraOrigen([{ origen: 'QNAP' }, { origen: 'velasea' }])).toBe('QNAP / Velasea');
   });
 

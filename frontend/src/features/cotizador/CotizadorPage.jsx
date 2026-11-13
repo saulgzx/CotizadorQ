@@ -5863,7 +5863,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       type="button"
                       onClick={() => setQuoteAbierto(true)}
                       className="mq-btn mq-btn-lg mq-btn-secundario shrink-0"
-                      title="Cargar el quote de ISS, Neural Labs, Milestone o Velasea"
+                      title="Cargar el quote de ISS, Neural Labs, Vaidio, Milestone o Velasea"
                     >
                       <Icono nombre="portapapeles" />
                       <span className="hidden sm:inline">Cargar quote</span>
