@@ -9,7 +9,10 @@ import {
   precioClienteQuote,
   normalizarLineasQuote,
   productoDeQuote,
-  resumenQuote
+  resumenQuote,
+  ORIGENES_QUOTE,
+  esOrigenQuote,
+  origenDeQuote
 } from './quoteFabricante';
 import { productoFueraDeLista } from './fueraDeLista';
 
@@ -357,10 +360,10 @@ describe('productoDeQuote', () => {
       fueraDeLista: true,
       origen: 'ISS',
       marca: 'ISS',
-      sku: '',
+      sku: 'To Create',
       mpn: 'ABC-1',
       desc: 'Equipo',
-      precio: 0,
+      precio: 100,
       gp: 0.08,
       costoChile: 115,
       tiempo: 'ETA por confirmar',
@@ -388,6 +391,30 @@ describe('productoDeQuote', () => {
     expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'licencia' })).toMatchObject({ costoChile: 100, tipoQuote: 'licencia' });
     expect(productoDeQuote({ ...linea, tipo: 'servidor' }, { fabricante: 'MILESTONE' }).costoChile).toBe(112);
     expect(productoDeQuote({ ...linea, descripcion: 'Husky M30' }, { fabricante: 'MILESTONE' }).tipoQuote).toBe('servidor');
+  });
+
+  test('Milestone: el servidor se guarda como MILESTONE_HW y la licencia como MILESTONE', () => {
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'servidor' }).origen).toBe('MILESTONE_HW');
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'licencia' }).origen).toBe('MILESTONE');
+    expect(productoDeQuote(linea, { fabricante: 'MILESTONE', tipo: 'servidor' }).marca).toBe('Milestone');
+  });
+
+  test('el costo del fabricante viaja como precio (precio_disty) y el costo Chile aparte', () => {
+    const p = productoDeQuote({ ...linea, costoUnitario: 250.5 }, { fabricante: 'NEURAL' });
+    expect(p.precio).toBe(250.5);
+    expect(p.costoChile).toBe(288.08);
+  });
+
+  test('origenDeQuote y esOrigenQuote', () => {
+    expect(origenDeQuote('iss')).toBe('ISS');
+    expect(origenDeQuote('MILESTONE', 'Servidor')).toBe('MILESTONE_HW');
+    expect(origenDeQuote('MILESTONE', 'licencia')).toBe('MILESTONE');
+    expect(origenDeQuote('MILESTONE')).toBe('MILESTONE');
+    expect(origenDeQuote('QNAP')).toBeNull();
+    expect(ORIGENES_QUOTE).toEqual(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']);
+    expect(esOrigenQuote('milestone_hw')).toBe(true);
+    expect(esOrigenQuote('AXIS')).toBe(false);
+    expect(esOrigenQuote(null)).toBe(false);
   });
 
   test('tipo inválido en Milestone -> null (no cae a 0%)', () => {
