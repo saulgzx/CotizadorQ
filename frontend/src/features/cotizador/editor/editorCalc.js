@@ -4,7 +4,7 @@
 //   costo final = max(costo XCL - rebates, 0)          (rebates solo AXIS)
 //   precio = costo final / (1 - gp)
 import { CADENA_POR_ORIGEN, CONSTANTS, DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
-import { GP_QUOTE_POR_DEFECTO, esOrigenQuote } from '../quoteFabricante';
+import { GP_QUOTE_POR_DEFECTO, esOrigenQuote, usaMargenQnap } from '../quoteFabricante';
 
 export const redondear = (valor, decimales = 2) => {
   const factor = 10 ** decimales;
@@ -133,8 +133,11 @@ export const lineaDesdeItem = (item) => {
 /** Producto del catalogo (formato de CotizadorPage para admin) -> linea nueva. */
 export const lineaDesdeProducto = (producto, { gpPct, partnerCategory, tiempoEntrega } = {}) => {
   const origen = inferirOrigen({ ...producto, descripcion: producto.desc });
-  // Margen por defecto: 8 % para un origen de quote, el de siempre (15 %) para el resto.
-  if (gpPct === undefined) gpPct = (esOrigenQuote(origen) ? GP_QUOTE_POR_DEFECTO : CONSTANTS.DEFAULT_GP) * 100;
+  // Margen por defecto: 8 % para un origen de quote (salvo Velasea, que va como QNAP), el de
+  // siempre (15 %) para el resto.
+  if (gpPct === undefined) {
+    gpPct = (esOrigenQuote(origen) && !usaMargenQnap(origen) ? GP_QUOTE_POR_DEFECTO : CONSTANTS.DEFAULT_GP) * 100;
+  }
   const categoria = origen === 'AXIS' ? (partnerCategory || DEFAULT_AXIS_PARTNER) : null;
   const rebatePartner = origen === 'AXIS' ? rebatePartnerDeProducto(producto, categoria) : null;
   const base = {

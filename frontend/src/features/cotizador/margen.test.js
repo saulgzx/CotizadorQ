@@ -63,6 +63,14 @@ describe('semaforo de margen: quotes', () => {
     expect(marcaDe(undefined)).toBe('QNAP');
   });
 
+  test('Velasea se mide con los umbrales de QNAP (se cotiza con su margen)', () => {
+    expect(marcaDe('VELASEA')).toBe('QNAP');
+    expect(marcaDe(' velasea ')).toBe('QNAP');
+    expect(estadoMargen(15, 'VELASEA', MARGEN_DEFAULTS)).toBe('ok');
+    expect(estadoMargen(8, 'VELASEA', MARGEN_DEFAULTS)).toBe('bajo_piso');
+    expect(estadoMargen(8, 'ISS', MARGEN_DEFAULTS)).toBe('ok');
+  });
+
   test('una línea de quote al 8 % está en objetivo, no bajo el piso', () => {
     expect(estadoMargen(8, 'ISS', config)).toBe('ok');
     expect(estadoMargen(8, 'MILESTONE_HW', config)).toBe('ok');

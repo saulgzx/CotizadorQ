@@ -8,9 +8,12 @@
 // Reglas de negocio (decididas por el dueño):
 //   costo puesto en Chile = costo del quote x (1 + % de transporte y arancel), sin más factores
 //     ISS 15% · Neural Labs 15% · Milestone 0% si es licencia, 12% si es servidor
+//   Velasea es "igual que QNAP pero sin IC": costo del quote x 1,011 (flete de entrada) x 1,12.
 //   precio al cliente = costo Chile / (1 - margen); margen por defecto 8%, editable por línea.
+//   Velasea no usa el 8%: parte del margen global de QNAP, como cualquier línea QNAP.
 
 import { normalizarMonto } from './pantallazoMontos';
+import { CONSTANTS } from './cotizadorConstants';
 
 export const GP_QUOTE_POR_DEFECTO = 0.08;
 
@@ -21,7 +24,9 @@ export const FABRICANTES = Object.freeze({
   MILESTONE: Object.freeze({
     nombre: 'Milestone',
     internacion: Object.freeze({ licencia: 0, servidor: 0.12 })
-  })
+  }),
+  // Igual que QNAP pero sin factor IC: lleva flete de entrada y usa el margen global de QNAP.
+  VELASEA: Object.freeze({ nombre: 'Velasea', internacion: 0.12, fleteEntrada: 1.011, margenQnap: true })
 });
 
 export const TIPOS_MILESTONE = Object.freeze(['licencia', 'servidor']);
@@ -30,7 +35,7 @@ const TIEMPO_QUOTE = 'ETA por confirmar';
 export const SKU_POR_CREAR = 'To Create';
 
 /** Orígenes de línea que salen de un quote (los mismos que conoce el backend). */
-export const ORIGENES_QUOTE = Object.freeze(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']);
+export const ORIGENES_QUOTE = Object.freeze(['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']);
 
 export const esOrigenQuote = (origen) => ORIGENES_QUOTE.includes(String(origen ?? '').trim().toUpperCase());
 
@@ -126,12 +131,27 @@ export const porcentajeInternacion = (fabricante, tipo) => {
   return TIPOS_MILESTONE.includes(t) ? internacion[t] : null;
 };
 
+/** Flete de entrada (factor, p. ej. 1.011) del fabricante; 1 si no lleva. null si no existe. */
+export const fleteEntradaQuote = (fabricante) => {
+  const k = claveFabricante(fabricante);
+  return k ? FABRICANTES[k].fleteEntrada ?? 1 : null;
+};
+
+/**
+ * true si las líneas de ese fabricante u origen parten del margen global de QNAP en vez del 8%
+ * de los quotes (hoy solo Velasea, que es "igual que QNAP").
+ */
+export const usaMargenQnap = (fabricanteUOrigen) => {
+  const k = claveFabricante(fabricanteUOrigen);
+  return !!(k && FABRICANTES[k].margenQnap);
+};
+
 /** Costo puesto en Chile con 2 decimales, o null si el costo no es > 0 o no hay porcentaje. */
 export const costoChileQuote = (costoUnitario, fabricante, tipo) => {
   const costo = costoValido(costoUnitario);
   const pct = porcentajeInternacion(fabricante, tipo);
   if (costo === null || pct === null) return null;
-  return redondear2(costo * (1 + pct));
+  return redondear2(costo * fleteEntradaQuote(fabricante) * (1 + pct));
 };
 
 /** Precio al cliente = costo Chile / (1 - gp), 2 decimales. gp decimal en [0, 1). */
@@ -295,7 +315,7 @@ let contadorId = 0;
  * lo hace determinista; sin él se usa un contador del módulo.
  * `cantidadSugerida` es la cantidad del quote, o 1 si no se pudo leer.
  */
-export const productoDeQuote = (linea, { fabricante, gp = GP_QUOTE_POR_DEFECTO, tipo, indice } = {}) => {
+export const productoDeQuote = (linea, { fabricante, gp, tipo, indice } = {}) => {
   const k = claveFabricante(fabricante);
   if (!k) return null;
   const costoFabricante = costoValido(linea?.costoUnitario);
@@ -305,7 +325,12 @@ export const productoDeQuote = (linea, { fabricante, gp = GP_QUOTE_POR_DEFECTO, 
   const costoChile = costoChileQuote(costoFabricante, k, tipoQuote);
   if (costoChile === null) return null;
   const mpn = texto(linea?.mpn);
-  const gpFinal = Number.isFinite(Number(gp)) && gp !== null && gp !== '' && Number(gp) >= 0 && Number(gp) < 1 ? Number(gp) : GP_QUOTE_POR_DEFECTO;
+  // `gp` es solo informativo: el carrito usa el margen propio de la línea o el base de su origen.
+  const gpPorDefecto = usaMargenQnap(k) ? CONSTANTS.DEFAULT_GP : GP_QUOTE_POR_DEFECTO;
+  const gpFinal =
+    gp !== undefined && gp !== null && gp !== '' && Number.isFinite(Number(gp)) && Number(gp) >= 0 && Number(gp) < 1
+      ? Number(gp)
+      : gpPorDefecto;
   const n = indice ?? ++contadorId;
   return {
     id: `${PREFIJO_QUOTE}${k}:${clave(mpn).replace(/\s+/g, '') || 'SINMPN'}#${n}`,

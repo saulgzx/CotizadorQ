@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { esOrigenQuote } from './quoteFabricante';
+import { esOrigenQuote, usaMargenQnap } from './quoteFabricante';
 
 // Semaforo de margen por marca. El objetivo es el GP con que se cotiza por
 // defecto; el piso es el minimo aceptable antes de pedir confirmacion.
@@ -60,11 +60,14 @@ export const useConfigMargen = () => {
   return [config, (next) => setConfig(guardarConfigMargen(next))];
 };
 
-/** Marca de umbrales de un origen: AXIS, QUOTE (ISS, Neural, Milestone) o QNAP para el resto. */
+/**
+ * Marca de umbrales de un origen: AXIS, QUOTE (ISS, Neural, Milestone) o QNAP para el resto.
+ * Velasea se cotiza con el margen de QNAP, así que se mide con los umbrales de QNAP.
+ */
 export const marcaDe = (origen) => {
   const clave = String(origen || '').trim().toUpperCase();
   if (clave === 'AXIS') return 'AXIS';
-  return esOrigenQuote(clave) ? 'QUOTE' : 'QNAP';
+  return esOrigenQuote(clave) && !usaMargenQnap(clave) ? 'QUOTE' : 'QNAP';
 };
 
 // Umbrales de una marca; si la configuración no la trae (guardada antes de que existiera), el default.

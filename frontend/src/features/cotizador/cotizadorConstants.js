@@ -6,15 +6,18 @@ export const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
 
 // Cadena de costo por origen de línea: costo Chile = disty x freight / IC x (1 + INT).
 // Espejo EXACTO de CADENA_POR_ORIGEN en backend/src/services/cotizacionItems.js: si cambia
-// allá, cambia aquí. Los orígenes de quote (ISS, NEURAL, MILESTONE, MILESTONE_HW) no llevan
+// allá, cambia aquí. Los orígenes de quote ISS, NEURAL, MILESTONE y MILESTONE_HW no llevan
 // flete de entrada ni factor IC: solo transporte y arancel (INT) sobre el costo del quote.
+// VELASEA (también se cotiza desde su quote) lleva el flete de entrada de QNAP, sin IC.
 export const CADENA_POR_ORIGEN = Object.freeze({
   AXIS: Object.freeze({ INBOUND_FREIGHT: AXIS_CONSTANTS.INBOUND_FREIGHT, IC: AXIS_CONSTANTS.IC, INT: AXIS_CONSTANTS.INT }),
   QNAP: Object.freeze({ INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT, IC: CONSTANTS.IC, INT: CONSTANTS.INT }),
   ISS: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   NEURAL: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   MILESTONE: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0 }),
-  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 })
+  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 }),
+  // Velasea: igual que QNAP pero sin factor IC.
+  VELASEA: Object.freeze({ INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT, IC: 1, INT: CONSTANTS.INT })
 });
 
 // Cómo se rotula en pantalla una línea que viene de un quote de fabricante.
@@ -22,7 +25,8 @@ export const ETIQUETA_ORIGEN_QUOTE = Object.freeze({
   ISS: 'Quote ISS',
   NEURAL: 'Quote Neural Labs',
   MILESTONE: 'Quote Milestone · licencia',
-  MILESTONE_HW: 'Quote Milestone · servidor'
+  MILESTONE_HW: 'Quote Milestone · servidor',
+  VELASEA: 'Quote Velasea'
 });
 
 export const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });

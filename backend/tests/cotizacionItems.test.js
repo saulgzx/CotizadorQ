@@ -117,10 +117,10 @@ describe('normalizarLineaAdmin', () => {
 });
 
 describe('origenes y cadena de costo', () => {
-  const NUEVOS = ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW'];
+  const NUEVOS = ['ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW', 'VELASEA'];
 
-  test('la tabla tiene los 6 origenes', () => {
-    expect([...ORIGENES_VALIDOS].sort()).toEqual(['AXIS', 'ISS', 'MILESTONE', 'MILESTONE_HW', 'NEURAL', 'QNAP']);
+  test('la tabla tiene los 7 origenes', () => {
+    expect([...ORIGENES_VALIDOS].sort()).toEqual(['AXIS', 'ISS', 'MILESTONE', 'MILESTONE_HW', 'NEURAL', 'QNAP', 'VELASEA']);
     expect(Object.keys(CADENA_POR_ORIGEN)).toEqual(ORIGENES_VALIDOS);
   });
 
@@ -150,6 +150,9 @@ describe('origenes y cadena de costo', () => {
     expect(costoXCL('NEURAL', 100)).toBeCloseTo(115, 10);
     expect(costoXCL('MILESTONE', 100)).toBeCloseTo(100, 10);
     expect(costoXCL('MILESTONE_HW', 100)).toBeCloseTo(112, 10);
+    // Velasea: como QNAP pero sin dividir por IC -> 100 x 1,011 x 1,12
+    expect(costoXCL('VELASEA', 100)).toBeCloseTo(113.232, 10);
+    expect(costoXCL('VELASEA', 100)).toBeCloseTo(costoXCL('QNAP', 100) * 0.95, 10);
   });
 
   test('AXIS y QNAP dan exactamente lo de siempre', () => {

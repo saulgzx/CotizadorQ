@@ -16,6 +16,8 @@ const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
  *   guarda el COSTO DEL QUOTE del fabricante (lo que Intcomex le paga), asi que no lleva
  *   flete de entrada ni factor IC (1 y 1): solo transporte y arancel (INT).
  *   MILESTONE = licencias (INT 0); MILESTONE_HW = servidores (INT 0.12).
+ * - VELASEA (tambien sin lista: se cotiza desde su quote): igual que QNAP pero SIN factor IC,
+ *   o sea flete de entrada 1.011 y transporte/arancel 12%.
  * Rebates y partner_category son SOLO de AXIS.
  */
 const CADENA_POR_ORIGEN = Object.freeze({
@@ -24,7 +26,8 @@ const CADENA_POR_ORIGEN = Object.freeze({
   ISS: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   NEURAL: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   MILESTONE: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0 }),
-  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 })
+  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 }),
+  VELASEA: Object.freeze({ INBOUND_FREIGHT: QNAP_CONSTANTS.INBOUND_FREIGHT, IC: 1, INT: QNAP_CONSTANTS.INT })
 });
 
 /** Origenes validos de una linea de cotizacion. */

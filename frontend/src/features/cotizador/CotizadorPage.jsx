@@ -4483,6 +4483,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             abierto={quoteAbierto}
             onCerrar={() => setQuoteAbierto(false)}
             onAgregar={agregarLineasDeQuote}
+            gpQnap={cotizacionGpGlobalQnap}
           />
         )}
         <AtajosAyuda abierto={atajosAbiertos} onCerrar={() => setAtajosAbiertos(false)} esAdmin={isFullAdmin} />
@@ -5862,7 +5863,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       type="button"
                       onClick={() => setQuoteAbierto(true)}
                       className="mq-btn mq-btn-lg mq-btn-secundario shrink-0"
-                      title="Cargar el quote de ISS, Neural Labs o Milestone"
+                      title="Cargar el quote de ISS, Neural Labs, Milestone o Velasea"
                     >
                       <Icono nombre="portapapeles" />
                       <span className="hidden sm:inline">Cargar quote</span>

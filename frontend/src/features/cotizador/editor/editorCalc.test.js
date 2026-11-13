@@ -171,6 +171,17 @@ describe('editorCalc: líneas de quote (ISS, Neural Labs, Milestone)', () => {
     expect(aplicarCambio(servidor, 'precio_disty', 200).costo_unitario).toBe(224);
   });
 
+  test('Velasea en el editor: cadena de QNAP sin IC y margen por defecto de 15 %', () => {
+    expect(inferirOrigen({ origen: ' velasea ' })).toBe('VELASEA');
+    expect(costoXCL('VELASEA', 100)).toBeCloseTo(113.232, 10);
+    expect(costoXCL('VELASEA', 100)).toBeCloseTo(costoXCL('QNAP', 100) * 0.95, 10);
+    const linea = lineaDesdeProducto({ id: 'quote:VELASEA:X#1', origen: 'VELASEA', precio: 100, costoChile: 113.23, desc: 'Servidor' });
+    expect(linea.origen).toBe('VELASEA');
+    expect(linea.rebate_partner).toBeNull();
+    expect(linea.precio_unitario).toBeCloseTo(133.21, 2);
+    expect(gpDe(linea)).toBeCloseTo(15, 1);
+  });
+
   test('la línea nueva de un producto de origen quote parte del 8 % por defecto', () => {
     const producto = { id: 'quote:ISS:X#1', origen: 'ISS', precio: 100, costoChile: 115, desc: 'Licencia' };
     const linea = lineaDesdeProducto(producto);
