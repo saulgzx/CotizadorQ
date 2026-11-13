@@ -6,7 +6,7 @@
 //   vi.mock('../../api', async () => (await import('./arnesOrdenes.testutil.jsx')).crearApiMock());
 import React from 'react';
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { vi } from 'vitest';
 import App from '../../App';
@@ -22,9 +22,7 @@ configure({ asyncUtilTimeout: 3000 });
 
 export const precalentar = () =>
   Promise.all([
-    import('./OrdenesRoute'),
-    import('../dashboard/DashboardRoute'),
-    import('../cotizador/CotizadorRoute'),
+    import('../cotizador/CotizadorPage'),
     import('../cotizador/views/DashboardView')
   ]);
 
@@ -113,7 +111,18 @@ export function prepararApi({ orders = crearOrdenes(), meta = crearMeta() } = {}
   api.authAPI.logout.mockResolvedValue({});
 }
 
+// Sonda del enrutador: deja a los tests leer la ubicación actual y navegar como lo haría
+// el navegador (atrás/adelante, URL nueva). Vive dentro del MemoryRouter.
+export const enrutador = { navegar: null, ubicacion: null };
+
+function SondaEnrutador() {
+  enrutador.navegar = useNavigate();
+  enrutador.ubicacion = useLocation();
+  return null;
+}
+
 // Deja la sesión iniciada y renderiza la app en la ruta dada.
+// Con `user: null` no se guarda sesión (visitante sin login).
 export function renderApp({ user = ADMIN, ruta = '/admin/ordenes' } = {}) {
   // jsdom no trae matchMedia (lo usa el tema) ni scrollTo.
   window.matchMedia = window.matchMedia || ((query) => ({
@@ -121,13 +130,16 @@ export function renderApp({ user = ADMIN, ruta = '/admin/ordenes' } = {}) {
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false
   }));
   window.scrollTo = () => {};
-  localStorage.setItem('token', 'token-de-prueba');
-  localStorage.setItem('user', JSON.stringify(user));
+  if (user) {
+    localStorage.setItem('token', 'token-de-prueba');
+    localStorage.setItem('user', JSON.stringify(user));
+  }
   queryClient.clear();
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[ruta]}>
         <App />
+        <SondaEnrutador />
         <Toaster />
       </MemoryRouter>
     </QueryClientProvider>
@@ -160,9 +172,8 @@ export const inputsDeLinea = (mpn) => {
 export const escribir = (input, valor) => fireEvent.change(input, { target: { value: valor } });
 
 // Opciones del menú con ese nombre. Hay menú de escritorio (menuitem) y barra con
-// botones; ESPERA a que exista alguna: al cambiar de ruta la página se desmonta y se
-// vuelve a montar, y durante ese instante no hay menú. Buscarla sin esperar fallaba
-// 1 de cada 4 corridas con la máquina cargada.
+// botones; ESPERA a que exista alguna (la página carga con lazy y, al entrar, el menú
+// puede tardar un instante en estar).
 const opcionesDeMenu = (nombre) =>
   waitFor(() => {
     const encontradas = [
@@ -176,13 +187,4 @@ const opcionesDeMenu = (nombre) =>
 // Navega por el menú (se usa la primera opción que coincida).
 export const irAVista = async (nombre) => {
   fireEvent.click((await opcionesDeMenu(nombre))[0]);
-};
-
-// Cambia de RUTA y espera a que la página anterior se haya desmontado de verdad.
-// Hoy cada ruta monta su propia página; sin esta espera, el siguiente clic podía caer
-// todavía en la página vieja y el resultado dependía del reloj.
-export const irARuta = async (nombre) => {
-  const testigo = (await opcionesDeMenu(nombre))[0];
-  fireEvent.click(testigo);
-  await waitFor(() => expect(testigo.isConnected).toBe(false));
 };

@@ -84,6 +84,7 @@ import { PerdidaDialogo } from '../crm/DialogosCrm';
 import { contarPorEtapa, etapaDeCotizacion, textoConteoArchivo } from '../crm/etapasCotizacion';
 import { nombreEtapa } from '../crm/formato';
 import { guardarCache, leerCache, limpiarCaches } from './cacheLocal';
+import { VIDA_UTIL_DATOS_MS, estaVencido, mismoMapaDeStock } from './frescura';
 import { esEntregaAutomatica, textoEntregaLinea } from './entregaStock';
 import { numeroMonto } from './montosOrden';
 import {
@@ -512,6 +513,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [atajosAbiertos, setAtajosAbiertos] = useState(false);
   const [revisionAbierta, setRevisionAbierta] = useState(false);
   const [catalogActivo, setCatalogActivo] = useState(0);
+  // Frescura del catálogo y del stock en memoria (ver frescura.js): marca de la última
+  // carga que terminó bien, cuántas hay en vuelo y la última respuesta cruda aplicada.
+  const ultimaCargaProductosRef = useRef(null);
+  const ultimaCargaStockRef = useRef(null);
+  const productosEnCursoRef = useRef(0);
+  const stockEnCursoRef = useRef(0);
+  const ultimoCrudoProductosRef = useRef(null);
+  // Sube al cerrar sesión: una carga que termina después ya no pisa la pantalla.
+  const generacionSesionRef = useRef(0);
+  // Lectura de la ruta y de la vista sin volver a disparar efectos.
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
+  // `navigate` cambia de identidad en cada cambio de ruta: se lee por referencia para que no
+  // dispare efectos que solo deben reaccionar a un cambio de vista.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const vistaAnteriorRef = useRef(currentView);
+  // El asistente IA cambia de vista Y abre "pegar lista" a la vez: esa lista no se cierra.
+  const conservarPegarListaRef = useRef(false);
   // Solo lectura aquí: se edita y guarda en SemaforoMargenAjustes.
   const [configMargen] = useConfigMargen();
   // Pila de líneas quitadas para Deshacer (Ctrl+Z o el botón del aviso).
@@ -816,7 +836,9 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   }, []);
 
   // Cargar productos del backend
-  const loadProductos = async (roleOverride) => {
+  // `silencioso`: recarga en segundo plano (no cambia nada visible salvo que haya datos nuevos).
+  const loadProductos = async (roleOverride, { silencioso = false } = {}) => {
+    const sesion = generacionSesionRef.current;
     const isAdminForLoad = roleOverride ? canManageCotizadorStock(roleOverride) : isAdmin;
     const usuarioCache = (() => {
       const u = safeJsonParse(localStorage.getItem('user'), null);
@@ -846,12 +868,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const guardado = leerCache('productos', usuarioCache);
       if (guardado) setProductos(prev => (prev.length ? prev : mapear(guardado)));
     }
+    productosEnCursoRef.current += 1;
     try {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.productos,
         queryFn: () => productosAPI.getAll(),
         staleTime: 0
       });
+      // Se cerró la sesión mientras llegaba: no se muestra el catálogo del usuario que salió.
+      if (sesion !== generacionSesionRef.current) return [];
+      ultimaCargaProductosRef.current = Date.now();
+      // React Query conserva la referencia si el contenido no cambió: en segundo plano
+      // no hay nada que volver a pintar ni que volver a guardar.
+      if (silencioso && data === ultimoCrudoProductosRef.current) return [];
+      ultimoCrudoProductosRef.current = data;
       const mapped = mapear(data);
       setProductos(mapped);
       if (usuarioCache) guardarCache('productos', usuarioCache, data);
@@ -859,16 +889,22 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     } catch (error) {
       console.error('Error cargando productos:', error);
       return [];
+    } finally {
+      productosEnCursoRef.current -= 1;
     }
   };
 
-  const loadStock = async () => {
+  const loadStock = async ({ silencioso = false } = {}) => {
+    const sesion = generacionSesionRef.current;
+    stockEnCursoRef.current += 1;
     try {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.stock,
         queryFn: () => stockAPI.getAll(),
         staleTime: 60 * 1000
       });
+      if (sesion !== generacionSesionRef.current) return;
+      ultimaCargaStockRef.current = Date.now();
       const items = Array.isArray(data?.items) ? data.items : [];
       const map = {};
       items.forEach(item => {
@@ -879,32 +915,80 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         map[key] = item.quantity;
       });
       // Las entregas del carrito se recalculan en el efecto de entregas al cambiar el mapa.
-      setStockByMpn(map);
+      // Si el stock no cambió se conserva el mismo objeto y no se renderiza nada.
+      setStockByMpn(prev => (mismoMapaDeStock(prev, map) ? prev : map));
     } catch (error) {
       console.error('Error cargando stock:', error);
-      setStockByMpn({});
+      // En segundo plano un fallo no borra el stock que ya se estaba mostrando.
+      if (!silencioso) setStockByMpn({});
+    } finally {
+      stockEnCursoRef.current -= 1;
     }
   };
 
   const loadStockCatalog = async () => {
+    const sesion = generacionSesionRef.current;
+    // Con datos ya en pantalla (volvió a la vista) se refresca sin esqueleto ni vaciar la tabla.
+    const hayDatos = stockCatalog.length > 0;
     try {
-      setStockCatalogLoading(true);
+      if (!hayDatos) setStockCatalogLoading(true);
       setStockCatalogError('');
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.stockCatalog,
         queryFn: () => stockAPI.getCatalog(),
-        staleTime: 150 * 1000
+        staleTime: VIDA_UTIL_DATOS_MS
       });
+      if (sesion !== generacionSesionRef.current) return;
       const items = Array.isArray(data?.items) ? data.items : [];
       setStockCatalog(items);
     } catch (error) {
       console.error('Error cargando catálogo de stock:', error);
-      setStockCatalogError(error.message || 'Error cargando stock disponible');
-      setStockCatalog([]);
+      if (!hayDatos) {
+        setStockCatalogError(error.message || 'Error cargando stock disponible');
+        setStockCatalog([]);
+      }
     } finally {
       setStockCatalogLoading(false);
     }
   };
+
+  // Recarga en segundo plano del catálogo y del stock cuando lo que hay en memoria tiene más
+  // de VIDA_UTIL_DATOS_MS. No muestra esqueletos ni vacía la pantalla y no toca el carrito, la
+  // búsqueda ni los filtros: solo reemplaza los datos si llegaron distintos. Cada dato decide
+  // por su cuenta (productos y stock tienen su propia marca) y no se duplica una carga en vuelo.
+  const refrescarCatalogoSiVencido = () => {
+    if (!isLoggedIn) return;
+    if (productosEnCursoRef.current === 0 && estaVencido(ultimaCargaProductosRef.current)) {
+      loadProductos(undefined, { silencioso: true });
+    }
+    if (stockEnCursoRef.current === 0 && estaVencido(ultimaCargaStockRef.current)) {
+      loadStock({ silencioso: true });
+    }
+  };
+  const refrescarCatalogoRef = useRef(null);
+  refrescarCatalogoRef.current = refrescarCatalogoSiVencido;
+  const alVolverALaPestanaRef = useRef(null);
+  alVolverALaPestanaRef.current = () => {
+    refrescarCatalogoSiVencido();
+    // La tabla de Stock disponible también se refresca (su propia consulta vence a los mismos 2 minutos).
+    if (currentView === 'stock') loadStockCatalog();
+  };
+
+  // (a) Se ENTRA al Cotizador o a Stock. Nunca en cada clic del menú: solo si está vencido.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (currentView === 'cotizador' || currentView === 'stock') refrescarCatalogoRef.current();
+  }, [isLoggedIn, currentView]);
+
+  // (b) La pestaña vuelve a estar visible después de un rato.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') alVolverALaPestanaRef.current();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [isLoggedIn]);
 
   // Recibe lo que hay escrito en los campos al enviar: un gestor de contraseñas
   // puede rellenarlos sin avisar a React y el estado quedaría vacío.
@@ -960,6 +1044,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     // Catálogo e historial guardados son del usuario que sale.
     limpiarCaches();
     queryClient.clear();
+    generacionSesionRef.current += 1;
+    ultimaCargaProductosRef.current = null;
+    ultimaCargaStockRef.current = null;
+    ultimoCrudoProductosRef.current = null;
     setIsLoggedIn(false);
     setUser(null);
     setUsuario('');
@@ -1165,6 +1253,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
   }, [location.pathname, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewDashboard, navigate]);
 
+  // Vista -> ruta. Solo reacciona cuando CAMBIA LA VISTA (clic en el menú, Alt+número,
+  // buscador, un botón interno): la ruta se lee de la referencia. Como la página ya no se
+  // remonta al cambiar de ruta, si también dependiera de la ruta, al volver atrás en el
+  // navegador esta sincronización vería la vista vieja y desharía el viaje.
   useEffect(() => {
     if (!isLoggedIn || !hasRouteSync) return;
     if (!VIEW_TO_ROUTE[currentView]) return;
@@ -1176,10 +1268,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     if (!canViewDashboard && currentView === 'dashboard') return;
     const targetRoute = VIEW_TO_ROUTE[currentView];
-    if (location.pathname !== targetRoute) {
-      navigate(targetRoute, { replace: true });
+    if (pathnameRef.current !== targetRoute) {
+      navigateRef.current(targetRoute, { replace: true });
     }
-  }, [currentView, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewDashboard, hasRouteSync, location.pathname, navigate]);
+  }, [currentView, isLoggedIn, isFullAdmin, isCotizadorStockAdmin, canViewDashboard, hasRouteSync]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -1867,6 +1959,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   useEffect(() => {
     setMobileMenuOpen(false);
+  }, [currentView]);
+
+  // Al cambiar de vista se cierra todo lo que estaba abierto ENCIMA de la vista. Antes lo
+  // hacía el remontaje de la página al cambiar de ruta; ahora la página persiste y hay que
+  // hacerlo a propósito. Filtros, búsquedas, paginación y filas expandidas NO se tocan.
+  useEffect(() => {
+    if (vistaAnteriorRef.current === currentView) return;
+    vistaAnteriorRef.current = currentView;
+    setPaletteOpen(false);
+    setAtajosAbiertos(false);
+    setRevisionAbierta(false);
+    setEditorCotizacionId(null);
+    setVersionesDe(null);
+    setPerdidaDe(null);
+    setArchivarFechaAbierto(false);
+    setCompraPreviewCot(null);
+    setProjectRegistroModal(null);
+    if (conservarPegarListaRef.current) conservarPegarListaRef.current = false;
+    else setPegarListaTexto(null);
   }, [currentView]);
 
   // Navegación restringida por usuario: si cae en una vista fuera de su lista
@@ -4408,6 +4519,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             <AsistenteIAView
               usuario={user?.usuario}
               onCargarLista={(texto) => {
+                conservarPegarListaRef.current = true;
                 setCurrentView('cotizador');
                 setPegarListaTexto(texto);
               }}
