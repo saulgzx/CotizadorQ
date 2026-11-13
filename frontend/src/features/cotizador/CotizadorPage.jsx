@@ -61,8 +61,10 @@ import useTheme from '../theme/useTheme';
 import { BarraSuperior, Cortina, Indice, direccionDeVista } from '../ui/Navegacion';
 import ThemeToggle from '../theme/ThemeToggle';
 import { notify, Toaster } from '../ui/toast';
-import PantallazoMontos from './PantallazoMontos';
+import PantallazoMontos, { esHoja } from './PantallazoMontos';
 import { leerPantallazo } from './leerPantallazo';
+import { leerMontosDeExcel } from './leerExcelMontos';
+import { calzarMontos } from './pantallazoMontos';
 import MargenChip from './MargenChip';
 import { estadoMargen, formatoPct, useConfigMargen } from './margen';
 import { pareceLista } from './listaPegada';
@@ -844,19 +846,29 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return Number.isNaN(parsed) ? 0 : parsed;
   };
 
-  // --- Pantallazo de montos -------------------------------------------------
-  // La imagen la lee la miniPC (cola del asistente IA). Acá solo se prellenan los
-  // borradores: nada se guarda hasta que Alexis revise y apriete Guardar.
+  // --- Carga de montos desde un archivo --------------------------------------
+  // Dos caminos según el archivo:
+  //  - Excel: se parsea en el navegador. Los números están en celdas, no hay nada
+  //    que interpretar, así que es exacto, instantáneo y no depende de la miniPC.
+  //  - PDF o imagen: va a la cola del asistente y la lee Claude Code en la miniPC.
+  // En los dos casos solo se prellenan los BORRADORES: nada se guarda hasta que
+  // Alexis revise y apriete Guardar.
 
-  const leerPantallazoDeOrden = (order, campo) => (file) =>
-    leerPantallazo({
+  const leerPantallazoDeOrden = (order, campo) => async (file) => {
+    const lineas = order?.lines || [];
+    if (esHoja(file)) {
+      const hoja = await leerMontosDeExcel(file);
+      return { ...calzarMontos({ filas: hoja.filas, lineas }), ...hoja, origen: 'excel' };
+    }
+    return leerPantallazo({
       file,
       campo,
       marca: ['AXIS', 'QNAP'].includes(String(order?.brand || '').toUpperCase())
         ? String(order.brand).toUpperCase()
         : 'AXIS',
-      lineas: order?.lines || []
+      lineas
     });
+  };
 
   const aplicarPantallazo = (order, campo) => (resultado) => {
     const asignaciones = resultado?.asignaciones || {};
@@ -891,6 +903,11 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     // Se informa TODO lo que no se llenó: lo peligroso de un autocompletado es
     // creer que llenó más de lo que llenó.
     const avisos = [plural(claves.length, 'línea completada', 'líneas completadas')];
+    // De un Excel se dice SIEMPRE qué columna se usó como precio. Si la planilla
+    // trae precio de lista y precio de proyecto, se elige el de proyecto, pero el
+    // que se equivoque ahí llena montos que parecen buenos y no lo son.
+    if (resultado?.origen === 'excel' && resultado?.columnas?.monto)
+      avisos.push(`precio tomado de «${resultado.columnas.monto}»`);
     if (leidasSinMonto)
       avisos.push(`${plural(leidasSinMonto, 'línea', 'líneas')} sin precio en el archivo`);
     if (resultado?.ambiguas?.length)
