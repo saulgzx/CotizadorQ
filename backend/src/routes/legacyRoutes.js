@@ -28,6 +28,7 @@ const {
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
 const crm = require('../crm');
+const { registrarOrdenesVistas } = require('../services/boMeta');
 
 const JWT_SECRET = (process.env.JWT_SECRET || '').trim();
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -3003,23 +3004,8 @@ app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, asy
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        for (const order of orders) {
-          await client.query(
-            `INSERT INTO bo_meta (bo, customer_name, alloc_pct, customer_po, last_seen_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (bo) DO UPDATE
-             SET customer_name = EXCLUDED.customer_name,
-                 alloc_pct = EXCLUDED.alloc_pct,
-                 customer_po = EXCLUDED.customer_po,
-                 last_seen_at = EXCLUDED.last_seen_at,
-                 deleted = false,
-                 deleted_at = NULL,
-                 deleted_comment = NULL,
-                 deleted_by = NULL,
-                 updated_at = CURRENT_TIMESTAMP`,
-            [order.bo, order.customerName || null, order.allocPct ?? null, order.customerPO || null, now]
-          );
-        }
+        // Un solo INSERT para todas las ordenes: ver services/boMeta.js.
+        await registrarOrdenesVistas(client, orders, now);
         await client.query('COMMIT');
       } catch (error) {
         await client.query('ROLLBACK');
@@ -3038,7 +3024,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdminOrIntcomexCompras, asy
     // de ordenes: un fallo queda en el log.
     if (orders.length > 0) {
       crm
-        .sincronizarOrdenes(pool, { log: logger })
+        .sincronizarOrdenes(pool, { log: logger, montos: crm.totalesPorBo(orders) })
         .catch((error) =>
           logger.warn(
             { event: 'crm_ordenes_auto_fallo', err: compactErrorForLog(error) },

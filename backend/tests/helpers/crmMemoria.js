@@ -67,6 +67,7 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       .sort((a, b) => Number(!b.archivada_en) - Number(!a.archivada_en) || new Date(b.created_at) - new Date(a.created_at) || b.id - a.id);
     return vinculadas.length ? redondear(vinculadas[0].total) : 0;
   };
+  const tieneCotizacion = (o) => estado.cotizaciones.some((c) => c.oportunidad_id === o.id);
   const vigenteMasReciente = (o) =>
     estado.cotizaciones
       .filter((c) => c.oportunidad_id === o.id && !c.archivada_en)
@@ -274,8 +275,20 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       return clonar(fila);
     },
     obtenerOportunidad: async (db, id) => clonar(oportunidadPorId(id)),
-    buscarOportunidadPorBo: async (db, bo) =>
-      clonar(estado.oportunidades.find((o) => o.bo === bo) || null),
+    buscarOportunidadPorBo: async (db, bo) => {
+      const fila = estado.oportunidades.find((o) => o.bo === bo);
+      return fila ? clonar({ ...fila, con_cotizacion: tieneCotizacion(fila) }) : null;
+    },
+    oportunidadesConBo: async () =>
+      estado.oportunidades
+        .filter((o) => o.bo)
+        .map((o) => ({
+          id: o.id,
+          bo: o.bo,
+          etapa: o.etapa,
+          monto_manual: o.monto_manual,
+          con_cotizacion: tieneCotizacion(o)
+        })),
     oportunidadesAbiertasSinBo: async (db, empresaId) =>
       clonar(
         estado.oportunidades
@@ -480,8 +493,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
   };
 
   /** Siembra una orden vigente, como la devolveria repo.ordenesVigentes. */
-  const agregarOrden = ({ bo, cliente: nombreCliente = null, customer_po = null, monto = 0 } = {}) => {
-    const fila = { bo, cliente: nombreCliente, customer_po, monto, last_seen_at: ahora() };
+  const agregarOrden = ({ bo, cliente: nombreCliente = null, customer_po = null } = {}) => {
+    const fila = { bo, cliente: nombreCliente, customer_po, last_seen_at: ahora() };
     estado.ordenes.push(fila);
     return clonar(fila);
   };

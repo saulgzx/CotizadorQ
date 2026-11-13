@@ -379,4 +379,121 @@ describeBD('CRM con PostgreSQL real', () => {
     const [opA] = (await request(app).get(`/api/crm/oportunidades?empresa_id=${va.empresa_id}`)).body.items;
     expect(opA.cotizacion_id).toBe(a.id); // b sigue archivada
   });
+
+  // --- Ordenes de OSO como oportunidades ganadas (bo_meta -> crm_oportunidades) ---
+
+  const crearTablasDeOrdenes = () =>
+    pool.query(`
+      CREATE TABLE IF NOT EXISTS bo_meta (
+        id SERIAL PRIMARY KEY,
+        bo VARCHAR(100) UNIQUE NOT NULL,
+        customer_name TEXT,
+        alloc_pct DECIMAL(12,4),
+        customer_po TEXT,
+        last_seen_at TIMESTAMP,
+        deleted BOOLEAN DEFAULT false,
+        deleted_at TIMESTAMP,
+        deleted_comment TEXT,
+        deleted_by INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+  test('ordenes: el registro en bo_meta va en un solo INSERT, actualiza y restaura', async () => {
+    await crearTablasDeOrdenes();
+    const { registrarOrdenesVistas } = require('../src/services/boMeta');
+
+    const escritas = await registrarOrdenesVistas(
+      pool,
+      [
+        { bo: 'PG-1', customerName: 'Ordenes PG SpA', allocPct: 37.5, customerPO: 'OC-1' },
+        { bo: 'PG-2', customerName: '', allocPct: null, customerPO: '' },
+        { bo: 'PG-3', customerName: 'Otra Empresa PG Ltda', allocPct: 0, customerPO: null }
+      ],
+      '2026-11-01T10:00:00.000Z'
+    );
+    expect(escritas).toBe(3);
+    const filas = await q('SELECT bo, customer_name, alloc_pct, customer_po, deleted FROM bo_meta ORDER BY bo');
+    expect(filas).toEqual([
+      { bo: 'PG-1', customer_name: 'Ordenes PG SpA', alloc_pct: '37.5000', customer_po: 'OC-1', deleted: false },
+      { bo: 'PG-2', customer_name: null, alloc_pct: null, customer_po: null, deleted: false },
+      { bo: 'PG-3', customer_name: 'Otra Empresa PG Ltda', alloc_pct: '0.0000', customer_po: null, deleted: false }
+    ]);
+
+    // Una orden borrada logicamente que vuelve a aparecer en la planilla se restaura,
+    // y los datos se actualizan. El mismo BO repetido en la lista no revienta.
+    await q(`UPDATE bo_meta SET deleted = true, deleted_at = NOW(), deleted_comment = 'x' WHERE bo = 'PG-1'`);
+    await registrarOrdenesVistas(
+      pool,
+      [
+        { bo: 'PG-1', customerName: 'Ordenes PG SpA', allocPct: 10, customerPO: 'OC-1' },
+        { bo: 'PG-1', customerName: 'Ordenes PG SpA', allocPct: 100, customerPO: 'OC-1b' }
+      ],
+      '2026-11-02T10:00:00.000Z'
+    );
+    const [pg1] = await q(
+      `SELECT alloc_pct, customer_po, deleted, deleted_at, deleted_comment,
+              to_char(last_seen_at, 'YYYY-MM-DD') AS visto
+         FROM bo_meta WHERE bo = 'PG-1'`
+    );
+    expect(pg1).toEqual({
+      alloc_pct: '100.0000',
+      customer_po: 'OC-1b',
+      deleted: false,
+      deleted_at: null,
+      deleted_comment: null,
+      visto: '2026-11-02'
+    });
+    expect(await registrarOrdenesVistas(pool, [], '2026-11-02T10:00:00.000Z')).toBe(0);
+  });
+
+  test('ordenes: sincronizacion de punta a punta con el repositorio real', async () => {
+    const { sincronizarOrdenes } = require('../src/crm/ordenes');
+    const sincronizar = (montos) => sincronizarOrdenes(pool, { log: silencio, montos });
+    const oportunidadDe = async (bo) =>
+      (await q('SELECT id, empresa_id, titulo, etapa, monto_manual, bo FROM crm_oportunidades WHERE bo = $1', [bo]))[0];
+
+    // PG-1 y PG-3 tienen cliente; PG-2 no. Primera pasada, sin montos (como en el arranque).
+    const primera = await sincronizar();
+    expect(primera).toMatchObject({ ordenes: 3, creadas: 2, sinCliente: 1, errores: 0 });
+    const op1 = await oportunidadDe('PG-1');
+    expect(op1).toMatchObject({ etapa: 'ganada', monto_manual: null, titulo: 'Orden PG-1 · OC OC-1b' });
+    expect(await oportunidadDe('PG-2')).toBeUndefined();
+
+    // Con montos (unitario x cantidad ya calculado por el endpoint): se actualiza.
+    const segunda = await sincronizar({ 'PG-1': 25000.5, 'PG-3': 300 });
+    expect(segunda).toMatchObject({ creadas: 0, montosActualizados: 2, sinCliente: 1, errores: 0 });
+    expect((await oportunidadDe('PG-1')).monto_manual).toBe('25000.50');
+
+    // Mismos montos otra vez: nada que hacer.
+    const tercera = await sincronizar({ 'PG-1': 25000.5, 'PG-3': 300 });
+    expect(tercera).toMatchObject({ creadas: 0, montosActualizados: 0, sinCambio: 2, sinCliente: 1 });
+
+    // Con una cotizacion vinculada, el monto sale de la cotizacion: monto_manual no se toca.
+    const cot = await insertarCotizacion({ empresa: 'Ordenes PG SpA', nombre: 'Compras PG', total: 999 });
+    await q('UPDATE cotizaciones SET oportunidad_id = $1, empresa_id = $2 WHERE id = $3', [op1.id, op1.empresa_id, cot.id]);
+    const cuarta = await sincronizar({ 'PG-1': 77777, 'PG-3': 300 });
+    expect(cuarta).toMatchObject({ montosActualizados: 0, sinCambio: 2 });
+    expect((await oportunidadDe('PG-1')).monto_manual).toBe('25000.50');
+
+    // Una empresa con exactamente una oportunidad abierta sin BO: la orden la cierra.
+    const [empresa] = await q(
+      `INSERT INTO crm_empresas (nombre, nombre_normalizado) VALUES ('Enganche PG', 'enganche pg') RETURNING id`
+    );
+    const [abierta] = await q(
+      `INSERT INTO crm_oportunidades (empresa_id, titulo, etapa) VALUES ($1, 'Cotización abierta PG', 'cotizada') RETURNING id`,
+      [empresa.id]
+    );
+    const { registrarOrdenesVistas } = require('../src/services/boMeta');
+    await registrarOrdenesVistas(pool, [{ bo: 'PG-4', customerName: 'ENGANCHE PG S.A.', customerPO: 'OC-4' }]);
+    const quinta = await sincronizar({});
+    expect(quinta).toMatchObject({ ordenes: 4, enlazadas: 1, creadas: 0 });
+    expect(await oportunidadDe('PG-4')).toMatchObject({ id: abierta.id, etapa: 'ganada', titulo: 'Cotización abierta PG' });
+
+    // Un BO vive en una sola oportunidad (indice unico parcial).
+    await expect(
+      q(`INSERT INTO crm_oportunidades (empresa_id, titulo, etapa, bo) VALUES ($1, 'dup', 'ganada', 'PG-4')`, [empresa.id])
+    ).rejects.toThrow(/crm_oportunidades_bo_idx|duplicate/);
+  });
 });

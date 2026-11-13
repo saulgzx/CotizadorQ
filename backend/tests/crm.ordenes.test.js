@@ -3,12 +3,15 @@
  * Usa el repositorio en memoria (helpers/crmMemoria), sin PostgreSQL.
  */
 const { crearCrmMemoria } = require('./helpers/crmMemoria');
-const { sincronizarOrdenes, tituloPara, montoDe } = require('../src/crm/ordenes');
+const { sincronizarOrdenes, tituloPara, montoDe, totalesPorBo } = require('../src/crm/ordenes');
 
 const logMudo = { info: () => {}, warn: () => {}, error: () => {} };
 
-const sincronizar = (memoria) =>
-  sincronizarOrdenes(memoria.pool, { repo: memoria.repo, log: logMudo });
+const sincronizar = (memoria, montos) =>
+  sincronizarOrdenes(memoria.pool, { repo: memoria.repo, log: logMudo, montos });
+
+const nuevaEmpresa = (memoria, nombre = 'Dimerc', normalizado = 'dimerc') =>
+  memoria.repo.insertarEmpresa(memoria.pool, { nombre, nombre_normalizado: normalizado });
 
 describe('titulo y monto de una orden', () => {
   test('el titulo incluye la OC del cliente cuando viene', () => {
@@ -17,19 +20,71 @@ describe('titulo y monto de una orden', () => {
   });
 
   test('un monto de 0 o no numerico queda en null, no en 0', () => {
-    expect(montoDe({ monto: '1250.50' })).toBe(1250.5);
-    expect(montoDe({ monto: 0 })).toBeNull();
-    expect(montoDe({ monto: null })).toBeNull();
-    expect(montoDe({ monto: 'x' })).toBeNull();
+    expect(montoDe('1250.50')).toBe(1250.5);
+    expect(montoDe(0)).toBeNull();
+    expect(montoDe(null)).toBeNull();
+    expect(montoDe('x')).toBeNull();
+  });
+});
+
+describe('totalesPorBo', () => {
+  test('suma monto unitario por cantidad de cada linea', () => {
+    const totales = totalesPorBo([
+      {
+        bo: 'BO-1',
+        lines: [
+          { montoIntcomex: 500, orderQty: 50 },
+          { montoIntcomex: 10.5, orderQty: 2 }
+        ]
+      }
+    ]);
+    expect(totales).toEqual({ 'BO-1': 25021 });
+  });
+
+  test('una linea sin monto o sin cantidad valida aporta 0', () => {
+    const totales = totalesPorBo([
+      {
+        bo: 'BO-2',
+        lines: [
+          { montoIntcomex: 100, orderQty: 3 },
+          { montoIntcomex: null, orderQty: 9 },
+          { montoIntcomex: 50, orderQty: 0 },
+          { montoIntcomex: 70, orderQty: 'x' },
+          { orderQty: 4 }
+        ]
+      }
+    ]);
+    expect(totales).toEqual({ 'BO-2': 300 });
+  });
+
+  test('una orden sin ningun monto no aparece en el resultado', () => {
+    const totales = totalesPorBo([
+      { bo: 'BO-3', lines: [{ orderQty: 5 }, { montoIntcomex: 0, orderQty: 5 }] },
+      { bo: 'BO-4', lines: [] },
+      { bo: 'BO-5' }
+    ]);
+    expect(totales).toEqual({});
+  });
+
+  test('redondea a 2 decimales', () => {
+    const totales = totalesPorBo([
+      { bo: 'BO-6', lines: [{ montoIntcomex: 0.335, orderQty: 3 }, { montoIntcomex: 1.111, orderQty: 1 }] }
+    ]);
+    expect(totales['BO-6']).toBe(2.12);
+  });
+
+  test('tolera entradas vacias', () => {
+    expect(totalesPorBo(undefined)).toEqual({});
+    expect(totalesPorBo([])).toEqual({});
   });
 });
 
 describe('sincronizarOrdenes', () => {
   test('crea empresa y oportunidad ganada cuando el cliente no existe en el CRM', async () => {
     const memoria = crearCrmMemoria();
-    memoria.agregarOrden({ bo: 'BO-100', cliente: 'SONDA S.A.', customer_po: '4500999', monto: 3200 });
+    memoria.agregarOrden({ bo: 'BO-100', cliente: 'SONDA S.A.', customer_po: '4500999' });
 
-    const resumen = await sincronizar(memoria);
+    const resumen = await sincronizar(memoria, { 'BO-100': 3200 });
 
     expect(resumen).toMatchObject({ ordenes: 1, creadas: 1, errores: 0 });
     const [empresa] = memoria.estado.empresas;
@@ -221,5 +276,143 @@ describe('sincronizarOrdenes', () => {
     };
 
     await expect(sincronizar(memoria)).resolves.toMatchObject({ ordenes: 0, errores: 0 });
+  });
+
+  test('sin mapa de montos la oportunidad nueva queda con monto null', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-120', cliente: 'Dimerc' });
+
+    await sincronizar(memoria);
+
+    expect(memoria.estado.oportunidades[0].monto_manual).toBeNull();
+  });
+
+  test('actualiza el monto de una oportunidad existente sin cotizacion cuando cambia', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-121', cliente: 'Dimerc' });
+    await sincronizar(memoria); // la orden llega primero, sin precios
+
+    const resumen = await sincronizar(memoria, { 'BO-121': 25000 });
+
+    expect(resumen).toMatchObject({ montosActualizados: 1, sinCambio: 0, creadas: 0, errores: 0 });
+    expect(memoria.estado.oportunidades).toHaveLength(1);
+    expect(memoria.estado.oportunidades[0].monto_manual).toBe(25000);
+
+    const otra = await sincronizar(memoria, { 'BO-121': 30000 });
+    expect(otra).toMatchObject({ montosActualizados: 1 });
+    expect(memoria.estado.oportunidades[0].monto_manual).toBe(30000);
+  });
+
+  test('con el mismo monto no cuenta ni escribe nada', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-122', cliente: 'Dimerc' });
+    await sincronizar(memoria, { 'BO-122': 25000 });
+    const espia = jest.spyOn(memoria.repo, 'actualizarOportunidad');
+
+    const resumen = await sincronizar(memoria, { 'BO-122': 25000 });
+
+    expect(resumen).toMatchObject({ montosActualizados: 0, sinCambio: 1 });
+    expect(espia).not.toHaveBeenCalled();
+  });
+
+  test('sin total conocido o con total 0 no pisa el monto existente', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-123', cliente: 'Dimerc' });
+    await sincronizar(memoria, { 'BO-123': 800 });
+
+    await sincronizar(memoria);
+    const resumen = await sincronizar(memoria, { 'BO-123': 0 });
+
+    expect(resumen).toMatchObject({ montosActualizados: 0, sinCambio: 1 });
+    expect(memoria.estado.oportunidades[0].monto_manual).toBe(800);
+  });
+
+  test('con cotizacion vinculada jamas toca monto_manual', async () => {
+    const memoria = crearCrmMemoria();
+    const empresa = await nuevaEmpresa(memoria);
+    const oportunidad = await memoria.repo.insertarOportunidad(memoria.pool, {
+      empresa_id: empresa.id,
+      titulo: 'Orden BO-124',
+      etapa: 'ganada',
+      bo: 'BO-124'
+    });
+    const cotizacion = memoria.agregarCotizacion({ cliente_empresa: 'Dimerc', total: 999 });
+    await memoria.repo.vincularCotizacion(memoria.pool, cotizacion.id, {
+      empresa_id: empresa.id,
+      contacto_id: null,
+      oportunidad_id: oportunidad.id
+    });
+    memoria.agregarOrden({ bo: 'BO-124', cliente: 'Dimerc' });
+
+    const resumen = await sincronizar(memoria, { 'BO-124': 5000 });
+
+    expect(resumen).toMatchObject({ montosActualizados: 0, sinCambio: 1 });
+    expect(memoria.estado.oportunidades[0].monto_manual).toBeNull();
+  });
+
+  test('con cotizacion vinculada tampoco lo toca al ganar una oportunidad abierta', async () => {
+    const memoria = crearCrmMemoria();
+    const empresa = await nuevaEmpresa(memoria);
+    const oportunidad = await memoria.repo.insertarOportunidad(memoria.pool, {
+      empresa_id: empresa.id,
+      titulo: 'Orden BO-125',
+      etapa: 'negociacion',
+      bo: 'BO-125'
+    });
+    const cotizacion = memoria.agregarCotizacion({ cliente_empresa: 'Dimerc', total: 999 });
+    await memoria.repo.vincularCotizacion(memoria.pool, cotizacion.id, {
+      empresa_id: empresa.id,
+      contacto_id: null,
+      oportunidad_id: oportunidad.id
+    });
+    memoria.agregarOrden({ bo: 'BO-125', cliente: 'Dimerc' });
+
+    const resumen = await sincronizar(memoria, { 'BO-125': 5000 });
+
+    expect(resumen).toMatchObject({ ganadas: 1, montosActualizados: 0 });
+    expect(memoria.estado.oportunidades[0].monto_manual).toBeNull();
+  });
+
+  test('todo al dia: cero transacciones y cero busquedas por BO', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-130', cliente: 'Dimerc' });
+    memoria.agregarOrden({ bo: 'BO-131', cliente: 'Sonda' });
+    await sincronizar(memoria, { 'BO-130': 100, 'BO-131': 200 });
+    const transacciones = jest.spyOn(memoria.repo, 'conTransaccion');
+    const busquedas = jest.spyOn(memoria.repo, 'buscarOportunidadPorBo');
+
+    const resumen = await sincronizar(memoria, { 'BO-130': 100, 'BO-131': 200 });
+
+    expect(resumen).toMatchObject({ ordenes: 2, sinCambio: 2, creadas: 0, errores: 0 });
+    expect(transacciones).not.toHaveBeenCalled();
+    expect(busquedas).not.toHaveBeenCalled();
+  });
+
+  test('solo las ordenes con algo que escribir abren transaccion', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-132', cliente: 'Dimerc' });
+    await sincronizar(memoria);
+    memoria.agregarOrden({ bo: 'BO-133', cliente: 'Sonda' });
+    const transacciones = jest.spyOn(memoria.repo, 'conTransaccion');
+
+    const resumen = await sincronizar(memoria);
+
+    expect(resumen).toMatchObject({ ordenes: 2, creadas: 1, sinCambio: 1 });
+    expect(transacciones).toHaveBeenCalledTimes(1);
+  });
+
+  test('si la consulta previa falla, sincroniza igual orden por orden', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-140', cliente: 'Dimerc' });
+    memoria.agregarOrden({ bo: 'BO-141', cliente: 'Sonda' });
+    await sincronizar(memoria);
+    memoria.agregarOrden({ bo: 'BO-142', cliente: 'Entel' });
+    memoria.fallarEn('oportunidadesConBo');
+
+    const resumen = await sincronizar(memoria, { 'BO-140': 700 });
+
+    expect(resumen).toMatchObject({ ordenes: 3, creadas: 1, sinCambio: 1, montosActualizados: 1, errores: 0 });
+    expect(memoria.estado.oportunidades).toHaveLength(3);
+    expect(memoria.estado.oportunidades.find((o) => o.bo === 'BO-140').monto_manual).toBe(700);
   });
 });

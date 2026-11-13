@@ -439,10 +439,27 @@ const insertarOportunidad = async (db, datos) => {
 /** La oportunidad de un BO, o null. Clave de idempotencia de la sincronizacion. */
 const buscarOportunidadPorBo = async (db, bo) => {
   const { rows } = await db.query(
-    `SELECT ${COLUMNAS_OPORTUNIDAD} FROM crm_oportunidades WHERE bo = $1`,
+    `SELECT ${COLUMNAS_OPORTUNIDAD},
+            EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = crm_oportunidades.id) AS con_cotizacion
+       FROM crm_oportunidades WHERE bo = $1`,
     [bo]
   );
   return rows[0] || null;
+};
+
+/**
+ * Todas las oportunidades que tienen BO, en una sola consulta, para decidir en memoria
+ * que ordenes necesitan escribir algo. con_cotizacion: tiene alguna cotizacion vinculada
+ * (en ese caso su monto sale de la cotizacion, no de monto_manual).
+ */
+const oportunidadesConBo = async (db) => {
+  const { rows } = await db.query(
+    `SELECT o.id, o.bo, o.etapa, o.monto_manual,
+            EXISTS (SELECT 1 FROM cotizaciones c WHERE c.oportunidad_id = o.id) AS con_cotizacion
+       FROM crm_oportunidades o
+      WHERE o.bo IS NOT NULL`
+  );
+  return rows;
 };
 
 /**
@@ -474,7 +491,8 @@ const asignarBo = async (db, oportunidadId, bo) => {
 
 /**
  * Ordenes vigentes de la pestana OSO, ya persistidas en bo_meta por
- * GET /api/oso/orders, con el monto que suman sus lineas en bo_line_meta.
+ * GET /api/oso/orders. El monto no sale de aqui: bo_line_meta guarda el precio unitario
+ * y la cantidad solo esta en la planilla (ver totalesPorBo en ordenes.js).
  * Se excluyen las borradas logicamente.
  */
 const ordenesVigentes = async (db, { limite = 5000 } = {}) => {
@@ -482,8 +500,7 @@ const ordenesVigentes = async (db, { limite = 5000 } = {}) => {
     `SELECT m.bo,
             NULLIF(TRIM(COALESCE(m.customer_name, '')), '') AS cliente,
             NULLIF(TRIM(COALESCE(m.customer_po, '')), '')   AS customer_po,
-            m.last_seen_at,
-            (SELECT COALESCE(SUM(l.monto_intcomex), 0) FROM bo_line_meta l WHERE l.bo = m.bo) AS monto
+            m.last_seen_at
        FROM bo_meta m
       WHERE m.deleted IS NOT TRUE
       ORDER BY m.bo
@@ -813,6 +830,7 @@ const restaurarCotizaciones = async (db, { ids }) => {
 
 module.exports = {
   buscarOportunidadPorBo,
+  oportunidadesConBo,
   oportunidadesAbiertasSinBo,
   asignarBo,
   ordenesVigentes,
