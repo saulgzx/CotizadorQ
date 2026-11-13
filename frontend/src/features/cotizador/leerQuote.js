@@ -77,7 +77,7 @@ export const leerQuote = async ({
 }) => {
   const clave = String(fabricante || '').trim().toUpperCase();
   if (!Object.prototype.hasOwnProperty.call(FABRICANTES, clave)) {
-    throw new Error('Fabricante desconocido: usa ISS, NEURAL o MILESTONE');
+    throw new Error('Fabricante desconocido: usa ISS, NEURAL, VAIDIO, MILESTONE o VELASEA');
   }
   const datos = await archivoABase64(file);
   const { id } = await api.iniciar({

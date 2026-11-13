@@ -110,7 +110,7 @@ describe('editorCalc', () => {
 
 describe('editorCalc: líneas de quote (ISS, Neural Labs, Milestone)', () => {
   test('inferirOrigen respeta los seis orígenes sin importar mayúsculas ni espacios', () => {
-    for (const origen of ['AXIS', 'QNAP', 'ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']) {
+    for (const origen of ['AXIS', 'QNAP', 'ISS', 'NEURAL', 'VAIDIO', 'MILESTONE', 'MILESTONE_HW', 'VELASEA']) {
       expect(inferirOrigen({ origen })).toBe(origen);
       expect(inferirOrigen({ origen: origen.toLowerCase() })).toBe(origen);
     }

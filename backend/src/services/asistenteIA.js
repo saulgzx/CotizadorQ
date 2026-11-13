@@ -47,6 +47,7 @@ const CAMPOS_PANTALLAZO = ['axis', 'intcomex', 'quote'];
 const FABRICANTES_QUOTE = {
   ISS: 'ISS',
   NEURAL: 'Neural Labs',
+  VAIDIO: 'Vaidio',
   MILESTONE: 'Milestone',
   VELASEA: 'Velasea'
 };
@@ -360,7 +361,7 @@ const validarPantallazo = (p) => {
   const esQuote = p.campo === 'quote';
   const fabricante = esQuote ? String(p.fabricante || '').trim().toUpperCase() : null;
   if (esQuote && !FABRICANTES_QUOTE[fabricante])
-    throw errorValidacion('Fabricante invalido para el quote: usa ISS, NEURAL, MILESTONE o VELASEA');
+    throw errorValidacion('Fabricante invalido para el quote: usa ISS, NEURAL, VAIDIO, MILESTONE o VELASEA');
   const esPdf = p.mime === MIME_PDF;
   const datos = p.datos;
   if (typeof datos !== 'string' || !datos)

@@ -12,7 +12,7 @@ const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
  * Cadena de costo por origen. costo Chile = precio_disty * INBOUND_FREIGHT / IC * (1 + INT).
  * - AXIS y QNAP: precio_disty viene de la lista de precios del disty (flete de entrada,
  *   factor IC y transporte/arancel).
- * - ISS, NEURAL, MILESTONE y MILESTONE_HW (fabricantes SIN lista de precios): precio_disty
+ * - ISS, NEURAL, VAIDIO, MILESTONE y MILESTONE_HW (fabricantes SIN lista de precios): precio_disty
  *   guarda el COSTO DEL QUOTE del fabricante (lo que Intcomex le paga), asi que no lleva
  *   flete de entrada ni factor IC (1 y 1): solo transporte y arancel (INT).
  *   MILESTONE = licencias (INT 0); MILESTONE_HW = servidores (INT 0.12).
@@ -25,6 +25,7 @@ const CADENA_POR_ORIGEN = Object.freeze({
   QNAP: QNAP_CONSTANTS,
   ISS: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   NEURAL: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
+  VAIDIO: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
   MILESTONE: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0 }),
   MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 }),
   VELASEA: Object.freeze({ INBOUND_FREIGHT: QNAP_CONSTANTS.INBOUND_FREIGHT, IC: 1, INT: QNAP_CONSTANTS.INT })
