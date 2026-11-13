@@ -3,6 +3,28 @@
 
 export const CONSTANTS = { INBOUND_FREIGHT: 1.011, IC: 0.95, INT: 0.12, DEFAULT_GP: 0.15 };
 export const AXIS_CONSTANTS = { INBOUND_FREIGHT: 1.015, IC: 0.97, INT: 0.12 };
+
+// Cadena de costo por origen de línea: costo Chile = disty x freight / IC x (1 + INT).
+// Espejo EXACTO de CADENA_POR_ORIGEN en backend/src/services/cotizacionItems.js: si cambia
+// allá, cambia aquí. Los orígenes de quote (ISS, NEURAL, MILESTONE, MILESTONE_HW) no llevan
+// flete de entrada ni factor IC: solo transporte y arancel (INT) sobre el costo del quote.
+export const CADENA_POR_ORIGEN = Object.freeze({
+  AXIS: Object.freeze({ INBOUND_FREIGHT: AXIS_CONSTANTS.INBOUND_FREIGHT, IC: AXIS_CONSTANTS.IC, INT: AXIS_CONSTANTS.INT }),
+  QNAP: Object.freeze({ INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT, IC: CONSTANTS.IC, INT: CONSTANTS.INT }),
+  ISS: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
+  NEURAL: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.15 }),
+  MILESTONE: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0 }),
+  MILESTONE_HW: Object.freeze({ INBOUND_FREIGHT: 1, IC: 1, INT: 0.12 })
+});
+
+// Cómo se rotula en pantalla una línea que viene de un quote de fabricante.
+export const ETIQUETA_ORIGEN_QUOTE = Object.freeze({
+  ISS: 'Quote ISS',
+  NEURAL: 'Quote Neural Labs',
+  MILESTONE: 'Quote Milestone · licencia',
+  MILESTONE_HW: 'Quote Milestone · servidor'
+});
+
 export const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 export const STOCK_DELIVERY_SUFFIX = 'unidades disponible en entrega inmediata, salvo venta previa';
 

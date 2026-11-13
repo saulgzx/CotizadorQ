@@ -15,6 +15,7 @@ import { queryKeys } from '../../app/queryKeys';
 import {
   CONSTANTS,
   AXIS_CONSTANTS,
+  CADENA_POR_ORIGEN,
   STOCK_DELIVERY_SUFFIX,
   SESSION_STORAGE_KEY,
   SESSION_HEARTBEAT_MS,
@@ -60,6 +61,10 @@ import MargenChip from './MargenChip';
 import { estadoMargen, formatoPct, useConfigMargen } from './margen';
 import { pareceLista } from './listaPegada';
 import PegarListaModal from './PegarListaModal';
+import CargarQuoteModal from './CargarQuoteModal';
+import { gpBaseDeOrigen, gpDeLinea } from './gpLinea';
+import { esOrigenQuote, productoDeQuoteGuardado } from './quoteFabricante';
+import { etiquetaCompraOrigen } from './compraOrigen';
 import AtajosAyuda from './AtajosAyuda';
 import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
@@ -409,6 +414,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [adminOrigin, setAdminOrigin] = useState('QNAP');
   const [cotizacionGpGlobalQnap, setCotizacionGpGlobalQnap] = useState(CONSTANTS.DEFAULT_GP);
   const [cotizacionGpGlobalAxis, setCotizacionGpGlobalAxis] = useState(CONSTANTS.DEFAULT_GP);
+  // Ventana «Cargar quote» (ISS, Neural Labs, Milestone): solo admin.
+  const [quoteAbierto, setQuoteAbierto] = useState(false);
   const [cotizacionPartnerCategory, setCotizacionPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [historial, setHistorial] = useState([]);
   const [historialLoading, setHistorialLoading] = useState(false);
@@ -621,12 +628,24 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return costoFinalXCL / (1 - gp);
   };
 
+  // Márgenes globales vigentes: base de las líneas sin margen propio (las de quote usan 8 %).
+  const gpGlobales = { gpQnap: cotizacionGpGlobalQnap, gpAxis: cotizacionGpGlobalAxis };
+
   const calcularPrecioClienteItem = (item) => {
     if (!isAdmin) {
       return Number(item.precio_cliente ?? item.precio ?? 0);
     }
-    const baseGp = (item.origen || 'QNAP') === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap;
-    const gpEffective = item.gpOverride ?? baseGp;
+    const gpEffective = gpDeLinea(item, gpGlobales);
+    if (esOrigenQuote(item.origen)) {
+      // Línea de quote: costo Chile = costo del quote x (1 + transporte y arancel), ya calculado al
+      // cargarla. Nunca pasa por calcParams (cadena de QNAP): si faltara costoChile se usa la
+      // cadena de su propio origen.
+      const cadena = CADENA_POR_ORIGEN[String(item.origen).trim().toUpperCase()];
+      const costoChile = item.costoChile > 0
+        ? item.costoChile
+        : ((Number(item.precio) || 0) * cadena.INBOUND_FREIGHT / cadena.IC) * (1 + cadena.INT);
+      return costoChile / (1 - gpEffective);
+    }
     if ((item.origen || 'QNAP') !== 'AXIS') {
       return calcularPrecioClienteLocal(item.precio, gpEffective, item.costoChile);
     }
@@ -1549,6 +1568,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!Array.isArray(catalogItems) || catalogItems.length === 0) return;
     const byId = new Map(catalogItems.map(item => [Number(item.id), item]));
     setCotizacion(prev => prev.map(item => {
+      // Una línea de quote no está en el catálogo: su costo viene del quote y no se repone.
+      if (item.deQuote || esOrigenQuote(item.origen)) return item;
       const match = byId.get(Number(item.id));
       if (!match) return item;
       return {
@@ -1709,6 +1730,40 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     });
   };
 
+  // Los quotes de fabricante son solo del admin completo (el admin de stock está limitado a AXIS).
+  const puedeCargarQuotes = isAdmin && !isCotizadorStockAdmin;
+
+  // Líneas de un quote de fabricante: cada una entra como línea NUEVA (nunca se fusiona con otra,
+  // aunque repita MPN). Margen propio vacío: usa el 8 % de las líneas de quote.
+  // `carritoVacio`: el carrito se acaba de vaciar en este mismo gesto (duplicar), así que los ids
+  // del carrito anterior no cuentan. `silencioso`: quien llama da su propio aviso.
+  const agregarLineasDeQuote = (productos, { silencioso = false, carritoVacio = false } = {}) => {
+    if (!puedeCargarQuotes) return;
+    const lista = (Array.isArray(productos) ? productos : []).filter(Boolean);
+    if (lista.length === 0) return;
+    const usados = new Set(carritoVacio ? [] : cotizacion.map(x => x.id));
+    const nuevas = lista.map(producto => {
+      const { cantidadSugerida, ...resto } = producto;
+      // El id es la clave de la línea (editar, quitar, mover): si ya existe, se hace único.
+      let id = resto.id;
+      for (let k = 2; usados.has(id); k += 1) id = `${resto.id}~${k}`;
+      usados.add(id);
+      return {
+        ...resto,
+        id,
+        cant: Math.max(1, parseInt(cantidadSugerida, 10) || 1),
+        partnerCategory: undefined,
+        rebateProject: undefined,
+        gpOverride: null,
+        tiempoCatalogo: resto.tiempo,
+        tiempo: resto.tiempo
+      };
+    });
+    setCotizacion(c => [...c, ...nuevas]);
+    if (silencioso) return;
+    notify(`Quote: ${nuevas.length} línea${nuevas.length === 1 ? '' : 's'} agregada${nuevas.length === 1 ? '' : 's'} al carrito`, { tipo: 'ok' });
+  };
+
   const agregarListaPegada = (entradas, { sinResolver = 0, noEncontradas = [] } = {}) => {
     agregarVarios(entradas);
     setPegarListaTexto(null);
@@ -1722,8 +1777,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // Margen de una línea del carrito: precio = costo / (1 - gp), así que costo = precio · (1 - gp).
   const margenItem = (item) => {
     const precio = calcularPrecioClienteItem(item);
-    const origen = item.origen || 'QNAP';
-    const gp = item.gpOverride ?? (origen === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap);
+    const gp = gpDeLinea(item, gpGlobales);
     const costo = precio * (1 - gp);
     return { precio, costo, gpPct: gp * 100, margenTotal: (precio - costo) * item.cant };
   };
@@ -1818,7 +1872,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       const items = isAdmin
         ? cotizacion.map(item => {
             const origen = item.origen || 'QNAP';
-            const gp = item.gpOverride ?? (origen === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap);
+            const gp = gpDeLinea(item, gpGlobales);
             const precioUnitario = calcularPrecioClienteItem(item);
             const isAxisItem = origen === 'AXIS';
             const partnerCategory = isAxisItem ? (item.partnerCategory || cotizacionPartnerCategory) : null;
@@ -1970,6 +2024,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     setPaletteOpen(false);
     setAtajosAbiertos(false);
     setRevisionAbierta(false);
+    setQuoteAbierto(false);
     setEditorCotizacionId(null);
     setVersionesDe(null);
     setPerdidaDe(null);
@@ -3284,13 +3339,20 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       (item.sku && item.sku !== 'To Create' && normalizeLookupKey(p.sku) === normalizeLookupKey(item.sku))
     );
     const entradas = [];
+    const deQuote = [];
     const faltantes = [];
     for (const item of items) {
+      // Una línea de quote no está en el catálogo: se rearma con el costo del fabricante guardado.
+      const quote = puedeCargarQuotes && esOrigenQuote(item.origen) ? productoDeQuoteGuardado(item) : null;
+      if (quote) {
+        deQuote.push(quote);
+        continue;
+      }
       const producto = porId.get(Number(item.producto_id)) || porCodigo(item);
       if (producto) entradas.push({ producto, cantidad: Number(item.cantidad) || 1 });
-      else faltantes.push(item.sku || item.mpn || 'sin código');
+      else faltantes.push(item.sku && item.sku !== 'To Create' ? item.sku : item.mpn || 'sin código');
     }
-    if (entradas.length === 0) {
+    if (entradas.length === 0 && deQuote.length === 0) {
       notify('No se pudo duplicar: ninguno de sus productos está en el catálogo activo.', { tipo: 'error' });
       return;
     }
@@ -3299,6 +3361,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const numeroAnterior = currentQuoteNumero;
     setCotizacion([]);
     agregarVarios(entradas);
+    agregarLineasDeQuote(deQuote, { silencioso: true, carritoVacio: true });
     setCurrentQuoteNumero(null);
     setCliente(c => ({
       ...c,
@@ -3327,17 +3390,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
 
 
-  const getCompraOrigenLabel = (cot) => {
-    const items = cot.items || [];
-    const hasAxis = items.some(item => {
-      const marca = (item.marca || '').toLowerCase();
-      const sku = (item.sku || '').toLowerCase();
-      const mpn = (item.mpn || '').toLowerCase();
-      const desc = (item.descripcion || '').toLowerCase();
-      return marca.includes('axis') || sku.includes('axis') || mpn.includes('axis') || desc.includes('axis');
-    });
-    return hasAxis ? 'Axis' : 'QNAP';
-  };
+  const getCompraOrigenLabel = (cot) => etiquetaCompraOrigen(cot.items);
 
   const buildCompraTableHtml = (cot) => {
     const rows = (cot.items || []).map(item => {
@@ -4425,6 +4478,13 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
           onAgregar={agregarListaPegada}
           onCerrar={() => setPegarListaTexto(null)}
         />
+        {puedeCargarQuotes && (
+          <CargarQuoteModal
+            abierto={quoteAbierto}
+            onCerrar={() => setQuoteAbierto(false)}
+            onAgregar={agregarLineasDeQuote}
+          />
+        )}
         <AtajosAyuda abierto={atajosAbiertos} onCerrar={() => setAtajosAbiertos(false)} esAdmin={isFullAdmin} />
         <RevisionEnvioModal
           abierto={revisionAbierta}
@@ -5797,6 +5857,17 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                     <Icono nombre="portapapeles" />
                     <span className="hidden sm:inline">Pegar lista</span>
                   </button>
+                  {puedeCargarQuotes && (
+                    <button
+                      type="button"
+                      onClick={() => setQuoteAbierto(true)}
+                      className="mq-btn mq-btn-lg mq-btn-secundario shrink-0"
+                      title="Cargar el quote de ISS, Neural Labs o Milestone"
+                    >
+                      <Icono nombre="portapapeles" />
+                      <span className="hidden sm:inline">Cargar quote</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -5938,7 +6009,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   isAdmin={isAdmin}
                   precioItem={calcularPrecioClienteItem}
                   margenItem={margenItem}
-                  gpBase={(item) => ((item.origen || 'QNAP') === 'AXIS' ? cotizacionGpGlobalAxis : cotizacionGpGlobalQnap)}
+                  gpBase={(item) => gpBaseDeOrigen(item.origen, gpGlobales)}
                   rebatePartner={getAxisPartnerRebate}
                   partnerDefault={cotizacionPartnerCategory}
                   alertaLinea={alertaLineaCarrito}

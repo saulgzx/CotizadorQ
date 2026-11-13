@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cotizacionesAPI } from '../../../api';
-import { DEFAULT_AXIS_PARTNER } from '../cotizadorConstants';
+import { DEFAULT_AXIS_PARTNER, ETIQUETA_ORIGEN_QUOTE } from '../cotizadorConstants';
+import { esOrigenQuote } from '../quoteFabricante';
 import { ETAPAS } from '../../crm/formato';
 import { etapaDeCotizacion } from '../../crm/etapasCotizacion';
 import { notify } from '../../ui/toast';
@@ -14,6 +15,7 @@ import {
   costoFinal,
   gpDe,
   huella,
+  inferirOrigen,
   lineaAPayload,
   lineaDesdeItem,
   lineaDesdeProducto,
@@ -185,6 +187,7 @@ const BuscadorProductos = ({ productos, onAgregar }) => {
 
 const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
   const esAxis = linea.origen === 'AXIS';
+  const esQuote = esOrigenQuote(linea.origen);
   const sinDisty = !(Number(linea.precio_disty) > 0);
   // Nivel de descuento que dio Axis en la linea, sobre el precio de lista disty.
   const listaDisty = Number(linea.precio_disty) || 0;
@@ -206,8 +209,8 @@ const CeldaCosto = ({ linea, onCambio, productoCatalogo }) => {
         </>
       ) : (
         <>
-          <span className='text-xs uppercase text-slate-400'>Disty USD</span>
-          <NumeroInput value={linea.precio_disty} onCommit={(v) => onCambio('precio_disty', v)} ariaLabel='Costo disty' />
+          <span className='text-xs uppercase text-slate-400'>{esQuote ? 'Costo quote USD' : 'Disty USD'}</span>
+          <NumeroInput value={linea.precio_disty} onCommit={(v) => onCambio('precio_disty', v)} ariaLabel={esQuote ? 'Costo del quote' : 'Costo disty'} />
           {esAxis && (
             <>
               <span className='mt-1 flex items-center justify-between text-xs uppercase text-slate-400'>
@@ -351,9 +354,14 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
       setAviso(`${producto.sku || producto.mpn} ya estaba: se sumó 1 unidad.`);
       return;
     }
-    const gpBase = lineas.map(gpDe).find((g) => g !== null);
+    // Margen de partida: el de la primera línea con margen, pero sin contar las de quote (8 %)
+    // para productos de catálogo; un producto de origen quote parte del 8 % por defecto.
+    const origenProducto = inferirOrigen({ ...producto, descripcion: producto.desc });
+    const gpBase = esOrigenQuote(origenProducto)
+      ? null
+      : lineas.filter((l) => !esOrigenQuote(l.origen)).map(gpDe).find((g) => g !== null);
     const linea = lineaDesdeProducto(producto, {
-      gpPct: gpBase ?? 15,
+      gpPct: gpBase ?? (esOrigenQuote(origenProducto) ? undefined : 15),
       partnerCategory: lineas.find((l) => l.partner_category)?.partner_category || DEFAULT_AXIS_PARTNER,
       tiempoEntrega: getStockText?.(producto.mpn) || producto.tiempo
     });
@@ -744,7 +752,7 @@ const CotizacionEditor = ({ cotizacionId, productos = [], getStockText, onClose,
                                   l.origen === 'AXIS' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200'
                                 }`}
                               >
-                                {l.origen}
+                                {ETIQUETA_ORIGEN_QUOTE[l.origen] || l.origen}
                               </span>
                               {cambios.nueva && <span className='rounded bg-emerald-100 px-1.5 text-xs font-semibold text-emerald-800'>nueva</span>}
                             </div>

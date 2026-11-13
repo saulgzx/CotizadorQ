@@ -335,6 +335,27 @@ export const productoDeQuote = (linea, { fabricante, gp = GP_QUOTE_POR_DEFECTO, 
   };
 };
 
+/**
+ * Línea de quote ya guardada en una cotización -> producto para el carrito (duplicar).
+ * El costo del fabricante es el precio_disty guardado y el tipo de Milestone sale del origen.
+ * null si la línea no es de quote o no trae costo: no se inventa un precio.
+ */
+export const productoDeQuoteGuardado = (item) => {
+  const origen = clave(item?.origen);
+  if (!ORIGENES_QUOTE.includes(origen)) return null;
+  const esServidor = origen === 'MILESTONE_HW';
+  const fabricante = esServidor ? 'MILESTONE' : origen;
+  return productoDeQuote(
+    {
+      mpn: item?.mpn,
+      descripcion: item?.descripcion ?? item?.desc,
+      cantidad: item?.cantidad,
+      costoUnitario: item?.precio_disty
+    },
+    { fabricante, tipo: fabricante === 'MILESTONE' ? (esServidor ? 'servidor' : 'licencia') : undefined }
+  );
+};
+
 // --- Advertencias del quote entero ---------------------------------------------------
 
 /** Avisos de plata sobre el quote completo: moneda, descuento global no aplicado y notas del lector. */

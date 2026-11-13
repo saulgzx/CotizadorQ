@@ -5,6 +5,7 @@ import {
   costoFinal,
   costoXCL,
   gpDe,
+  inferirOrigen,
   lineaAPayload,
   lineaDesdeItem,
   lineaDesdeProducto,
@@ -106,3 +107,84 @@ describe('editorCalc', () => {
     expect(buscarEnCatalogo(productos, 'rail-b02').map((p) => p.id)).toEqual([2, 1]);
   });
 });
+
+describe('editorCalc: líneas de quote (ISS, Neural Labs, Milestone)', () => {
+  test('inferirOrigen respeta los seis orígenes sin importar mayúsculas ni espacios', () => {
+    for (const origen of ['AXIS', 'QNAP', 'ISS', 'NEURAL', 'MILESTONE', 'MILESTONE_HW']) {
+      expect(inferirOrigen({ origen })).toBe(origen);
+      expect(inferirOrigen({ origen: origen.toLowerCase() })).toBe(origen);
+    }
+    expect(inferirOrigen({ origen: ' milestone_hw ' })).toBe('MILESTONE_HW');
+    expect(inferirOrigen({ origen: ' Mile stone ' })).toBe('MILESTONE');
+    // aunque el texto diga "axis", manda el origen
+    expect(inferirOrigen({ origen: 'ISS', descripcion: 'Licencia para cámaras Axis' })).toBe('ISS');
+  });
+
+  test('inferirOrigen sin origen conocido deduce AXIS/QNAP del texto, como el backend', () => {
+    expect(inferirOrigen({ origen: '', marca: 'AXIS' })).toBe('AXIS');
+    expect(inferirOrigen({ origen: 'OTRO', descripcion: 'Cámara Axis' })).toBe('AXIS');
+    expect(inferirOrigen({ origen: null, mpn: 'TS-464' })).toBe('QNAP');
+    expect(inferirOrigen({})).toBe('QNAP');
+  });
+
+  test('costoXCL usa la cadena de cada origen', () => {
+    expect(costoXCL('ISS', 100)).toBeCloseTo(115, 6);
+    expect(costoXCL('NEURAL', 100)).toBeCloseTo(115, 6);
+    expect(costoXCL('MILESTONE', 100)).toBeCloseTo(100, 6);
+    expect(costoXCL('MILESTONE_HW', 100)).toBeCloseTo(112, 6);
+    // AXIS y QNAP no cambian
+    expect(costoXCL('QNAP', 1000)).toBeCloseTo(((1000 * 1.011) / 0.95) * 1.12, 6);
+    expect(costoXCL('AXIS', 1000)).toBeCloseTo(((1000 * 1.015) / 0.97) * 1.12, 6);
+  });
+
+  test('costoXCL con un origen desconocido cae a QNAP (el backend lanzaría un error)', () => {
+    expect(costoXCL('OTRO', 1000)).toBeCloseTo(costoXCL('QNAP', 1000), 6);
+    expect(costoXCL(undefined, 1000)).toBeCloseTo(costoXCL('QNAP', 1000), 6);
+  });
+
+  test('abrir y guardar una cotización con líneas de quote no cambia su origen ni su costo', () => {
+    const items = [
+      { id: 1, origen: 'ISS', marca: 'ISS', sku: 'To Create', mpn: 'A', precio_disty: 100, costo_unitario: 115, precio_unitario: 125, cantidad: 3 },
+      { id: 2, origen: 'MILESTONE_HW', marca: 'Milestone', sku: 'To Create', mpn: 'B', precio_disty: 100, costo_unitario: 112, precio_unitario: 121.74, cantidad: 1 },
+      { id: 3, origen: 'MILESTONE', marca: 'Milestone', sku: 'To Create', mpn: 'C', precio_disty: 100, costo_unitario: 100, precio_unitario: 108.7, cantidad: 1 }
+    ];
+    const lineas = items.map(lineaDesdeItem);
+    expect(lineas.map((l) => l.origen)).toEqual(['ISS', 'MILESTONE_HW', 'MILESTONE']);
+    // sin rebates ni categoría de partner: son solo de AXIS
+    for (const l of lineas) {
+      expect(l.rebate_partner).toBeNull();
+      expect(l.rebate_proyecto).toBeNull();
+      expect(l.rebate_inferido).toBe(false);
+    }
+    const payloads = lineas.map((l, i) => lineaAPayload(l, i));
+    expect(payloads.map((p) => p.origen)).toEqual(['ISS', 'MILESTONE_HW', 'MILESTONE']);
+    expect(payloads.map((p) => p.costo_unitario)).toEqual([115, 112, 100]);
+    expect(payloads.map((p) => p.precio_disty)).toEqual([100, 100, 100]);
+    expect(payloads.every((p) => p.partner_category === null && p.rebate_partner === null)).toBe(true);
+  });
+
+  test('editar el costo del quote de una línea recalcula con la cadena de su origen', () => {
+    const linea = lineaDesdeItem({ id: 1, origen: 'ISS', precio_disty: 100, costo_unitario: 115, precio_unitario: 125, cantidad: 1 });
+    const editada = aplicarCambio(linea, 'precio_disty', 200, MODO_COSTO.MANTENER_PRECIO);
+    expect(editada.costo_unitario).toBe(230); // 200 x 1,15, no la cadena de QNAP
+    const servidor = lineaDesdeItem({ id: 2, origen: 'MILESTONE_HW', precio_disty: 100, costo_unitario: 112, precio_unitario: 125, cantidad: 1 });
+    expect(aplicarCambio(servidor, 'precio_disty', 200).costo_unitario).toBe(224);
+  });
+
+  test('la línea nueva de un producto de origen quote parte del 8 % por defecto', () => {
+    const producto = { id: 'quote:ISS:X#1', origen: 'ISS', precio: 100, costoChile: 115, desc: 'Licencia' };
+    const linea = lineaDesdeProducto(producto);
+    expect(linea.origen).toBe('ISS');
+    expect(linea.rebate_partner).toBeNull();
+    expect(linea.precio_unitario).toBeCloseTo(125, 2);
+    expect(gpDe(linea)).toBeCloseTo(8, 1);
+  });
+
+  test('un producto del catálogo sin margen indicado sigue partiendo del 15 %', () => {
+    const linea = lineaDesdeProducto({ id: 1, origen: 'QNAP', precio: 1000, desc: 'NAS' });
+    expect(gpDe(linea)).toBeCloseTo(15, 1);
+    const axis = lineaDesdeProducto({ id: 2, origen: 'AXIS', precio: 1000, desc: 'Cam' });
+    expect(gpDe(axis)).toBeCloseTo(15, 1);
+  });
+});
+

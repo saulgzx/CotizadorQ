@@ -33,7 +33,7 @@ export const api = {
   boLineMetaAPI: { save: vi.fn() },
   productosAPI: { getAll: vi.fn(), getSyncStatus: vi.fn() },
   stockAPI: { getAll: vi.fn(), getCatalog: vi.fn() },
-  cotizacionesAPI: { getAll: vi.fn() },
+  cotizacionesAPI: { getAll: vi.fn(), create: vi.fn() },
   usuariosAPI: { getAll: vi.fn() },
   sesionesAPI: { getActive: vi.fn(), getByUser: vi.fn(), getUserLogs: vi.fn() },
   authAPI: { login: vi.fn(), logout: vi.fn() }
@@ -104,6 +104,7 @@ export function prepararApi({ orders = crearOrdenes(), meta = crearMeta() } = {}
   api.stockAPI.getAll.mockResolvedValue({ items: [] });
   api.stockAPI.getCatalog.mockResolvedValue({ items: [] });
   api.cotizacionesAPI.getAll.mockResolvedValue([]);
+  api.cotizacionesAPI.create.mockResolvedValue({ cotizacion: { id: 501, numero: 501 } });
   api.usuariosAPI.getAll.mockResolvedValue([]);
   api.sesionesAPI.getActive.mockResolvedValue([]);
   api.sesionesAPI.getByUser.mockResolvedValue([]);

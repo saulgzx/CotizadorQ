@@ -12,7 +12,8 @@ import {
   resumenQuote,
   ORIGENES_QUOTE,
   esOrigenQuote,
-  origenDeQuote
+  origenDeQuote,
+  productoDeQuoteGuardado
 } from './quoteFabricante';
 import { productoFueraDeLista } from './fueraDeLista';
 
@@ -533,3 +534,30 @@ describe('resumenQuote', () => {
     expect(resumenQuote({ moneda: 'EUR', descuentoGlobalPct: 5, notas: 'x' }).avisos).toHaveLength(3);
   });
 });
+
+describe('productoDeQuoteGuardado', () => {
+  const guardada = { origen: 'ISS', mpn: 'SOS-LIC', descripcion: 'Licencia SecurOS', cantidad: 4, precio_disty: 100, sku: 'To Create', gp: 0.08 };
+
+  test('rearma la línea con el costo del fabricante guardado', () => {
+    expect(productoDeQuoteGuardado(guardada)).toMatchObject({
+      origen: 'ISS', marca: 'ISS', mpn: 'SOS-LIC', desc: 'Licencia SecurOS', sku: 'To Create',
+      precio: 100, costoChile: 115, deQuote: true, cantidadSugerida: 4
+    });
+  });
+
+  test('Milestone: el tipo sale del origen guardado', () => {
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'MILESTONE_HW' })).toMatchObject({ origen: 'MILESTONE_HW', marca: 'Milestone', costoChile: 112, tipoQuote: 'servidor' });
+    // Aunque la descripción suene a hardware, una línea guardada como licencia sigue siendo licencia.
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'MILESTONE', descripcion: 'Husky M30' })).toMatchObject({ origen: 'MILESTONE', costoChile: 100, tipoQuote: 'licencia' });
+    expect(productoDeQuoteGuardado({ ...guardada, origen: ' neural ' }).origen).toBe('NEURAL');
+  });
+
+  test('no inventa: línea que no es de quote o sin costo devuelve null', () => {
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'QNAP' })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, origen: 'AXIS' })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, precio_disty: 0 })).toBeNull();
+    expect(productoDeQuoteGuardado({ ...guardada, precio_disty: null })).toBeNull();
+    expect(productoDeQuoteGuardado(null)).toBeNull();
+  });
+});
+
