@@ -405,6 +405,21 @@ describe('productoDeQuote', () => {
     expect(p.costoChile).toBe(288.08);
   });
 
+  test('el costo Chile redondea al centavo como una calculadora, sin ruido de coma flotante', () => {
+    expect(costoChileQuote(80.5, 'ISS')).toBe(92.58);
+    expect(costoChileQuote(1000.5, 'NEURAL')).toBe(1150.58);
+    expect(costoChileQuote(0.3, 'MILESTONE', 'servidor')).toBe(0.34);
+    // Contra aritmética exacta en centavos, para todos los costos de 0,01 a 500,00.
+    for (const [fabricante, tipo, pct] of [['ISS', null, 115], ['MILESTONE', 'servidor', 112], ['MILESTONE', 'licencia', 100]]) {
+      for (let centavos = 1; centavos <= 50000; centavos += 1) {
+        const exacto = Math.floor((centavos * pct + 50) / 100) / 100;
+        if (costoChileQuote(centavos / 100, fabricante, tipo) !== exacto) {
+          throw new Error(`${fabricante} ${centavos / 100}: ${costoChileQuote(centavos / 100, fabricante, tipo)} en vez de ${exacto}`);
+        }
+      }
+    }
+  });
+
   test('origenDeQuote y esOrigenQuote', () => {
     expect(origenDeQuote('iss')).toBe('ISS');
     expect(origenDeQuote('MILESTONE', 'Servidor')).toBe('MILESTONE_HW');

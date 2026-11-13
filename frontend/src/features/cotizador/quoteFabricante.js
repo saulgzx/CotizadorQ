@@ -42,7 +42,10 @@ export const origenDeQuote = (fabricante, tipo) => {
 };
 const PREFIJO_QUOTE = 'quote:';
 
-const redondear2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+// Redondeo a centavos "como en la calculadora". 80,5 x 1,15 da 92,57499999999999 en coma
+// flotante y un redondeo directo lo dejaba en 92,57 (un centavo menos, en ~0,8% de los costos).
+// toPrecision(12) limpia ese ruido antes de redondear.
+const redondear2 = (n) => Math.round(Number((n * 100).toPrecision(12))) / 100;
 const clave = (valor) => String(valor ?? '').trim().toUpperCase();
 const texto = (valor) => String(valor ?? '').trim();
 
