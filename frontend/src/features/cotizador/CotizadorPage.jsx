@@ -874,9 +874,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       }));
     }
 
+    // Caso aparte, y el más confuso de todos: el archivo se leyó bien y las líneas
+    // calzaron, pero ninguna traía precio. Pasa con las OC que solo listan producto
+    // y cantidad. Sin decirlo, parece que el lector falló cuando en realidad no
+    // había nada que leer.
+    const leidasSinMonto = resultado?.sinMonto?.length || 0;
+    if (!claves.length && leidasSinMonto) {
+      notify(
+        `Se leyeron ${plural(leidasSinMonto, 'línea', 'líneas')}, pero ninguna trae precio. ` +
+          '¿El archivo incluye montos? Si solo lista producto y cantidad, no hay nada que cargar.',
+        { tipo: 'error' }
+      );
+      return;
+    }
+
     // Se informa TODO lo que no se llenó: lo peligroso de un autocompletado es
     // creer que llenó más de lo que llenó.
     const avisos = [plural(claves.length, 'línea completada', 'líneas completadas')];
+    if (leidasSinMonto)
+      avisos.push(`${plural(leidasSinMonto, 'línea', 'líneas')} sin precio en el archivo`);
     if (resultado?.ambiguas?.length)
       avisos.push(`${plural(resultado.ambiguas.length, 'ambigua', 'ambiguas')} sin llenar`);
     if (resultado?.lineasSinDato?.length)
