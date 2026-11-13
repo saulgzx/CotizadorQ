@@ -346,6 +346,42 @@ describe('POST /api/cotizaciones', () => {
     expect(it[COL.costo_unitario]).toBe(800);
   });
 
+  test('admin: linea de quote ISS sin producto se guarda con origen ISS, sin rebates y con costo de la cadena ISS', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), ADMIN).send({
+      cliente: CLIENTE_BODY,
+      total: 460,
+      items: [{ marca: 'ISS', sku: 'SECUROS', descripcion: 'Integracion con camaras AXIS', origen: 'ISS', cantidad: 2, precio_disty: 100, precio_unitario: 230, rebate_partner: 9, partner_category: 'Partner Gold' }]
+    });
+
+    expect(res.status).toBe(201);
+    const it = insertItems(llamadas).params;
+    expect(it[COL.producto_id]).toBeNull();
+    expect(it[COL.origen]).toBe('ISS');
+    expect(it[COL.rebate_partner]).toBeNull();
+    expect(it[COL.partner_category]).toBeNull();
+    expect(it[COL.costo_unitario]).toBe(115);
+    expect(it[COL.gp]).toBe(0.5);
+  });
+
+  test('cliente (no admin): una linea de quote sin producto_id => 400 y no se inserta nada', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), CLIENTE).send({
+      cliente: CLIENTE_BODY,
+      total: 460,
+      items: [{ marca: 'ISS', sku: 'SECUROS', descripcion: 'Quote ISS', origen: 'ISS', cantidad: 2, precio_disty: 100, precio_unitario: 230 }]
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('producto_id invalido');
+    expect(insertItems(llamadas)).toBeUndefined();
+    expect(insertCotizacion(llamadas)).toBeUndefined();
+  });
+
   test('SOSPECHOSO: cot_stock_admin se trata como admin al crear (confiamos en los precios que manda)', async () => {
     mockQuery.mockImplementation(dbRouter(sesionActiva()));
     const { llamadas } = transaccion(handlerCrear());
