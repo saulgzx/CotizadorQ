@@ -449,3 +449,45 @@ export const empresasOso = (osoOrders, boMeta, boDraft) => {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => a.name.localeCompare(b.name));
 };
+
+// --- Carga desde la API ---------------------------------------------------------
+
+// Convierte la respuesta de OSO y de la meta de BO en { orders, boMeta, faltantes }.
+// `faltantes` son los BO con meta que ya no vienen en OSO y que no están facturados
+// ni eliminados. La usan la vista de órdenes y el cargador del dashboard.
+export const procesarCargaOso = (data, metaRows) => {
+  const orders = data.orders || [];
+  const metaMap = (metaRows || []).reduce((acc, row) => {
+    if (!row?.bo) return acc;
+    const invoiceMonth = normalizarMesFacturacion(row.estimated_invoice_month || row.estimatedInvoiceMonth || row.estimated_invoice_date || row.estimatedInvoiceDate || '');
+    const invoiceWeek = normalizarSemanaFacturacion(row.estimated_invoice_week ?? row.estimatedInvoiceWeek ?? '');
+    acc[row.bo] = {
+      projectName: row.project_name || row.projectName || '',
+      poAxis: row.po_axis || row.poAxis || '',
+      estimatedInvoiceDate: row.estimated_invoice_date || row.estimatedInvoiceDate || '',
+      estimatedInvoiceMonth: invoiceMonth,
+      estimatedInvoiceWeek: invoiceWeek,
+      sAndDStatus: row.s_and_d_status || row.sAndDStatus || '',
+      invoiced: row.invoiced ?? false,
+      invoicedAt: row.invoiced_at || row.invoicedAt || '',
+      customerName: row.customer_name || row.customerName || '',
+      allocPct: row.alloc_pct ?? row.allocPct,
+      customerPO: row.customer_po || row.customerPO || '',
+      lastSeenAt: row.last_seen_at || row.lastSeenAt || '',
+      purchaseStatus: row.purchase_status || row.purchaseStatus || '',
+      purchaseDispatch: row.purchase_dispatch || row.purchaseDispatch || '',
+      purchaseShipping: row.purchase_shipping || row.purchaseShipping || '',
+      purchaseSo: row.purchase_so || row.purchaseSo || '',
+      deleted: row.deleted ?? false,
+      deletedAt: row.deleted_at || row.deletedAt || '',
+      deletedComment: row.deleted_comment || row.deletedComment || '',
+      deletedBy: row.deleted_by || row.deletedBy || null
+    };
+    return acc;
+  }, {});
+  const existingBos = new Set(orders.map(order => order.bo));
+  const faltantes = Object.keys(metaMap).filter(bo =>
+    !existingBos.has(bo) && !metaMap[bo]?.invoiced && !metaMap[bo]?.deleted
+  );
+  return { orders, boMeta: metaMap, faltantes };
+};
