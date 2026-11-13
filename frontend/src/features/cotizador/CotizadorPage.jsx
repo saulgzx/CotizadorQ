@@ -710,11 +710,15 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const list = osoOrders.filter(order => {
       const bo = (order.bo || '').toString().toLowerCase();
       const customer = (order.customerName || '').toString().toLowerCase();
+      // El proyecto y el PO Axis no vienen en la orden: viven en la meta del BO (lo que
+      // se ve en la tarjeta, borrador incluido). Antes se buscaba en order.projectName /
+      // order.poAxis, que no existen, y la búsqueda nunca encontraba por esos dos campos.
+      const metaBusqueda = globalQuery ? getOsoMeta(order.bo) : null;
       const globalMatch = !globalQuery || [
         order.bo,
         order.customerName,
-        order.projectName,
-        order.poAxis,
+        metaBusqueda.projectName,
+        metaBusqueda.poAxis,
         ...(order.lines || []).map(line => `${line.sku || ''} ${line.mpn || ''}`)
       ].some(v => (v || '').toString().toLowerCase().includes(globalQuery));
       const matchesText = (!query || bo.includes(query) || customer.includes(query)) && globalMatch;
