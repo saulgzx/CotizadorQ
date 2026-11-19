@@ -24,6 +24,9 @@ describe('adaptador CRM', () => {
     expect(sql).toMatch(/etapa_desde = NOW\(\)/);
     expect(sql).toMatch(/cerrada_en = CASE WHEN \$2::text IN \('ganada', 'perdida'\)/);
     expect(sql).toMatch(/WHERE id = \$1 AND etapa <> \$2::text/);
+    // Al cerrar se limpia el seguimiento manual; en una etapa abierta se conserva.
+    expect(sql).toMatch(/proximo_seguimiento = CASE WHEN \$2::text IN \('ganada', 'perdida'\) THEN NULL ELSE proximo_seguimiento END/);
+    expect(sql).toMatch(/seguimiento_nota = CASE WHEN \$2::text IN \('ganada', 'perdida'\) THEN NULL ELSE seguimiento_nota END/);
     expect(db.query.mock.calls[0][1]).toEqual([7, 'perdida', 'Sin respuesta']);
     await expect(crm.cambiarEtapa(db, 7, 'perdida')).rejects.toThrow(/motivo/);
   });

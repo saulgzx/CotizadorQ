@@ -204,6 +204,7 @@ describe('oportunidades', () => {
   const RESUMEN = [
     'id', 'titulo', 'etapa', 'empresa_id', 'empresa_nombre', 'contacto_id', 'contacto_nombre', 'marca', 'es_proyecto', 'monto',
     'fecha_cierre_estimada', 'motivo_perdida', 'cotizaciones', 'dias_en_etapa', 'created_at', 'updated_at',
+    'proximo_seguimiento', 'seguimiento_nota',
     // Para que el tablero enlace a la cotizacion vigente mas reciente.
     'cotizacion_id', 'cotizacion_numero', 'archivada_en'
   ];
@@ -529,7 +530,7 @@ describe('arbol', () => {
     expect(Object.keys(conBo).sort()).toEqual(
       ['archivada_en', 'bo', 'cerrada_en', 'contacto_id', 'contacto_nombre', 'cotizacion_id', 'cotizacion_numero', 'cotizaciones',
         'created_at', 'dias_en_etapa', 'empresa_id', 'empresa_nombre', 'es_proyecto', 'etapa', 'fecha_cierre_estimada', 'id',
-        'marca', 'monto', 'motivo_perdida', 'titulo', 'updated_at']
+        'marca', 'monto', 'motivo_perdida', 'proximo_seguimiento', 'seguimiento_nota', 'titulo', 'updated_at']
     );
     expect(typeof conBo.monto).toBe('number');
   });
@@ -574,5 +575,159 @@ describe('arbol', () => {
     const res = await get('/arbol');
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Error del servidor' });
+  });
+});
+
+describe('seguimiento manual de la oportunidad (proximo_seguimiento y seguimiento_nota)', () => {
+  const nueva = async (extra = {}) => {
+    const empresa = mem.estado.empresas[0] || (await crearEmpresa('Sonda'));
+    return (await post('/oportunidades', { empresa_id: empresa.id, titulo: 'Proyecto', ...extra })).body;
+  };
+  const fila = (id) => mem.estado.oportunidades.find((o) => o.id === id);
+
+  test('POST sin los campos: ambos null; con ellos: se guardan y se devuelven', async () => {
+    const sin = await nueva();
+    expect(sin).toMatchObject({ proximo_seguimiento: null, seguimiento_nota: null });
+    const empresa = await crearEmpresa('Globex');
+    const con = await post('/oportunidades', {
+      empresa_id: empresa.id, titulo: 'Con', proximo_seguimiento: '2026-12-01', seguimiento_nota: '  Llamar al jefe de TI  '
+    });
+    expect(con.status).toBe(201);
+    expect(con.body).toMatchObject({ proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Llamar al jefe de TI' });
+    const mala = await post('/oportunidades', { empresa_id: empresa.id, titulo: 'X', proximo_seguimiento: '2026-13-01' });
+    expect(mala.status).toBe(400);
+  });
+
+  test('PATCH fija fecha y nota; null los quita; nota vacia o en blanco => null', async () => {
+    const op = await nueva();
+    const fijado = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: '2026-12-15', seguimiento_nota: ' Enviar muestra ' });
+    expect(fijado.status).toBe(200);
+    expect(fijado.body).toMatchObject({ proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Enviar muestra' });
+
+    for (const vacia of ['', '   ', null]) {
+      await patch(`/oportunidades/${op.id}`, { seguimiento_nota: 'algo' });
+      const res = await patch(`/oportunidades/${op.id}`, { seguimiento_nota: vacia });
+      expect(res.status).toBe(200);
+      expect(res.body.seguimiento_nota).toBeNull();
+      expect(res.body.proximo_seguimiento).toBe('2026-12-15'); // la fecha no se toca
+    }
+    const sinFecha = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: null });
+    expect(sinFecha.body).toMatchObject({ proximo_seguimiento: null, seguimiento_nota: null });
+  });
+
+  test('se puede mandar solo uno de los dos y lo que no viene no se toca', async () => {
+    const op = await nueva();
+    await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Nota' });
+    const soloNota = await patch(`/oportunidades/${op.id}`, { seguimiento_nota: 'Otra' });
+    expect(soloNota.body).toMatchObject({ proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Otra' });
+    const soloFecha = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: '2027-01-10' });
+    expect(soloFecha.body).toMatchObject({ proximo_seguimiento: '2027-01-10', seguimiento_nota: 'Otra' });
+    const otro = await patch(`/oportunidades/${op.id}`, { titulo: 'Renombrada' });
+    expect(otro.body).toMatchObject({ titulo: 'Renombrada', proximo_seguimiento: '2027-01-10', seguimiento_nota: 'Otra' });
+    expect((await patch(`/oportunidades/${op.id}`, {})).body).toMatchObject({ proximo_seguimiento: '2027-01-10', seguimiento_nota: 'Otra' });
+  });
+
+  test('nota: 300 caracteres pasan (tras trim), 301 dan 400', async () => {
+    const op = await nueva();
+    const justa = await patch(`/oportunidades/${op.id}`, { seguimiento_nota: ` ${'a'.repeat(300)} ` });
+    expect(justa.status).toBe(200);
+    expect(justa.body.seguimiento_nota).toHaveLength(300);
+    const larga = await patch(`/oportunidades/${op.id}`, { seguimiento_nota: 'a'.repeat(301) });
+    expect(larga.status).toBe(400);
+    expect(larga.body.error).toMatch(/300/);
+    expect(fila(op.id).seguimiento_nota).toHaveLength(300); // el 400 no cambio nada
+    expect((await patch(`/oportunidades/${op.id}`, { seguimiento_nota: 123 })).status).toBe(400);
+  });
+
+  test('fecha: formato malo, inexistente o fuera de 2000-2100 dan 400; la pasada se acepta', async () => {
+    const op = await nueva();
+    const malas = ['2026-1-5', '15/12/2026', '2026-12-15T00:00:00Z', 'manana', '', '2026-02-30', '2026-13-01', '2025-02-29',
+      '1999-12-31', '2101-01-01', 20261215];
+    for (const fecha of malas) {
+      const res = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: fecha });
+      expect([fecha, res.status]).toEqual([fecha, 400]);
+      expect(typeof res.body.error).toBe('string');
+    }
+    expect(fila(op.id).proximo_seguimiento).toBeNull();
+    for (const fecha of ['2000-01-01', '2100-12-31', '2024-02-29', '2020-03-04']) {
+      const res = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: fecha });
+      expect([fecha, res.status, res.body.proximo_seguimiento]).toEqual([fecha, 200, fecha]);
+    }
+  });
+
+  test('aparecen en GET /oportunidades, GET /arbol y la ficha de empresa', async () => {
+    const op = await nueva();
+    await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Nota' });
+    const esperado = { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Nota' };
+    expect((await get('/oportunidades')).body.items[0]).toMatchObject(esperado);
+    expect((await get('/arbol')).body.oportunidades[0]).toMatchObject(esperado);
+    expect((await get(`/empresas/${op.empresa_id}`)).body.oportunidades[0]).toMatchObject(esperado);
+  });
+
+  describe('regla de cierre', () => {
+    const conSeguimiento = async () => {
+      const op = await nueva();
+      await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Nota' });
+      return op;
+    };
+
+    test('PATCH de etapa a ganada o perdida deja ambos en null', async () => {
+      const g = await conSeguimiento();
+      const ganada = await patch(`/oportunidades/${g.id}`, { etapa: 'ganada' });
+      expect(ganada.status).toBe(200);
+      expect(ganada.body).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+
+      const p = await conSeguimiento();
+      const perdida = await patch(`/oportunidades/${p.id}`, { etapa: 'perdida', motivo_perdida: 'Precio' });
+      expect(perdida.body).toMatchObject({ etapa: 'perdida', proximo_seguimiento: null, seguimiento_nota: null });
+    });
+
+    test('si el mismo PATCH trae etapa de cierre y fecha, gana el cierre', async () => {
+      const op = await nueva();
+      const res = await patch(`/oportunidades/${op.id}`, {
+        etapa: 'ganada', proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Nota'
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+    });
+
+    test('reabrir no restaura nada', async () => {
+      const op = await conSeguimiento();
+      await patch(`/oportunidades/${op.id}`, { etapa: 'ganada' });
+      const res = await patch(`/oportunidades/${op.id}`, { etapa: 'negociacion' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ etapa: 'negociacion', proximo_seguimiento: null, seguimiento_nota: null });
+    });
+
+    test('reabrir y fijar seguimiento en el mismo PATCH se acepta', async () => {
+      const op = await conSeguimiento();
+      await patch(`/oportunidades/${op.id}`, { etapa: 'ganada' });
+      const res = await patch(`/oportunidades/${op.id}`, { etapa: 'cotizada', proximo_seguimiento: '2027-02-01' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ etapa: 'cotizada', proximo_seguimiento: '2027-02-01' });
+    });
+
+    test('fijar seguimiento en una cerrada da 400; null siempre se acepta', async () => {
+      const op = await conSeguimiento();
+      await patch(`/oportunidades/${op.id}`, { etapa: 'perdida', motivo_perdida: 'Precio' });
+      for (const body of [{ proximo_seguimiento: '2026-12-20' }, { seguimiento_nota: 'Llamar' },
+        { etapa: 'perdida', proximo_seguimiento: '2026-12-20' }]) {
+        const res = await patch(`/oportunidades/${op.id}`, body);
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Una oportunidad cerrada no lleva seguimiento');
+      }
+      const limpia = await patch(`/oportunidades/${op.id}`, { proximo_seguimiento: null, seguimiento_nota: null });
+      expect(limpia.status).toBe(200);
+      expect(limpia.body).toMatchObject({ etapa: 'perdida', proximo_seguimiento: null, seguimiento_nota: null });
+    });
+
+    test('POST en etapa cerrada nace sin seguimiento', async () => {
+      const empresa = await crearEmpresa('Globex');
+      const res = await post('/oportunidades', {
+        empresa_id: empresa.id, titulo: 'Ya ganada', etapa: 'ganada', proximo_seguimiento: '2026-12-15', seguimiento_nota: 'x'
+      });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ proximo_seguimiento: null, seguimiento_nota: null });
+    });
   });
 });

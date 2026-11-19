@@ -285,6 +285,97 @@ describeBD('CRM con PostgreSQL real', () => {
     expect(embudo.body.perdidas_mes.cantidad).toBeGreaterThanOrEqual(1); // la rechazada hoy en el cotizador
   });
 
+  test('seguimiento manual: ALTER idempotente, fecha exacta sin correr de dia, nota y regla de cierre (SQL real)', async () => {
+    // Los dos ALTER se pueden repetir y las columnas quedan con el tipo esperado.
+    expect(await esquema.prepararEsquema(pool, { log: silencio })).toBe(true);
+    expect(await esquema.prepararEsquema(pool, { log: silencio })).toBe(true);
+    const columnas = await q(
+      `SELECT column_name, data_type, character_maximum_length FROM information_schema.columns
+        WHERE table_schema = $1 AND table_name = 'crm_oportunidades'
+          AND column_name IN ('proximo_seguimiento', 'seguimiento_nota') ORDER BY 1`,
+      [schema]
+    );
+    expect(columnas).toEqual([
+      { column_name: 'proximo_seguimiento', data_type: 'date', character_maximum_length: null },
+      { column_name: 'seguimiento_nota', data_type: 'character varying', character_maximum_length: 300 }
+    ]);
+
+    const [empresa] = await q(`INSERT INTO crm_empresas (nombre, nombre_normalizado) VALUES ('Seguimiento PG', 'seguimiento pg') RETURNING id`);
+    const patchear = (id, body) => request(app).patch(`/api/crm/oportunidades/${id}`).send(body);
+    const creada = await request(app).post('/api/crm/oportunidades').send({ empresa_id: empresa.id, titulo: 'Con seguimiento' });
+    expect(creada.status).toBe(201);
+    expect(creada.body).toMatchObject({ proximo_seguimiento: null, seguimiento_nota: null });
+
+    const fijada = await patchear(creada.body.id, { proximo_seguimiento: '2026-12-01', seguimiento_nota: '  Llamar al jefe de TI ' });
+    expect(fijada.status).toBe(200);
+    expect(fijada.body).toMatchObject({ proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Llamar al jefe de TI' });
+
+    // Aparece igual en listado, arbol y ficha, y no se corre un dia con ninguna zona horaria de sesion.
+    const esperado = { proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Llamar al jefe de TI' };
+    expect((await request(app).get(`/api/crm/oportunidades?empresa_id=${empresa.id}`)).body.items[0]).toMatchObject(esperado);
+    expect((await request(app).get('/api/crm/arbol')).body.oportunidades.find((o) => o.id === creada.body.id)).toMatchObject(esperado);
+    expect((await request(app).get(`/api/crm/empresas/${empresa.id}`)).body.oportunidades[0]).toMatchObject(esperado);
+    const { crearRutasCrm } = require('../src/crm/rutas');
+    for (const zona of ['Pacific/Kiritimati', 'Pacific/Pago_Pago', 'America/Santiago', 'UTC']) {
+      const poolZona = new Pool({ connectionString: URL_BD, options: `-c search_path=${schema} -c TimeZone=${zona}` });
+      try {
+        const appZona = express();
+        appZona.use(express.json());
+        appZona.use('/api/crm', crearRutasCrm({ pool: poolZona, log: silencio }));
+        const res = await request(appZona).get(`/api/crm/oportunidades?empresa_id=${empresa.id}`);
+        expect([zona, res.body.items[0].proximo_seguimiento]).toEqual([zona, '2026-12-01']);
+      } finally {
+        await poolZona.end();
+      }
+    }
+    // Una fecha en el borde del cambio de hora de Chile tambien vuelve exacta.
+    expect((await patchear(creada.body.id, { proximo_seguimiento: '2026-09-06' })).body.proximo_seguimiento).toBe('2026-09-06');
+    expect((await patchear(creada.body.id, { proximo_seguimiento: '2020-01-31' })).body.proximo_seguimiento).toBe('2020-01-31'); // pasada
+
+    // Validacion y quitar con null / nota vacia.
+    expect((await patchear(creada.body.id, { proximo_seguimiento: '2026-02-30' })).status).toBe(400);
+    expect((await patchear(creada.body.id, { seguimiento_nota: 'a'.repeat(301) })).status).toBe(400);
+    expect((await patchear(creada.body.id, { seguimiento_nota: '  ' })).body.seguimiento_nota).toBeNull();
+    const [guardada] = await q('SELECT proximo_seguimiento::text AS f, seguimiento_nota FROM crm_oportunidades WHERE id = $1', [creada.body.id]);
+    expect(guardada).toEqual({ f: '2020-01-31', seguimiento_nota: null });
+    expect((await patchear(creada.body.id, { proximo_seguimiento: null })).body.proximo_seguimiento).toBeNull();
+
+    // Regla de cierre por PATCH de etapa (y gana sobre la fecha del mismo PATCH); reabrir no restaura.
+    await patchear(creada.body.id, { proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Nota' });
+    const ganada = await patchear(creada.body.id, { etapa: 'ganada', proximo_seguimiento: '2026-12-05' });
+    expect(ganada.body).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+    const enBd = async () => (await q('SELECT proximo_seguimiento, seguimiento_nota FROM crm_oportunidades WHERE id = $1', [creada.body.id]))[0];
+    expect(await enBd()).toEqual({ proximo_seguimiento: null, seguimiento_nota: null });
+    const cerrada = await patchear(creada.body.id, { seguimiento_nota: 'Tarde' });
+    expect(cerrada.status).toBe(400);
+    expect(cerrada.body.error).toBe('Una oportunidad cerrada no lleva seguimiento');
+    expect((await patchear(creada.body.id, { etapa: 'cotizada' })).body).toMatchObject({ etapa: 'cotizada', proximo_seguimiento: null, seguimiento_nota: null });
+
+    // Regla de cierre desde la cotizacion.
+    await patchear(creada.body.id, { proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Nota' });
+    const cot = await insertarCotizacion({ empresa: 'Seguimiento PG', nombre: 'Z', total: 7 });
+    await q('UPDATE cotizaciones SET empresa_id = $1, oportunidad_id = $2 WHERE id = $3', [empresa.id, creada.body.id, cot.id]);
+    await enlace.cambiarEtapaDeCotizacion(pool, { cotizacionId: cot.id, etapa: 'perdida', motivoPorDefecto: 'Rechazada', log: silencio });
+    expect(await enBd()).toEqual({ proximo_seguimiento: null, seguimiento_nota: null });
+
+    // Regla de cierre tambien cuando cierra el seguimiento AUTOMATICO por correo (su propio UPDATE,
+    // que no pasa por reglas.js): mover a una etapa abierta conserva el seguimiento; cerrar lo limpia.
+    const adaptador = require('../src/seguimiento/crmAdaptador');
+    await patchear(creada.body.id, { etapa: 'cotizada' });
+    await patchear(creada.body.id, { proximo_seguimiento: '2026-12-01', seguimiento_nota: 'Nota' });
+    expect(await adaptador.cambiarEtapa(pool, creada.body.id, 'negociacion')).toBe(true);
+    expect((await q('SELECT proximo_seguimiento::text AS f, seguimiento_nota FROM crm_oportunidades WHERE id = $1', [creada.body.id]))[0])
+      .toEqual({ f: '2026-12-01', seguimiento_nota: 'Nota' });
+    expect(await adaptador.cambiarEtapa(pool, creada.body.id, 'perdida', 'Sin respuesta')).toBe(true);
+    expect(await enBd()).toEqual({ proximo_seguimiento: null, seguimiento_nota: null });
+
+    // POST con los campos.
+    const conCampos = await request(app).post('/api/crm/oportunidades').send({
+      empresa_id: empresa.id, titulo: 'Nace con seguimiento', proximo_seguimiento: '2027-03-04', seguimiento_nota: 'Visita'
+    });
+    expect(conCampos.body).toMatchObject({ proximo_seguimiento: '2027-03-04', seguimiento_nota: 'Visita' });
+  });
+
   test('duplicados y fusion: mueve todo, funde contactos por email y deja alias', async () => {
     const a = await request(app).post('/api/crm/empresas').send({ nombre: 'Intersistemas SpA', sitio: 'https://inter.cl' });
     const b = await request(app).post('/api/crm/empresas').send({ nombre: 'Inter Sistemas Ltda' });
@@ -563,7 +654,7 @@ describeBD('CRM con PostgreSQL real', () => {
     expect(Object.keys(propias[0]).sort()).toEqual(
       ['archivada_en', 'bo', 'cerrada_en', 'contacto_id', 'contacto_nombre', 'cotizacion_id', 'cotizacion_numero', 'cotizaciones',
         'created_at', 'dias_en_etapa', 'empresa_id', 'empresa_nombre', 'es_proyecto', 'etapa', 'fecha_cierre_estimada', 'id',
-        'marca', 'monto', 'motivo_perdida', 'titulo', 'updated_at']
+        'marca', 'monto', 'motivo_perdida', 'proximo_seguimiento', 'seguimiento_nota', 'titulo', 'updated_at']
     );
     const total = (await q('SELECT COUNT(*)::int AS n FROM crm_oportunidades WHERE archivada_en IS NULL'))[0].n;
     expect(res.total_oportunidades).toBe(total);

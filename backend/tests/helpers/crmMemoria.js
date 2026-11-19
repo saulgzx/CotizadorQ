@@ -87,6 +87,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
     monto: montoDe(o),
     fecha_cierre_estimada: o.fecha_cierre_estimada,
     motivo_perdida: o.motivo_perdida,
+    proximo_seguimiento: o.proximo_seguimiento ?? null,
+    seguimiento_nota: o.seguimiento_nota ?? null,
     cotizaciones: estado.cotizaciones.filter((c) => c.oportunidad_id === o.id).length,
     cotizacion_id: vigenteMasReciente(o)?.id ?? null,
     cotizacion_numero: vigenteMasReciente(o)?.numero ?? null,
@@ -266,6 +268,8 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
         monto_orden: datos.monto_orden ?? null,
         bo: datos.bo ?? null,
         fecha_cierre_estimada: datos.fecha_cierre_estimada ?? null,
+        proximo_seguimiento: datos.proximo_seguimiento ?? null,
+        seguimiento_nota: datos.seguimiento_nota ?? null,
         motivo_perdida: datos.motivo_perdida ?? null,
         etapa_desde: valorFecha(datos.etapa_desde) || ahora(),
         cerrada_en: valorFecha(datos.cerrada_en) ?? null,
@@ -319,7 +323,7 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
       if (!fila) return null;
       return clonar(aplicar(fila, campos, [
         'titulo', 'etapa', 'contacto_id', 'marca', 'es_proyecto', 'monto_manual', 'fecha_cierre_estimada',
-        'motivo_perdida', 'etapa_desde', 'cerrada_en'
+        'proximo_seguimiento', 'seguimiento_nota', 'motivo_perdida', 'etapa_desde', 'cerrada_en'
       ]));
     },
     obtenerResumenOportunidad: async (db, id) => {

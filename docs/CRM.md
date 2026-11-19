@@ -32,7 +32,8 @@ Montos en USD con 2 decimales (number). Fechas ISO 8601. Errores: `{ error: stri
   es_proyecto (bool), monto_manual (nullable, edición manual), monto_orden (`DECIMAL(14,2)` nullable: total de
   la orden OSO, lo escribe solo la sincronización de órdenes; no es editable por la API), bo (nullable, único parcial: el BO de la orden OSO que
   ganó esta oportunidad), fecha_cierre_estimada (date nullable), motivo_perdida (nullable),
-  etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
+  proximo_seguimiento (`DATE` nullable: cuándo hay que hacerle seguimiento; null = sin seguimiento),
+  seguimiento_nota (`VARCHAR(300)` nullable: qué hacer), etapa_desde (timestamp: cuándo entró a la etapa actual), cerrada_en (nullable), archivada_en (nullable),
   created_at, updated_at.
 - `cotizaciones`: columnas nuevas nullable `empresa_id`, `contacto_id`, `oportunidad_id` y `archivada_en`.
 
@@ -103,8 +104,11 @@ Un solo lugar: `backend/src/crm/normalizar.js` (`ETAPA_POR_ESTADO`, `ESTADO_POR_
 
 ### Oportunidades
 - `OportunidadResumen` = `{ id, titulo, etapa, empresa_id, empresa_nombre, contacto_id, contacto_nombre, marca,
-  es_proyecto, monto, fecha_cierre_estimada, motivo_perdida, cotizaciones, cotizacion_id, cotizacion_numero,
-  dias_en_etapa, cerrada_en, archivada_en, created_at, updated_at }`. `cotizacion_id`/`cotizacion_numero`: la
+  es_proyecto, monto, fecha_cierre_estimada, motivo_perdida, proximo_seguimiento, seguimiento_nota, cotizaciones,
+  cotizacion_id, cotizacion_numero, dias_en_etapa, cerrada_en, archivada_en, created_at, updated_at }`.
+  `proximo_seguimiento` sale como texto `'YYYY-MM-DD'` (`to_char`, nunca timestamp: no se corre un día por zona
+  horaria) o `null`; `seguimiento_nota` es texto o `null`. Salen en todo lugar donde se devuelve una oportunidad
+  (listado, árbol, ficha de empresa, respuestas de `POST`/`PATCH`). `cotizacion_id`/`cotizacion_numero`: la
   cotización vinculada más reciente **no archivada** (null si no hay), para que el tablero enlace a ella.
 - `GET /api/crm/oportunidades?etapa=&empresa_id=&q=&abiertas=1` → `{ items: [OportunidadResumen] }`. Excluye
   las archivadas. `GET /api/crm/embudo` y los agregados de `GET /api/crm/empresas` (oportunidades abiertas,
@@ -123,12 +127,21 @@ Un solo lugar: `backend/src/crm/normalizar.js` (`ETAPA_POR_ESTADO`, `ESTADO_POR_
   lista viene cortada (en ese caso faltan las oportunidades menos recientes). Tres consultas (oportunidades, total y
   cotizaciones con `oportunidad_id = ANY(...)`), sin N+1. No cambia `GET /api/crm/oportunidades`.
 - `POST /api/crm/oportunidades` `{ empresa_id, titulo, contacto_id?, etapa?, marca?, es_proyecto?, monto_manual?,
-  fecha_cierre_estimada? }` → OportunidadResumen (201).
+  fecha_cierre_estimada?, proximo_seguimiento?, seguimiento_nota? }` → OportunidadResumen (201).
 - `PATCH /api/crm/oportunidades/:id` `{ titulo?, etapa?, contacto_id?, marca?, es_proyecto?, monto_manual?,
-  fecha_cierre_estimada?, motivo_perdida? }` → OportunidadResumen.
+  fecha_cierre_estimada?, proximo_seguimiento?, seguimiento_nota?, motivo_perdida? }` → OportunidadResumen.
   Pasar a `perdida` exige `motivo_perdida` (400 si falta). Pasar a `ganada`/`perdida` fija `cerrada_en`; volver a
   una etapa abierta lo limpia. Cambiar de etapa actualiza `etapa_desde` y deriva el `estado` de todas sus
   cotizaciones (misma transacción).
+  **Seguimiento**: `proximo_seguimiento` (`'YYYY-MM-DD'` de una fecha real entre los años 2000 y 2100, o `null`
+  para quitarla; las fechas pasadas se aceptan) y `seguimiento_nota` (texto recortado con trim; vacío o `null` →
+  `null`; más de 300 caracteres → 400). Se pueden mandar los dos, uno o ninguno; lo que no viene no se toca. 400
+  con mensaje en español si algo no cumple. **Regla de cierre**: cuando una oportunidad pasa a `ganada` o
+  `perdida` (por `PATCH`, por el cambio de estado de una cotización o porque una orden la gana) ambos campos
+  quedan en `null`, y si el mismo `PATCH` trae `etapa` de cierre junto con un seguimiento, gana el cierre.
+  Reabrir no restaura nada. Fijar un valor no nulo en una oportunidad que sigue cerrada responde 400 «Una
+  oportunidad cerrada no lleva seguimiento»; `null` siempre se acepta. `POST` en etapa cerrada nace sin
+  seguimiento. La regla vive en `reglas.cambiosOportunidad`/`datosOportunidadNueva`.
 - `POST /api/crm/oportunidades/:id/cotizaciones` `{ cotizacion_id }` → vincula la cotización (y le fija empresa_id
   de la oportunidad; su `estado` se deriva de la etapa). → OportunidadResumen.
 
@@ -227,6 +240,10 @@ cotización se crea igual (el fallo se registra en el log).
   falla, la migración no corre y `/api/crm` responde 500; el resto de la app sigue igual y el
   enlace automático solo registra el error.
 - Las columnas nuevas de `cotizaciones` son nullable y sin DEFAULT: el `ALTER` no reescribe la tabla.
+- `proximo_seguimiento DATE` y `seguimiento_nota VARCHAR(300)` de `crm_oportunidades` se agregan con
+  `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (nullable, sin DEFAULT; idempotentes). Sin índice: ninguna consulta
+  filtra ni ordena por la fecha todavía; si aparece una vista «seguimientos de hoy», agregar un índice parcial
+  `(proximo_seguimiento) WHERE proximo_seguimiento IS NOT NULL AND archivada_en IS NULL`.
 - Archivado: `crm_oportunidades.archivada_en` (+ índice parcial `crm_oportunidades_vigentes_idx (etapa) WHERE
   archivada_en IS NULL`) aquí; `cotizaciones.archivada_en` (+ `cotizaciones_vigentes_created_idx (created_at)
   WHERE archivada_en IS NULL`) en `ensureCotizacionEdicion` (`services/cotizacionItems.js`).
@@ -296,6 +313,8 @@ cotización se crea igual (el fallo se registra en el log).
   transacción; lo usan el PATCH y el PUT). Antes era un `UPDATE` del estado más un cierre best-effort de la
   oportunidad solo para `aprobada`/`rechazada` (`sincronizarEstadoCotizacion`, eliminado junto con
   `repositorio.cerrarOportunidadAbierta`); ahora la etapa manda y un fallo de BD da 500 sin cambios.
+- La regla de cierre del seguimiento (ver Oportunidades) se aplica aquí sin código propio: la etapa pasa por
+  `reglas.cambiosOportunidad`, igual que en la sincronización de órdenes (`ordenes.js`).
 - Orden de bloqueo: oportunidad (`FOR UPDATE`) y después el `UPDATE` de sus cotizaciones, igual que el
   `PATCH` del CRM, para no cruzar bloqueos.
 

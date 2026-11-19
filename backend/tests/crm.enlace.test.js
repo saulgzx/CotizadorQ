@@ -169,6 +169,22 @@ describe('cambio de etapa desde la cotizacion (PATCH /api/cotizaciones/:id/estad
     expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'nueva', cerrada_en: null, motivo_perdida: null });
   });
 
+  test('regla de cierre: ganar o perder desde la cotizacion limpia el seguimiento; reabrir no lo restaura', async () => {
+    const seguimiento = { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Llamar' };
+    const { a } = await conOportunidad('cotizada', seguimiento);
+    expect(mem.estado.oportunidades[0]).toMatchObject(seguimiento);
+    await cambiar(a.id, { etapa: 'ganada' });
+    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+    await cambiar(a.id, { etapa: 'cotizada' });
+    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'cotizada', proximo_seguimiento: null, seguimiento_nota: null });
+  });
+
+  test('regla de cierre: perder desde la cotizacion limpia el seguimiento', async () => {
+    const { a } = await conOportunidad('negociacion', { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Llamar' });
+    await cambiar(a.id, { etapa: 'perdida', motivoPerdida: 'Precio' });
+    expect(mem.estado.oportunidades[0]).toMatchObject({ etapa: 'perdida', proximo_seguimiento: null, seguimiento_nota: null });
+  });
+
   test('ganada -> cotizada tambien reabre', async () => {
     const { a } = await conOportunidad('ganada', { cerrada_en: new Date('2026-01-01T00:00:00Z') });
     const res = await cambiar(a.id, { etapa: 'cotizada' });

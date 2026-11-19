@@ -154,6 +154,30 @@ describe('sincronizarOrdenes', () => {
     });
   });
 
+  test('regla de cierre: la orden que gana una oportunidad abierta le limpia el seguimiento', async () => {
+    const seguimiento = { proximo_seguimiento: '2026-12-15', seguimiento_nota: 'Llamar' };
+    const memoria = crearCrmMemoria();
+    const empresa = await memoria.repo.insertarEmpresa(memoria.pool, { nombre: 'Dimerc', nombre_normalizado: 'dimerc' });
+    // Camino 1: se engancha a la unica abierta sin BO.
+    await memoria.repo.insertarOportunidad(memoria.pool, { empresa_id: empresa.id, titulo: 'Abierta', etapa: 'cotizada', ...seguimiento });
+    memoria.agregarOrden({ bo: 'BO-201', cliente: 'Dimerc' });
+    await sincronizar(memoria);
+    expect(memoria.estado.oportunidades[0]).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+
+    // Camino 2: la oportunidad ya tenia el BO pero se reabrio (con seguimiento) y la orden la vuelve a ganar.
+    await memoria.repo.actualizarOportunidad(memoria.pool, memoria.estado.oportunidades[0].id, { etapa: 'negociacion', ...seguimiento });
+    expect(memoria.estado.oportunidades[0]).toMatchObject(seguimiento);
+    await sincronizar(memoria);
+    expect(memoria.estado.oportunidades[0]).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+  });
+
+  test('una oportunidad creada por la orden nace ganada y sin seguimiento', async () => {
+    const memoria = crearCrmMemoria();
+    memoria.agregarOrden({ bo: 'BO-202', cliente: 'Globex' });
+    await sincronizar(memoria);
+    expect(memoria.estado.oportunidades[0]).toMatchObject({ etapa: 'ganada', proximo_seguimiento: null, seguimiento_nota: null });
+  });
+
   test('con dos oportunidades abiertas no adivina: crea una nueva para el BO', async () => {
     const memoria = crearCrmMemoria();
     const empresa = await memoria.repo.insertarEmpresa(memoria.pool, {
