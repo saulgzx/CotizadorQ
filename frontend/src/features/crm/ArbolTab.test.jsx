@@ -220,6 +220,100 @@ describe('ArbolTab', () => {
     expect(fila('o:1')).toHaveAttribute('aria-expanded', 'false');
   });
 
+  describe('seguimiento y panel', () => {
+    const verTodas = () => window.localStorage.setItem('crmArbol', JSON.stringify({ etapas: [] }));
+    const desplegar = (...ids) => ids.forEach((id) => fireEvent.click(fila(id)));
+
+    test('la columna Seguimiento va entre Etapa y Marca', async () => {
+      await montar();
+      const cabeceras = within(document.querySelector('.mq-arbol-cabecera')).getAllByRole('columnheader').map((c) => c.textContent);
+      expect(cabeceras).toEqual(['Empresa', 'Etapa', 'Seguimiento', 'Marca', 'Monto', 'Días']);
+      // Todas las filas tienen una celda por columna.
+      desplegar('g:empresa:10', 'o:1');
+      ['g:empresa:10', 'o:1', 'c:501'].forEach((id) => expect(within(fila(id)).getAllByRole('gridcell')).toHaveLength(6));
+    });
+
+    test('muestra el estado de cada oportunidad con su punto y abre el panel al hacer clic', async () => {
+      const onAbrirOportunidad = vi.fn();
+      await montar({ onAbrirOportunidad });
+      desplegar('g:empresa:10', 'g:empresa:11');
+      const sin = within(fila('o:1')).getByRole('button', { name: 'Seguimiento de NAS sucursal Norte: Sin seguimiento' });
+      expect(sin).toHaveTextContent('Sin seguimiento');
+      expect(sin.querySelector('.mq-punto-neutro')).toBeInTheDocument();
+      expect(sin).not.toHaveAttribute('title');
+
+      const vencida = within(fila('o:2')).getByRole('button', { name: /^Seguimiento de Cámaras bodega: Vencido hace \d+ días$/ });
+      expect(vencida.querySelector('.mq-punto-critico')).toBeInTheDocument();
+      expect(vencida).toHaveAttribute('title', 'Llamar a Ana por el descuento');
+
+      const futura = within(fila('o:4')).getByRole('button', { name: 'Seguimiento de Switches Beta: 15-dic-2099' });
+      expect(futura.querySelector('.mq-punto-ok')).toBeInTheDocument();
+
+      fireEvent.click(vencida);
+      expect(onAbrirOportunidad).toHaveBeenCalledWith(2);
+      // El clic en el botón no despliega la fila.
+      expect(fila('o:2')).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    test('una oportunidad cerrada muestra "—" sin botón; los grupos y las cotizaciones dejan la celda vacía', async () => {
+      verTodas();
+      await montar({ onAbrirOportunidad: vi.fn() });
+      desplegar('g:empresa:10', 'o:1');
+      const celdaCerrada = within(fila('o:3')).getAllByRole('gridcell')[2];
+      expect(celdaCerrada).toHaveTextContent('—');
+      expect(within(celdaCerrada).queryByRole('button')).not.toBeInTheDocument();
+      expect(within(fila('o:3')).queryByRole('button', { name: /^Seguimiento de/ })).not.toBeInTheDocument();
+      expect(within(fila('g:empresa:10')).getAllByRole('gridcell')[2]).toBeEmptyDOMElement();
+      expect(within(fila('c:501')).getAllByRole('gridcell')[2]).toBeEmptyDOMElement();
+    });
+
+    test('el título de la oportunidad es un botón que abre el panel sin plegar ni desplegar la fila', async () => {
+      const onAbrirOportunidad = vi.fn();
+      await montar({ onAbrirOportunidad });
+      desplegar('g:empresa:10');
+      fireEvent.click(within(fila('o:1')).getByRole('button', { name: 'NAS sucursal Norte' }));
+      expect(onAbrirOportunidad).toHaveBeenCalledWith(1);
+      expect(fila('o:1')).toHaveAttribute('aria-expanded', 'false');
+      // Hacer clic en otra parte de la fila sigue desplegándola.
+      fireEvent.click(fila('o:1'));
+      expect(fila('o:1')).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    test('el teclado de la fila no se mezcla con el botón del título ni con el de seguimiento', async () => {
+      const onAbrirOportunidad = vi.fn();
+      await montar({ onAbrirOportunidad });
+      desplegar('g:empresa:10');
+      const titulo = within(fila('o:1')).getByRole('button', { name: 'NAS sucursal Norte' });
+      const seguimiento = within(fila('o:1')).getByRole('button', { name: /^Seguimiento de/ });
+      [titulo, seguimiento].forEach((boton) => {
+        boton.focus();
+        const sinCancelar = fireEvent.keyDown(boton, { key: 'Enter' });
+        expect(sinCancelar).toBe(true);
+        fireEvent.keyDown(boton, { key: 'ArrowDown' });
+        expect(document.activeElement).toBe(boton);
+        expect(fila('o:1')).toHaveAttribute('aria-expanded', 'false');
+      });
+      // Y las flechas con el foco en la fila siguen funcionando.
+      fireEvent.keyDown(fila('o:1'), { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(fila('o:2'));
+    });
+
+    test('sin onAbrirOportunidad el título y el seguimiento son texto, no botones', async () => {
+      await montar();
+      desplegar('g:empresa:10');
+      expect(within(fila('o:1')).queryByRole('button', { name: 'NAS sucursal Norte' })).not.toBeInTheDocument();
+      expect(within(fila('o:1')).queryByRole('button', { name: /^Seguimiento de/ })).not.toBeInTheDocument();
+      expect(within(fila('o:1')).getByText('Sin seguimiento')).toBeInTheDocument();
+    });
+
+    test('la búsqueda también calza por la nota del seguimiento', async () => {
+      await montar();
+      buscar('descuento');
+      expect(await screen.findByText('Cámaras bodega')).toBeInTheDocument();
+      expect(idsFilas()).toEqual(['g:empresa:10', 'o:2']);
+    });
+  });
+
   test('agrupar por Etapa y por Marca', async () => {
     await montar();
     const grupo = screen.getByRole('radiogroup', { name: 'Agrupar por' });

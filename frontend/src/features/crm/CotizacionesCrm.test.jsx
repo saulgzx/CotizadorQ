@@ -27,6 +27,19 @@ vi.mock('./crmApi', () => ({
   seguimientoApi: { lista: vi.fn(), valor: vi.fn(), pausar: vi.fn(), reanudar: vi.fn() }
 }));
 
+// El mapa tiene su propio test: aquí basta un doble con su buscador y una tarjeta.
+vi.mock('./MapaTab', async () => {
+  const React = (await import('react')).default;
+  return {
+    default: ({ inputBusquedaRef, onAbrirOportunidad }) => (
+      <div data-testid='mapa'>
+        <input type='search' aria-label='Buscar en el mapa' ref={inputBusquedaRef} />
+        <button type='button' onClick={() => onAbrirOportunidad(1)}>Tarjeta simulada</button>
+      </div>
+    )
+  };
+});
+
 vi.mock('../../api', async (original) => ({
   ...(await original()),
   cotizacionesAPI: { previaArchivar: vi.fn(), archivar: vi.fn() }
@@ -44,10 +57,10 @@ beforeEach(() => {
 });
 
 describe('CrmView › pestaña Cotizaciones', () => {
-  test('ordena las pestañas: Árbol primero y Cotizaciones después de Embudo', () => {
+  test('ordena las pestañas: Oportunidades primero y Cotizaciones después de Embudo', () => {
     renderConQuery(<CrmView />);
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
-      'Árbol', 'Resumen', 'Embudo', 'Cotizaciones', 'Empresas', 'Seguimiento automático'
+      'Oportunidades', 'Resumen', 'Embudo', 'Cotizaciones', 'Empresas', 'Seguimiento automático'
     ]);
   });
 

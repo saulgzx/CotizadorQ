@@ -27,6 +27,19 @@ vi.mock('./crmApi', () => ({
   }
 }));
 
+// El mapa tiene su propio test: aquí basta un doble con su buscador y una tarjeta.
+vi.mock('./MapaTab', async () => {
+  const React = (await import('react')).default;
+  return {
+    default: ({ inputBusquedaRef, onAbrirOportunidad }) => (
+      <div data-testid='mapa'>
+        <input type='search' aria-label='Buscar en el mapa' ref={inputBusquedaRef} />
+        <button type='button' onClick={() => onAbrirOportunidad(1)}>Tarjeta simulada</button>
+      </div>
+    )
+  };
+});
+
 describe('FichaEmpresa', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -102,9 +115,12 @@ describe('CrmView atajos', () => {
     seguimientoApi.lista.mockResolvedValue({ activo: false, total: 0, items: [] });
   });
 
-  test('abre en el Árbol, la primera pestaña', async () => {
+  test('abre en Oportunidades, la primera pestaña, con el Mapa; la Tabla muestra el árbol', async () => {
     renderConQuery(<CrmView />);
-    expect(screen.getByRole('tab', { name: 'Árbol' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Oportunidades' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByTestId('mapa')).toBeInTheDocument();
+    expect(screen.queryByRole('treegrid')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tabla' }));
     expect(await screen.findByRole('treegrid', { name: 'Árbol del CRM' })).toBeInTheDocument();
   });
 
@@ -134,9 +150,9 @@ describe('CrmView atajos', () => {
     expect(await screen.findByRole('dialog', { name: 'Nueva oportunidad' })).toBeInTheDocument();
   });
 
-  test('en el Árbol "/" enfoca su buscador y "N" abre el diálogo de oportunidad', async () => {
+  test('en Oportunidades "/" enfoca el buscador del mapa y "N" abre el diálogo de oportunidad', async () => {
     renderConQuery(<CrmView />);
-    const busqueda = await screen.findByRole('searchbox');
+    const busqueda = await screen.findByRole('searchbox', { name: 'Buscar en el mapa' });
     fireEvent.keyDown(document.body, { key: '/' });
     expect(document.activeElement).toBe(busqueda);
     busqueda.blur();
@@ -144,8 +160,23 @@ describe('CrmView atajos', () => {
     expect(await screen.findByRole('dialog', { name: 'Nueva oportunidad' })).toBeInTheDocument();
   });
 
-  test('en el Árbol "Ficha" lleva a la ficha de la empresa en Empresas', async () => {
+  test('en la Tabla "/" enfoca el buscador del árbol', async () => {
     renderConQuery(<CrmView />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Tabla' }));
+    const busqueda = await screen.findByRole('searchbox', { name: 'Buscar en el árbol' });
+    fireEvent.keyDown(document.body, { key: '/' });
+    expect(document.activeElement).toBe(busqueda);
+  });
+
+  test('abrir una oportunidad abre su panel dentro de la pestaña', async () => {
+    renderConQuery(<CrmView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Tarjeta simulada' }));
+    expect(await screen.findByRole('dialog', { name: 'NAS sucursal Norte' })).toBeInTheDocument();
+  });
+
+  test('en la Tabla "Ficha" lleva a la ficha de la empresa en Empresas', async () => {
+    renderConQuery(<CrmView />);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Tabla' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Ficha de Acme SA' }));
     expect(screen.getByRole('tab', { name: 'Empresas' })).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => expect(crmApi.obtenerEmpresa).toHaveBeenCalledWith(10));

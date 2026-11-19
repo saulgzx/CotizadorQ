@@ -56,6 +56,7 @@ export const FICHA = {
 };
 
 // Respuesta de GET /api/crm/arbol (oportunidades por updated_at desc; cotizaciones por created_at desc).
+// Seguimiento: la 2 está vencida (con nota) y la 4 es futura; el resto no tiene.
 // Los ids de cotización (501…) difieren de su número (1041…) para distinguir uno del otro.
 export const opArbol = (extra) => ({
   id: 1,
@@ -79,6 +80,8 @@ export const opArbol = (extra) => ({
   created_at: '2026-11-01T10:00:00Z',
   updated_at: '2026-11-08T10:00:00Z',
   bo: null,
+  proximo_seguimiento: null,
+  seguimiento_nota: null,
   ...extra
 });
 
@@ -98,9 +101,9 @@ export const cotArbol = (extra) => ({
 export const ARBOL = {
   oportunidades: [
     opArbol({ id: 1 }),
-    opArbol({ id: 2, titulo: 'Cámaras bodega', etapa: 'cotizada', marca: 'AXIS', monto: 35800, cotizaciones: 1, cotizacion_id: 503, cotizacion_numero: 1050, dias_en_etapa: 14, contacto_nombre: null }),
+    opArbol({ id: 2, titulo: 'Cámaras bodega', etapa: 'cotizada', marca: 'AXIS', monto: 35800, cotizaciones: 1, cotizacion_id: 503, cotizacion_numero: 1050, dias_en_etapa: 14, contacto_nombre: null, proximo_seguimiento: '2020-01-10', seguimiento_nota: 'Llamar a Ana por el descuento' }),
     opArbol({ id: 3, titulo: 'Orden BO-1001', etapa: 'ganada', marca: 'AXIS', monto: 9300, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, dias_en_etapa: 40, bo: 'BO-1001', contacto_nombre: null }),
-    opArbol({ id: 4, titulo: 'Switches Beta', etapa: 'cotizada', empresa_id: 11, empresa_nombre: 'Beta Ltda', marca: null, monto: 7150, cotizaciones: 1, cotizacion_id: 504, cotizacion_numero: 1060, dias_en_etapa: 1, contacto_nombre: 'Luis Rojas' }),
+    opArbol({ id: 4, titulo: 'Switches Beta', etapa: 'cotizada', empresa_id: 11, empresa_nombre: 'Beta Ltda', marca: null, monto: 7150, cotizaciones: 1, cotizacion_id: 504, cotizacion_numero: 1060, dias_en_etapa: 1, contacto_nombre: 'Luis Rojas', proximo_seguimiento: '2099-12-15' }),
     opArbol({ id: 5, titulo: 'Proyecto BID Entel', etapa: 'negociacion', empresa_id: 12, empresa_nombre: 'Entel', marca: 'MIXTA', es_proyecto: true, monto: 20000, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, dias_en_etapa: 0, contacto_nombre: null }),
     opArbol({ id: 6, titulo: 'Rack perdido', etapa: 'perdida', empresa_id: 11, empresa_nombre: 'Beta Ltda', marca: 'QNAP', monto: 900, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, motivo_perdida: 'Precio', dias_en_etapa: 30, contacto_nombre: null })
   ],

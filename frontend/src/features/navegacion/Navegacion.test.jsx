@@ -154,16 +154,17 @@ describe('Entrada directa por URL', () => {
 
   // Va antes del caso de /historial: ese deja recordado "Cotizaciones" como destino del CRM
   // durante unos segundos, y aquí se prueba la pestaña por defecto.
-  it('/crm abre en el Árbol y el atajo "/" enfoca su buscador aunque el índice de secciones esté en la página', async () => {
+  it('/crm abre en Oportunidades (mapa) y el atajo "/" enfoca su buscador aunque el índice de secciones esté en la página', async () => {
     renderApp({ user: ADMIN, ruta: '/crm' });
     await encabezado('CRM')();
-    expect(screen.getByRole('tab', { name: 'Árbol' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Oportunidades' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('radio', { name: 'Mapa' })).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(rutaActual()).toBe('/crm'));
     expect(enrutador.ubicacion.search).toBe('');
     // El índice de secciones es un role="dialog" cerrado que vive siempre en la página:
     // antes apagaba este atajo (y los de la lista de cotizaciones) en toda la aplicación.
     expect(document.querySelector('[role="dialog"][aria-hidden="true"]')).not.toBeNull();
-    const buscador = screen.getByRole('searchbox', { name: 'Buscar en el árbol' });
+    const buscador = screen.getByRole('searchbox', { name: 'Buscar en el mapa' });
     expect(buscador).not.toHaveFocus();
     fireEvent.keyDown(window, { key: '/' });
     expect(buscador).toHaveFocus();

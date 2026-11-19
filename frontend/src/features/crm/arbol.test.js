@@ -164,6 +164,25 @@ describe('construirArbol › búsqueda', () => {
     expect(ids(grupos[0].oportunidades[0].cotizaciones)).toEqual(['c:1041', 'c:1038']);
   });
 
+  test('también calza por la nota de seguimiento de la oportunidad, sin tildes ni mayúsculas', () => {
+    const datos = {
+      ...DATOS,
+      oportunidades: DATOS.oportunidades.map((o) =>
+        o.id === 5 ? { ...o, proximo_seguimiento: '2026-11-20', seguimiento_nota: 'Llamar a Ana por el DESCUENTO de envío' } : o
+      )
+    };
+    ['descuento', 'envio', 'llamar a ana'].forEach((q) => {
+      const { grupos, abrirPorBusqueda } = construirArbol(datos, { busqueda: q });
+      expect(grupos.flatMap((g) => ids(g.oportunidades)), q).toEqual(['o:5']);
+      // Calzó por la oportunidad misma: solo se abre el grupo, no la oportunidad.
+      expect([...abrirPorBusqueda]).toEqual(['g:empresa:14']);
+    });
+    expect(construirArbol(datos, { busqueda: 'descuento zeta' }).totales.oportunidades).toBe(0);
+    // Sin nota (null o ausente) no rompe ni calza con "null".
+    expect(construirArbol(DATOS, { busqueda: 'null' }).totales.oportunidades).toBe(0);
+    expect(construirArbol({ ...datos, oportunidades: datos.oportunidades.map((o) => ({ ...o, seguimiento_nota: null })) }, { busqueda: 'null' }).totales.oportunidades).toBe(0);
+  });
+
   test('se puede combinar oportunidad y cotización', () => {
     expect(construirArbol(DATOS, { busqueda: 'acme 1038' }).totales.oportunidades).toBe(1);
   });

@@ -7,6 +7,7 @@ import { FiltroEtapas } from './CotizacionesPiezas';
 import { claseInput } from './Dialogo';
 import { AGRUPACIONES, conteosPorEtapa, construirArbol, filasVisibles, guardarPreferencias, leerPreferencias, moverFoco } from './arbol';
 import { ETAPAS, diasTexto, fechaCL, mensajeError, usd } from './formato';
+import { TONO_URGENCIA, hoyLocal, textoSeguimiento, urgenciaDeOportunidad } from './seguimiento';
 import { EstadoVacio, ListaEsqueleto } from '../ui/Esqueleto';
 import './arbol.css';
 
@@ -74,6 +75,7 @@ function CeldaGrupo({ fila, onAbrirEmpresa }) {
       </div>
       <div role='gridcell' className='mq-arbol-celda' />
       <div role='gridcell' className='mq-arbol-celda' />
+      <div role='gridcell' className='mq-arbol-celda' />
       <div role='gridcell' className='mq-arbol-celda mq-arbol-monto'>
         <span>{usd(g.agrupacion === 'etapa' ? g.montoTotal : g.montoAbierto)}</span>
         {g.agrupacion !== 'etapa' && g.montoGanado > 0 && <span className='mq-arbol-detalle'>Ganado {usd(g.montoGanado)}</span>}
@@ -83,7 +85,38 @@ function CeldaGrupo({ fila, onAbrirEmpresa }) {
   );
 }
 
-function CeldaOportunidad({ fila, agruparPorEmpresa, onMover, onAbrirEmpresa }) {
+function CeldaSeguimiento({ op, hoy, onAbrirOportunidad }) {
+  const urgencia = urgenciaDeOportunidad(op, hoy);
+  // Una oportunidad ganada o perdida ya no se sigue.
+  if (urgencia === 'cerrada') return <div role='gridcell' className='mq-arbol-celda mq-arbol-seguimiento'>—</div>;
+  const texto = textoSeguimiento(op.proximo_seguimiento, hoy);
+  const nota = String(op.seguimiento_nota ?? '').trim();
+  const contenido = (
+    <>
+      <span className={`mq-punto mq-punto-${TONO_URGENCIA[urgencia]}`} aria-hidden='true' />
+      <span className='mq-arbol-seguimiento-texto'>{texto}</span>
+    </>
+  );
+  return (
+    <div role='gridcell' className='mq-arbol-celda mq-arbol-seguimiento'>
+      {onAbrirOportunidad ? (
+        <button
+          type='button'
+          className='mq-arbol-enlace mq-arbol-seguimiento-boton'
+          aria-label={`Seguimiento de ${op.titulo}: ${texto}`}
+          title={nota || undefined}
+          onClick={() => onAbrirOportunidad(op.id)}
+        >
+          {contenido}
+        </button>
+      ) : (
+        <span className='mq-arbol-seguimiento-boton' title={nota || undefined}>{contenido}</span>
+      )}
+    </div>
+  );
+}
+
+function CeldaOportunidad({ fila, agruparPorEmpresa, hoy, onMover, onAbrirEmpresa, onAbrirOportunidad }) {
   const { op } = fila.nodo;
   const motivo = op.etapa === 'perdida' && op.motivo_perdida ? op.motivo_perdida : null;
   const dias = op.dias_en_etapa;
@@ -93,7 +126,13 @@ function CeldaOportunidad({ fila, agruparPorEmpresa, onMover, onAbrirEmpresa }) 
         <Flecha expandible={fila.expandible} expandido={fila.expandido} />
         <span className='mq-arbol-cuerpo'>
           <span className='mq-arbol-linea'>
-            <span className='mq-arbol-titulo' title={op.titulo}>{op.titulo}</span>
+            {onAbrirOportunidad ? (
+              <button type='button' className='mq-arbol-enlace mq-arbol-titulo' title={op.titulo} onClick={() => onAbrirOportunidad(op.id)}>
+                {op.titulo}
+              </button>
+            ) : (
+              <span className='mq-arbol-titulo' title={op.titulo}>{op.titulo}</span>
+            )}
             {op.es_proyecto && <span className='mq-arbol-chip mq-arbol-chip-acento' title='Proyecto / BID'>BID</span>}
             {op.bo && <span className='mq-arbol-chip' title={`Orden ${op.bo}`}>{textoBo(op.bo)}</span>}
           </span>
@@ -129,6 +168,7 @@ function CeldaOportunidad({ fila, agruparPorEmpresa, onMover, onAbrirEmpresa }) 
           {ETAPAS.map((et) => <option key={et.clave} value={et.clave}>{et.nombre}</option>)}
         </select>
       </div>
+      <CeldaSeguimiento op={op} hoy={hoy} onAbrirOportunidad={onAbrirOportunidad} />
       <div role='gridcell' className='mq-arbol-celda mq-arbol-marca'>{op.marca || '—'}</div>
       <div role='gridcell' className='mq-arbol-celda mq-arbol-monto'>{usd(op.monto)}</div>
       <div role='gridcell' className='mq-arbol-celda mq-arbol-dias'>{dias == null ? '—' : diasTexto(dias)}</div>
@@ -167,13 +207,14 @@ function CeldaCotizacion({ fila, onAbrirCotizacion }) {
       </div>
       <div role='gridcell' className='mq-arbol-celda' />
       <div role='gridcell' className='mq-arbol-celda' />
+      <div role='gridcell' className='mq-arbol-celda' />
       <div role='gridcell' className='mq-arbol-celda mq-arbol-monto'>{usd(cot.total)}</div>
       <div role='gridcell' className='mq-arbol-celda' />
     </>
   );
 }
 
-export default function ArbolTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCotizacion }) {
+export default function ArbolTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCotizacion, onAbrirOportunidad }) {
   const [inicial] = useState(leerPreferencias);
   const [agruparPor, setAgruparPor] = useState(inicial.agruparPor);
   const [etapas, setEtapas] = useState(inicial.etapas);
@@ -189,6 +230,7 @@ export default function ArbolTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCoti
 
   const consulta = useQuery({ queryKey: queryKeys.crm.arbol, queryFn: () => crmApi.arbol() });
   const datos = consulta.data;
+  const hoy = hoyLocal();
   const busquedaDiferida = useDeferredValue(busqueda);
 
   const arbol = useMemo(
@@ -384,6 +426,7 @@ export default function ArbolTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCoti
             <div role='row' className='mq-arbol-fila mq-arbol-cabecera'>
               <div role='columnheader' className='mq-arbol-celda mq-sobre'>{AGRUPACIONES.find((a) => a.clave === agruparPor)?.nombre}</div>
               <div role='columnheader' className='mq-arbol-celda mq-sobre'>Etapa</div>
+              <div role='columnheader' className='mq-arbol-celda mq-sobre'>Seguimiento</div>
               <div role='columnheader' className='mq-arbol-celda mq-sobre'>Marca</div>
               <div role='columnheader' className='mq-arbol-celda mq-sobre mq-arbol-monto'>Monto</div>
               <div role='columnheader' className='mq-arbol-celda mq-sobre mq-arbol-dias'>Días</div>
@@ -408,7 +451,14 @@ export default function ArbolTab({ inputBusquedaRef, onAbrirEmpresa, onAbrirCoti
               >
                 {fila.tipo === 'grupo' && <CeldaGrupo fila={fila} onAbrirEmpresa={onAbrirEmpresa} />}
                 {fila.tipo === 'oportunidad' && (
-                  <CeldaOportunidad fila={fila} agruparPorEmpresa={agruparPor === 'empresa'} onMover={mover} onAbrirEmpresa={onAbrirEmpresa} />
+                  <CeldaOportunidad
+                    fila={fila}
+                    agruparPorEmpresa={agruparPor === 'empresa'}
+                    hoy={hoy}
+                    onMover={mover}
+                    onAbrirEmpresa={onAbrirEmpresa}
+                    onAbrirOportunidad={onAbrirOportunidad}
+                  />
                 )}
                 {fila.tipo === 'cotizacion' && <CeldaCotizacion fila={fila} onAbrirCotizacion={onAbrirCotizacion} />}
               </div>
