@@ -68,7 +68,7 @@ function filtrarOportunidades(datos, { busqueda = '', etapas = [], marca = '' } 
     let porCotizacion = false;
     if (palabras.length > 0) {
       const textoOp = normalizar(
-        [op.empresa_nombre, op.titulo, op.contacto_nombre, op.bo, op.marca].filter((v) => v != null).join(' ')
+        [op.empresa_nombre, op.titulo, op.contacto_nombre, op.bo, op.marca, op.seguimiento_nota].filter((v) => v != null).join(' ')
       );
       const textoCots = normalizar(
         cots.map((c) => [`#${c.numero}`, c.numero, c.proyecto, c.pid, c.usuario].filter((v) => v != null).join(' ')).join(' ')

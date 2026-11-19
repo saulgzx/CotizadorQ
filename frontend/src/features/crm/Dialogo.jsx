@@ -15,6 +15,9 @@ export function Campo({ etiqueta, children, ayuda }) {
   );
 }
 
+// Diálogos abiertos, del más antiguo al más reciente: el teclado es del último.
+const PILA = [];
+
 /**
  * Diálogo modal accesible: role="dialog", foco atrapado, Esc cierra y el foco
  * vuelve al elemento que lo abrió.
@@ -34,29 +37,48 @@ export default function Dialogo({ titulo, onCerrar, children, ancho = 'max-w-md'
     };
   }, []);
 
-  const onKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      onCerrar();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const lista = Array.from(ref.current?.querySelectorAll(FOCOS) || []);
-    if (lista.length === 0) {
-      e.preventDefault();
-      return;
-    }
-    const primero = lista[0];
-    const ultimo = lista[lista.length - 1];
-    if (e.shiftKey && (document.activeElement === primero || !ref.current.contains(document.activeElement))) {
-      e.preventDefault();
-      ultimo.focus();
-    } else if (!e.shiftKey && (document.activeElement === ultimo || !ref.current.contains(document.activeElement))) {
-      e.preventDefault();
-      primero.focus();
-    }
-  };
+  // Teclado a nivel de documento, no del nodo: si el elemento enfocado desaparece o se
+  // deshabilita (p. ej. una sección que se oculta tras guardar), el foco cae en <body> y un
+  // listener puesto en el diálogo ya no recibiría Escape. Con varios diálogos abiertos, solo
+  // responde el de más arriba.
+  const cerrarRef = useRef(onCerrar);
+  cerrarRef.current = onCerrar;
+  useEffect(() => {
+    const yo = {};
+    PILA.push(yo);
+    const alTeclear = (e) => {
+      if (PILA[PILA.length - 1] !== yo) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cerrarRef.current?.();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const nodo = ref.current;
+      const lista = Array.from(nodo?.querySelectorAll(FOCOS) || []);
+      if (lista.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const primero = lista[0];
+      const ultimo = lista[lista.length - 1];
+      const fuera = !nodo.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === primero || fuera)) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && (document.activeElement === ultimo || fuera)) {
+        e.preventDefault();
+        primero.focus();
+      }
+    };
+    document.addEventListener('keydown', alTeclear);
+    return () => {
+      document.removeEventListener('keydown', alTeclear);
+      const i = PILA.indexOf(yo);
+      if (i !== -1) PILA.splice(i, 1);
+    };
+  }, []);
 
   return (
     <div
@@ -71,7 +93,6 @@ export default function Dialogo({ titulo, onCerrar, children, ancho = 'max-w-md'
         aria-modal='true'
         aria-labelledby={tituloId}
         aria-describedby={descripcion ? descId : undefined}
-        onKeyDown={onKeyDown}
         className={`w-full ${ancho} rounded-2xl border border-slate-200 bg-white p-5 shadow-float animate-scale-in dark:border-slate-700 dark:bg-slate-900`}
       >
         <div className='mb-3 flex items-start justify-between gap-3'>

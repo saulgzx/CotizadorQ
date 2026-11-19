@@ -88,6 +88,33 @@ const fechaOpcional = z
     message: 'Fecha invalida'
   });
 
+/** Fecha de seguimiento: 'YYYY-MM-DD' real entre los anos 2000 y 2100, o null (la quita). */
+const seguimientoFecha = z
+  .union([
+    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha invalida (YYYY-MM-DD)'),
+    z.null()
+  ])
+  .optional()
+  .refine((v) => v === undefined || v === null || esFechaReal(v), {
+    message: 'Fecha invalida'
+  })
+  .refine(
+    (v) =>
+      v === undefined ||
+      v === null ||
+      (v >= '2000-01-01' && v <= '2100-12-31'),
+    { message: 'La fecha debe estar entre los anos 2000 y 2100' }
+  );
+
+/** Nota de seguimiento: se recorta; vacia o null => null; mas de 300 caracteres => error. */
+const seguimientoNota = z
+  .union([z.string(), z.null()])
+  .optional()
+  .transform((v) => (v === undefined || v === null ? v : v.trim() || null))
+  .refine((v) => v === undefined || v === null || v.length <= 300, {
+    message: 'La nota de seguimiento admite hasta 300 caracteres'
+  });
+
 const etapa = z.enum(ETAPAS);
 const marcaOpcional = z.union([z.enum(MARCAS), z.null()]).optional();
 const booleano = z
@@ -173,6 +200,8 @@ const esquemas = {
     es_proyecto: z.boolean().optional(),
     monto_manual: montoOpcional,
     fecha_cierre_estimada: fechaOpcional,
+    proximo_seguimiento: seguimientoFecha,
+    seguimiento_nota: seguimientoNota,
     motivo_perdida: textoOpcional(500)
   }),
   editarOportunidad: z.object({
@@ -183,6 +212,8 @@ const esquemas = {
     es_proyecto: z.boolean().optional(),
     monto_manual: montoOpcional,
     fecha_cierre_estimada: fechaOpcional,
+    proximo_seguimiento: seguimientoFecha,
+    seguimiento_nota: seguimientoNota,
     motivo_perdida: textoOpcional(500)
   }),
   vincularCotizacion: z.object({ cotizacion_id: id })

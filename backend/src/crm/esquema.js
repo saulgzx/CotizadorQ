@@ -102,6 +102,12 @@ const SENTENCIAS = [
      END IF;
    END $$`,
   `CREATE INDEX IF NOT EXISTS crm_oportunidades_vigentes_idx ON crm_oportunidades(etapa) WHERE archivada_en IS NULL`,
+  // Seguimiento manual: cuando hay que volver a tocar la oportunidad y una nota corta de
+  // que hacer. Nullable y sin DEFAULT (el ALTER no reescribe la tabla). Solo las
+  // oportunidades abiertas lo llevan: al cerrarse (ganada/perdida) quedan en null.
+  // Sin indice: ninguna consulta filtra ni ordena por la fecha (solo se lee en el resumen).
+  `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS proximo_seguimiento DATE`,
+  `ALTER TABLE crm_oportunidades ADD COLUMN IF NOT EXISTS seguimiento_nota VARCHAR(300)`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES crm_empresas(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS contacto_id INTEGER REFERENCES crm_contactos(id) ON DELETE SET NULL`,
   `ALTER TABLE cotizaciones ADD COLUMN IF NOT EXISTS oportunidad_id INTEGER REFERENCES crm_oportunidades(id) ON DELETE SET NULL`,

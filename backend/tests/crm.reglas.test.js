@@ -85,3 +85,52 @@ describe('embudo y resumen', () => {
     expect(reglas.resumenEmpresa([{ etapa: 'nueva', monto: 0 }], { cotizaciones: 0, monto_cotizado: 0 }).tasa_cierre).toBeNull();
   });
 });
+
+describe('regla de cierre del seguimiento (cambiosOportunidad / datosOportunidadNueva)', () => {
+  const abierta = { etapa: 'cotizada', motivo_perdida: null, cerrada_en: null };
+  const cerrada = { etapa: 'ganada', motivo_perdida: null, cerrada_en: new Date() };
+  const SIN = { proximo_seguimiento: null, seguimiento_nota: null };
+
+  test('pasar a ganada o perdida limpia el seguimiento, incluso si el cuerpo trae uno', () => {
+    expect(reglas.cambiosOportunidad(abierta, { etapa: 'ganada' })).toMatchObject(SIN);
+    expect(reglas.cambiosOportunidad(abierta, { etapa: 'perdida', motivo_perdida: 'x' })).toMatchObject(SIN);
+    expect(
+      reglas.cambiosOportunidad(abierta, { etapa: 'ganada', proximo_seguimiento: '2026-12-01', seguimiento_nota: 'n' })
+    ).toMatchObject(SIN);
+  });
+
+  test('cambiar entre etapas abiertas no toca el seguimiento; reabrir tampoco lo restaura', () => {
+    expect(reglas.cambiosOportunidad(abierta, { etapa: 'negociacion' })).not.toHaveProperty('proximo_seguimiento');
+    const reabierta = reglas.cambiosOportunidad(cerrada, { etapa: 'cotizada' });
+    expect(reabierta).not.toHaveProperty('proximo_seguimiento');
+    expect(reabierta).not.toHaveProperty('seguimiento_nota');
+    expect(reglas.cambiosOportunidad(cerrada, { etapa: 'cotizada', proximo_seguimiento: '2027-01-01' })).toMatchObject({
+      proximo_seguimiento: '2027-01-01'
+    });
+  });
+
+  test('en una oportunidad abierta los campos pasan tal cual, null incluido', () => {
+    expect(reglas.cambiosOportunidad(abierta, { proximo_seguimiento: '2026-12-01', seguimiento_nota: 'n' })).toEqual({
+      proximo_seguimiento: '2026-12-01', seguimiento_nota: 'n'
+    });
+    expect(reglas.cambiosOportunidad(abierta, SIN)).toEqual(SIN);
+  });
+
+  test('fijar seguimiento (no nulo) en una cerrada lanza 400; null se acepta', () => {
+    for (const body of [{ proximo_seguimiento: '2026-12-01' }, { seguimiento_nota: 'n' }, { etapa: 'ganada', seguimiento_nota: 'n' }]) {
+      expect(() => reglas.cambiosOportunidad(cerrada, body)).toThrow(reglas.MENSAJE_CERRADA_SIN_SEGUIMIENTO);
+      try {
+        reglas.cambiosOportunidad(cerrada, body);
+      } catch (error) {
+        expect(error.status).toBe(400);
+      }
+    }
+    expect(reglas.cambiosOportunidad(cerrada, SIN)).toEqual(SIN);
+  });
+
+  test('oportunidad nueva cerrada nace sin seguimiento; abierta lo conserva', () => {
+    const body = { empresa_id: 1, titulo: 'X', proximo_seguimiento: '2026-12-01', seguimiento_nota: 'n' };
+    expect(reglas.datosOportunidadNueva({ ...body, etapa: 'ganada' })).toMatchObject(SIN);
+    expect(reglas.datosOportunidadNueva(body)).toMatchObject({ proximo_seguimiento: '2026-12-01', seguimiento_nota: 'n' });
+  });
+});

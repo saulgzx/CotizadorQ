@@ -1,0 +1,252 @@
+/* Pestaña Mapa del CRM: treemap de oportunidades (área = monto, color = urgencia del seguimiento).
+   La barra, los avisos y los vacíos reutilizan las clases de arbol.css.
+   Solo tokens del sistema (src/index.css): el modo oscuro cambia los tokens solos.
+   El texto de las tarjetas usa --mq-ink / --mq-ink-2 sobre tintes de 15 % como máximo (contraste AA). */
+
+.mq-mapa {
+  --mq-mapa-gris: color-mix(in srgb, var(--mq-line-strong) 55%, var(--mq-surface-2));
+}
+
+/* ---------- Leyenda ---------- */
+.mq-mapa-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--mq-ink-2);
+}
+.mq-mapa-leyenda li { display: inline-flex; align-items: center; gap: 0.375rem; }
+.mq-mapa-muestra {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: var(--mq-r-1);
+  background: var(--c-fondo, var(--mq-surface));
+  border: 1px var(--c-estilo, solid) var(--c-borde, var(--mq-line-strong));
+}
+
+/* ---------- Lienzo, bloques y cabeceras ---------- */
+.mq-mapa-lienzo {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--mq-r-3);
+  background: var(--mq-line);
+}
+
+.mq-mapa-bloque { position: absolute; }
+.mq-mapa-bloque::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--mq-line-strong);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-surface-2);
+}
+
+.mq-mapa-cabecera {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.625rem;
+  font-size: 0.75rem;
+  color: var(--mq-ink);
+}
+.mq-mapa-grupo-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  text-align: left;
+}
+.mq-mapa-grupo-cifras {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--mq-ink-2);
+  white-space: nowrap;
+}
+.mq-mapa-ficha {
+  padding: 0;
+  border-radius: var(--mq-r-1);
+  color: var(--mq-accent);
+  font-size: inherit;
+  transition: color var(--mq-t-1) var(--mq-ease);
+}
+.mq-mapa-ficha:hover { color: var(--mq-ink); text-decoration: underline; text-underline-offset: 2px; }
+.mq-mapa-ficha:focus-visible { outline: 2px solid var(--mq-accent); outline-offset: 1px; }
+
+/* ---------- Tarjetas ---------- */
+.mq-mapa-tarjeta {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 7px;
+  overflow: hidden;
+  isolation: isolate;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: var(--mq-ink);
+}
+/* El fondo y el borde van en un pseudo-elemento con 1px de margen: deja un surco entre tarjetas
+   sin cambiar la caja (el área en pantalla sigue siendo la del treemap). */
+.mq-mapa-tarjeta::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border: 1px var(--c-estilo, solid) var(--c-borde, var(--mq-line-strong));
+  border-radius: var(--mq-r-2);
+  background: var(--c-fondo, var(--mq-surface));
+}
+.mq-mapa-tarjeta:hover { z-index: 1; }
+.mq-mapa-tarjeta:hover::before {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px var(--c-borde, var(--mq-line-strong));
+}
+.mq-mapa-tarjeta:focus { outline: none; }
+.mq-mapa-tarjeta:focus-visible {
+  z-index: 2;
+  outline: 3px solid var(--mq-accent);
+  outline-offset: -3px;
+}
+.mq-mapa-tarjeta:focus-visible::before { box-shadow: inset 0 0 0 1px var(--mq-surface); }
+
+.mq-mapa-tarjeta[data-tamano='xl'] { gap: 3px; padding: 9px 11px; }
+.mq-mapa-tarjeta[data-tamano='l'] { padding: 7px 9px; }
+.mq-mapa-tarjeta[data-tamano='m'] { padding: 6px 8px; }
+.mq-mapa-tarjeta[data-tamano='c'] { gap: 1px; padding: 4px 7px; }
+.mq-mapa-tarjeta[data-tamano='c'] .mq-mapa-titulo { font-size: 0.75rem; }
+.mq-mapa-tarjeta[data-tamano='s'] { gap: 1px; padding: 4px 6px; }
+.mq-mapa-tarjeta[data-tamano='xs'] { align-items: center; justify-content: center; padding: 0; }
+
+.mq-mapa-titulo { max-width: 100%; font-size: 0.8125rem; font-weight: 600; overflow-wrap: anywhere; }
+.mq-mapa-tarjeta[data-tamano='xl'] .mq-mapa-titulo { font-size: 0.9375rem; }
+.mq-mapa-una-linea { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.mq-mapa-dos-lineas {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.mq-mapa-empresa,
+.mq-mapa-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  color: var(--mq-ink-2);
+}
+.mq-mapa-monto { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.mq-mapa-monto-grande { font-size: 1.1875rem; line-height: 1.2; }
+.mq-mapa-tarjeta[data-tamano='s'] { flex-direction: row; align-items: center; gap: 4px; flex-wrap: wrap; }
+.mq-mapa-tarjeta[data-tamano='s'] .mq-mapa-monto { font-family: var(--font-mono); font-size: 0.6875rem; }
+
+.mq-mapa-seg { display: inline-flex; align-items: center; gap: 0.3125rem; max-width: 100%; font-size: 0.75rem; }
+.mq-mapa-seg-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mq-mapa-nota {
+  max-width: 100%;
+  font-size: 0.6875rem;
+  font-style: italic;
+  color: var(--mq-ink-2);
+  overflow-wrap: anywhere;
+}
+.mq-mapa-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: auto; }
+.mq-mapa-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 1.0625rem;
+  padding: 0 0.3125rem;
+  border: 1px solid var(--mq-ink-2);
+  border-radius: var(--mq-r-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--mq-ink-2);
+  white-space: nowrap;
+}
+
+/* Puntos: el redondo del sistema (.mq-punto) con un aro del color del fondo para que se vea sobre cualquier tinte. */
+.mq-mapa .mq-punto { box-shadow: 0 0 0 1.5px var(--mq-surface); }
+.mq-mapa .mq-mapa-punto-hueco {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  border: 1.5px solid var(--mq-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---------- Colores: por seguimiento ---------- */
+.mq-mapa-c-vencido {
+  --c-fondo: color-mix(in srgb, var(--mq-critico) 15%, var(--mq-surface));
+  --c-borde: color-mix(in srgb, var(--mq-critico) 70%, var(--mq-surface));
+}
+.mq-mapa-c-hoy,
+.mq-mapa-c-manana {
+  --c-fondo: color-mix(in srgb, var(--mq-aviso) 15%, var(--mq-surface));
+  --c-borde: color-mix(in srgb, var(--mq-aviso) 70%, var(--mq-surface));
+}
+.mq-mapa-c-futuro {
+  --c-fondo: var(--mq-surface);
+  --c-borde: var(--mq-line-strong);
+}
+.mq-mapa-c-sin {
+  --c-fondo: color-mix(in srgb, var(--mq-surface-2) 60%, transparent);
+  --c-borde: var(--mq-muted);
+  --c-estilo: dotted;
+}
+.mq-mapa-c-cerrada {
+  --c-fondo: var(--mq-mapa-gris);
+  --c-borde: var(--mq-line);
+}
+
+/* ---------- Colores: por etapa (los mismos tonos que los puntos de ETAPAS) ---------- */
+.mq-mapa-c-etapa-nueva { --c-tinte: #64748b; }
+.mq-mapa-c-etapa-cotizada { --c-tinte: #3b82f6; }
+.mq-mapa-c-etapa-negociacion { --c-tinte: #f59e0b; }
+.mq-mapa-c-etapa-ganada { --c-tinte: #10b981; }
+.mq-mapa-c-etapa-perdida { --c-tinte: #f43f5e; }
+
+/* ---------- Colores: por marca ---------- */
+.mq-mapa-c-marca-axis { --c-tinte: #eab308; }
+.mq-mapa-c-marca-qnap { --c-tinte: #14b8a6; }
+.mq-mapa-c-marca-mixta { --c-tinte: #8b5cf6; }
+.mq-mapa-c-marca-sin { --c-tinte: #94a3b8; }
+
+.mq-mapa-c-etapa-nueva,
+.mq-mapa-c-etapa-cotizada,
+.mq-mapa-c-etapa-negociacion,
+.mq-mapa-c-etapa-ganada,
+.mq-mapa-c-etapa-perdida,
+.mq-mapa-c-marca-axis,
+.mq-mapa-c-marca-qnap,
+.mq-mapa-c-marca-mixta,
+.mq-mapa-c-marca-sin {
+  --c-fondo: color-mix(in srgb, var(--c-tinte) 15%, var(--mq-surface));
+  --c-borde: color-mix(in srgb, var(--c-tinte) 65%, var(--mq-surface));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mq-mapa-tarjeta::before { transition: transform var(--mq-t-1) var(--mq-ease), box-shadow var(--mq-t-1) var(--mq-ease); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mq-mapa-tarjeta:hover::before { transform: none; }
+}

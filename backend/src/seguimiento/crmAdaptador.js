@@ -92,7 +92,9 @@ const oportunidadesParaSeguimiento = async (db, { estados = null, oportunidadIds
 /**
  * Cambia la etapa de una oportunidad siguiendo las reglas del contrato CRM:
  * perdida exige motivo; ganada/perdida fijan cerrada_en y una etapa abierta lo limpia;
- * el cambio actualiza etapa_desde. Si cambió, deriva el estado de sus cotizaciones
+ * ganada/perdida limpian ademas el seguimiento manual (proximo_seguimiento y seguimiento_nota:
+ * una oportunidad cerrada no se sigue; es la misma regla de reglas.cambiosOportunidad, repetida
+ * aqui porque este UPDATE no pasa por ella); el cambio actualiza etapa_desde. Si cambió, deriva el estado de sus cotizaciones
  * (best-effort: un fallo ahí no deshace el cambio de etapa). Devuelve true si cambió algo.
  */
 const cambiarEtapa = async (db, oportunidadId, etapa, motivo = null) => {
@@ -103,6 +105,8 @@ const cambiarEtapa = async (db, oportunidadId, etapa, motivo = null) => {
             motivo_perdida = CASE WHEN $2::text = 'perdida' THEN $3::text ELSE NULL END,
             etapa_desde = NOW(),
             cerrada_en = CASE WHEN $2::text IN ('ganada', 'perdida') THEN NOW() ELSE NULL END,
+            proximo_seguimiento = CASE WHEN $2::text IN ('ganada', 'perdida') THEN NULL ELSE proximo_seguimiento END,
+            seguimiento_nota = CASE WHEN $2::text IN ('ganada', 'perdida') THEN NULL ELSE seguimiento_nota END,
             updated_at = NOW()
       WHERE id = $1 AND etapa <> $2::text`,
     [Number(oportunidadId), etapa, motivo]

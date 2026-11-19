@@ -4,10 +4,31 @@ import { queryKeys } from '../../app/queryKeys';
 import { notify } from '../ui/toast';
 import { mensajeError, nombreEtapa } from './formato';
 
+// Al ganar o perder, el servidor borra el seguimiento: la pantalla lo refleja sin esperarlo.
 const aplicarEtapa = (op, id, etapa, motivo) =>
   op.id === id
-    ? { ...op, etapa, dias_en_etapa: 0, motivo_perdida: etapa === 'perdida' ? motivo || op.motivo_perdida : op.motivo_perdida }
+    ? {
+        ...op,
+        etapa,
+        dias_en_etapa: 0,
+        motivo_perdida: etapa === 'perdida' ? motivo || op.motivo_perdida : op.motivo_perdida,
+        ...(etapa === 'ganada' || etapa === 'perdida' ? { proximo_seguimiento: null, seguimiento_nota: null } : {})
+      }
     : op;
+
+// Aplica `parche(op)` a la oportunidad `id` en todas las cachés del CRM que la contienen.
+const parchearOportunidad = (qc, id, parche) => {
+  const aplicar = (op) => (op.id === id ? parche(op) : op);
+  qc.setQueriesData({ queryKey: queryKeys.crm.oportunidades }, (data) =>
+    data?.items ? { ...data, items: data.items.map(aplicar) } : data
+  );
+  qc.setQueriesData({ queryKey: queryKeys.crm.arbol }, (data) =>
+    data?.oportunidades ? { ...data, oportunidades: data.oportunidades.map(aplicar) } : data
+  );
+  qc.setQueriesData({ queryKey: ['crm', 'empresa'] }, (data) =>
+    data?.oportunidades ? { ...data, oportunidades: data.oportunidades.map(aplicar) } : data
+  );
+};
 
 /**
  * Cambio de etapa optimista: mueve la oportunidad en el embudo, el árbol y las fichas
@@ -21,17 +42,7 @@ export function useCambiarEtapa() {
     onMutate: async ({ id, etapa, motivo_perdida: motivo }) => {
       await qc.cancelQueries({ queryKey: queryKeys.crm.todo });
       const previos = qc.getQueriesData({ queryKey: queryKeys.crm.todo });
-      qc.setQueriesData({ queryKey: queryKeys.crm.oportunidades }, (data) =>
-        data?.items ? { ...data, items: data.items.map((op) => aplicarEtapa(op, id, etapa, motivo)) } : data
-      );
-      qc.setQueriesData({ queryKey: queryKeys.crm.arbol }, (data) =>
-        data?.oportunidades ? { ...data, oportunidades: data.oportunidades.map((op) => aplicarEtapa(op, id, etapa, motivo)) } : data
-      );
-      qc.setQueriesData({ queryKey: ['crm', 'empresa'] }, (data) =>
-        data?.oportunidades
-          ? { ...data, oportunidades: data.oportunidades.map((op) => aplicarEtapa(op, id, etapa, motivo)) }
-          : data
-      );
+      parchearOportunidad(qc, id, (op) => aplicarEtapa(op, id, etapa, motivo));
       return { previos };
     },
     onError: (error, vars, contexto) => {
@@ -45,6 +56,34 @@ export function useCambiarEtapa() {
       qc.invalidateQueries({ queryKey: queryKeys.crm.todo });
       // La etapa de la oportunidad es la de su cotización: la lista de Cotizaciones también cambia.
       qc.invalidateQueries({ queryKey: queryKeys.cotizaciones });
+    }
+  });
+}
+
+/**
+ * Guarda la fecha del próximo seguimiento y su nota (ambas null = sin seguimiento).
+ * Optimista como el cambio de etapa: si el servidor falla, devuelve todo como estaba.
+ */
+export function useGuardarSeguimiento() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, proximo_seguimiento, seguimiento_nota }) =>
+      crmApi.actualizarOportunidad(id, { proximo_seguimiento, seguimiento_nota }),
+    onMutate: async ({ id, proximo_seguimiento: fecha, seguimiento_nota: nota }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.crm.todo });
+      const previos = qc.getQueriesData({ queryKey: queryKeys.crm.todo });
+      parchearOportunidad(qc, id, (op) => ({ ...op, proximo_seguimiento: fecha ?? null, seguimiento_nota: nota ?? null }));
+      return { previos };
+    },
+    onError: (error, _vars, contexto) => {
+      (contexto?.previos || []).forEach(([clave, data]) => qc.setQueryData(clave, data));
+      notify(`No se pudo guardar el seguimiento: ${mensajeError(error)}`, { tipo: 'error' });
+    },
+    onSuccess: (_data, vars) => {
+      notify(vars.proximo_seguimiento ? 'Seguimiento guardado' : 'Seguimiento quitado', { tipo: 'ok' });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.crm.todo });
     }
   });
 }

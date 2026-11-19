@@ -119,6 +119,8 @@ const CAMPOS_OPORTUNIDAD = [
   'es_proyecto',
   'monto_manual',
   'fecha_cierre_estimada',
+  'proximo_seguimiento',
+  'seguimiento_nota',
   'motivo_perdida',
   'etapa_desde',
   'cerrada_en'
@@ -368,6 +370,7 @@ const moverContactos = async (db, origenEmpresaId, destinoEmpresaId) => {
 
 const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, monto_orden, bo,
   to_char(fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, motivo_perdida, etapa_desde, cerrada_en,
+  to_char(proximo_seguimiento, 'YYYY-MM-DD') AS proximo_seguimiento, seguimiento_nota,
   created_at, updated_at`;
 
 const selectResumen = (columnasExtra = '') => `
@@ -375,6 +378,7 @@ const selectResumen = (columnasExtra = '') => `
          ct.nombre AS contacto_nombre, o.marca, o.es_proyecto,
          ${MONTO_OPORTUNIDAD_SQL} AS monto,
          to_char(o.fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, o.motivo_perdida,
+         to_char(o.proximo_seguimiento, 'YYYY-MM-DD') AS proximo_seguimiento, o.seguimiento_nota,
          (SELECT COUNT(*)::int FROM cotizaciones c WHERE c.oportunidad_id = o.id) AS cotizaciones,
          cv.id AS cotizacion_id, cv.numero AS cotizacion_numero,
          GREATEST(0, (CURRENT_TIMESTAMP::date - o.etapa_desde::date))::int AS dias_en_etapa,
@@ -403,6 +407,8 @@ const insertarOportunidad = async (db, datos) => {
     monto_manual = null,
     monto_orden = null,
     fecha_cierre_estimada = null,
+    proximo_seguimiento = null,
+    seguimiento_nota = null,
     motivo_perdida = null,
     etapa_desde = null,
     cerrada_en = null,
@@ -412,11 +418,12 @@ const insertarOportunidad = async (db, datos) => {
   const { rows } = await db.query(
     `INSERT INTO crm_oportunidades (
        empresa_id, contacto_id, titulo, etapa, marca, es_proyecto, monto_manual, fecha_cierre_estimada,
-       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at, bo, monto_orden)
+       motivo_perdida, etapa_desde, cerrada_en, created_at, updated_at, bo, monto_orden,
+       proximo_seguimiento, seguimiento_nota)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              COALESCE($10::timestamp, CURRENT_TIMESTAMP),
              CASE WHEN $13::boolean THEN CURRENT_TIMESTAMP ELSE $11::timestamp END,
-             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, $14, $15)
+             COALESCE($12::timestamp, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, $14, $15, $16::date, $17)
      ON CONFLICT (bo) WHERE bo IS NOT NULL DO NOTHING
      RETURNING ${COLUMNAS_OPORTUNIDAD}`,
     [
@@ -434,7 +441,9 @@ const insertarOportunidad = async (db, datos) => {
       created_at,
       cerrada_en === AHORA,
       bo,
-      monto_orden
+      monto_orden,
+      proximo_seguimiento,
+      seguimiento_nota
     ]
   );
   // undefined = otra transaccion inserto el mismo BO entre medio: lo resuelve quien llama.

@@ -22,8 +22,18 @@ const CAMPOS_SIMPLES = [
   'marca',
   'es_proyecto',
   'monto_manual',
-  'fecha_cierre_estimada'
+  'fecha_cierre_estimada',
+  'proximo_seguimiento',
+  'seguimiento_nota'
 ];
+
+const MENSAJE_CERRADA_SIN_SEGUIMIENTO =
+  'Una oportunidad cerrada no lleva seguimiento';
+
+/** Seguimiento vacio: una oportunidad cerrada (ganada/perdida) no se sigue. */
+const SIN_SEGUIMIENTO = { proximo_seguimiento: null, seguimiento_nota: null };
+
+const hayValor = (v) => v !== undefined && v !== null;
 
 const copiarPresentes = (origen, campos) => {
   const salida = {};
@@ -51,7 +61,10 @@ const datosOportunidadNueva = (body) => {
     if (!motivo) throw errorValidacion(MENSAJE_MOTIVO);
     datos.motivo_perdida = motivo;
   }
-  if (esEtapaCerrada(etapa)) datos.cerrada_en = AHORA;
+  if (esEtapaCerrada(etapa)) {
+    datos.cerrada_en = AHORA;
+    Object.assign(datos, SIN_SEGUIMIENTO);
+  }
   return datos;
 };
 
@@ -60,7 +73,12 @@ const datosOportunidadNueva = (body) => {
  * - cambiar de etapa actualiza etapa_desde;
  * - pasar a ganada/perdida fija cerrada_en; volver a una etapa abierta lo limpia;
  * - pasar a perdida exige motivo_perdida (400); salir de perdida lo limpia;
- * - el motivo solo se guarda si la oportunidad queda perdida.
+ * - el motivo solo se guarda si la oportunidad queda perdida;
+ * - REGLA DE CIERRE: pasar a ganada/perdida deja proximo_seguimiento y seguimiento_nota en
+ *   null (gana a lo que venga en el mismo cuerpo); reabrir no restaura nada. Fijar un
+ *   seguimiento (no nulo) en una oportunidad que sigue cerrada lanza 400. Es el unico
+ *   lugar de la regla: PATCH, cambio de etapa desde una cotizacion y sincronizacion de
+ *   ordenes pasan por aqui.
  */
 const cambiosOportunidad = (actual, body) => {
   const cambios = copiarPresentes(body, CAMPOS_SIMPLES);
@@ -76,6 +94,7 @@ const cambiosOportunidad = (actual, body) => {
     cambios.etapa = body.etapa;
     cambios.etapa_desde = AHORA;
     cambios.cerrada_en = esEtapaCerrada(body.etapa) ? AHORA : null;
+    if (esEtapaCerrada(body.etapa)) Object.assign(cambios, SIN_SEGUIMIENTO);
     if (body.etapa === 'perdida') {
       if (!motivo) throw errorValidacion(MENSAJE_MOTIVO);
       cambios.motivo_perdida = motivo;
@@ -85,6 +104,13 @@ const cambiosOportunidad = (actual, body) => {
     return cambios;
   }
 
+  if (
+    esEtapaCerrada(etapaFinal) &&
+    (hayValor(cambios.proximo_seguimiento) ||
+      hayValor(cambios.seguimiento_nota))
+  ) {
+    throw errorValidacion(MENSAJE_CERRADA_SIN_SEGUIMIENTO);
+  }
   if (etapaFinal === 'perdida' && motivoEnviado) {
     if (!motivo) throw errorValidacion(MENSAJE_MOTIVO);
     cambios.motivo_perdida = motivo;
@@ -158,6 +184,7 @@ const resumenEmpresa = (oportunidades, { cotizaciones, monto_cotizado }) => {
 
 module.exports = {
   MENSAJE_MOTIVO,
+  MENSAJE_CERRADA_SIN_SEGUIMIENTO,
   errorValidacion,
   datosOportunidadNueva,
   cambiosOportunidad,
