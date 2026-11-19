@@ -338,6 +338,34 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
         .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at) || b.id - a.id)
         .slice(offset, offset + limite);
     },
+    TOPE_ARBOL: real.TOPE_ARBOL,
+    arbol: async (db, { tope = real.TOPE_ARBOL } = {}) => {
+      const todas = estado.oportunidades
+        .filter((o) => !o.archivada_en)
+        .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at) || b.id - a.id);
+      const incluidas = todas.slice(0, tope);
+      const ids = new Set(incluidas.map((o) => o.id));
+      const cotizaciones = estado.cotizaciones
+        .filter((c) => ids.has(c.oportunidad_id) && !c.archivada_en)
+        .sort((a, b) => (b.created_at ? new Date(b.created_at) : -Infinity) - (a.created_at ? new Date(a.created_at) : -Infinity) || b.id - a.id)
+        .map((c) => ({
+          id: c.id,
+          numero: c.numero,
+          version: Number(c.version) || 1,
+          total: redondear(c.total),
+          created_at: c.created_at,
+          oportunidad_id: c.oportunidad_id,
+          usuario: c.usuario ?? null,
+          proyecto: c.cliente_telefono ?? null,
+          pid: c.cliente_email ?? null
+        }));
+      return {
+        oportunidades: incluidas.map((o) => ({ bo: o.bo ?? null, ...resumen(o) })),
+        cotizaciones,
+        total_oportunidades: todas.length,
+        truncado: todas.length > incluidas.length
+      };
+    },
     totalesEmbudo: async () => {
       const filas = [];
       const porEtapa = new Map();
@@ -484,13 +512,14 @@ const crearCrmMemoria = ({ ahora = () => new Date() } = {}) => {
   /** Inserta una cotizacion "del cotizador" (sin enlazar) con sus origenes de linea. */
   const agregarCotizacion = ({
     cliente_empresa = null, cliente_nombre = null, cliente_email = null, cliente_telefono = null,
-    estado: estadoCot = 'revision', total = 100, created_at = new Date('2026-03-10T12:00:00Z'), origenes = []
+    estado: estadoCot = 'revision', total = 100, created_at = new Date('2026-03-10T12:00:00Z'), origenes = [],
+    version = 1, usuario = null
   } = {}) => {
     estado.seq.cotizacion += 1;
     const id = estado.seq.cotizacion;
     const fila = {
       id, numero: 65422 + id, cliente_empresa, cliente_nombre, cliente_email, cliente_telefono, total,
-      estado: estadoCot, created_at, empresa_id: null, contacto_id: null, oportunidad_id: null, archivada_en: null
+      estado: estadoCot, created_at, empresa_id: null, contacto_id: null, oportunidad_id: null, archivada_en: null, version, usuario
     };
     estado.cotizaciones.push(fila);
     for (const origen of origenes) estado.items.push({ cotizacion_id: id, origen });

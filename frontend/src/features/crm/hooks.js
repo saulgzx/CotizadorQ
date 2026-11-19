@@ -10,7 +10,7 @@ const aplicarEtapa = (op, id, etapa, motivo) =>
     : op;
 
 /**
- * Cambio de etapa optimista: mueve la oportunidad en el embudo y en las fichas
+ * Cambio de etapa optimista: mueve la oportunidad en el embudo, el árbol y las fichas
  * abiertas al instante y, si el servidor falla, devuelve todo como estaba.
  */
 export function useCambiarEtapa() {
@@ -23,6 +23,9 @@ export function useCambiarEtapa() {
       const previos = qc.getQueriesData({ queryKey: queryKeys.crm.todo });
       qc.setQueriesData({ queryKey: queryKeys.crm.oportunidades }, (data) =>
         data?.items ? { ...data, items: data.items.map((op) => aplicarEtapa(op, id, etapa, motivo)) } : data
+      );
+      qc.setQueriesData({ queryKey: queryKeys.crm.arbol }, (data) =>
+        data?.oportunidades ? { ...data, oportunidades: data.oportunidades.map((op) => aplicarEtapa(op, id, etapa, motivo)) } : data
       );
       qc.setQueriesData({ queryKey: ['crm', 'empresa'] }, (data) =>
         data?.oportunidades

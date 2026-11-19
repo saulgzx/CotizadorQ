@@ -111,6 +111,17 @@ Un solo lugar: `backend/src/crm/normalizar.js` (`ETAPA_POR_ESTADO`, `ESTADO_POR_
   monto abierto) también.
 - `GET /api/crm/embudo` → `{ etapas: [{ etapa, cantidad, monto }], abiertas: { cantidad, monto },
   ganadas_mes: { cantidad, monto }, perdidas_mes: { cantidad, monto } }` (las 5 etapas siempre presentes, en orden).
+- `GET /api/crm/arbol` (sin parámetros) → `{ oportunidades: [OportunidadResumen + bo], cotizaciones: [{ id, numero,
+  version, total, created_at, oportunidad_id, usuario, proyecto, pid }], total_oportunidades, truncado }`. Existe para
+  la vista de árbol grupo → oportunidad → cotización: el servidor entrega dos listas planas en una llamada y el
+  frontend agrupa en memoria. `oportunidades`: todas las no archivadas, de cualquier etapa, por `updated_at DESC,
+  id DESC`, hasta un tope de 5000 (`TOPE_ARBOL` en `repositorio.js`); cada una es un `OportunidadResumen` más `bo`
+  (texto o null). `cotizaciones`: las no archivadas que cuelgan de esas oportunidades, por `created_at DESC NULLS
+  LAST, id DESC`, sin líneas ni más columnas; `proyecto` = `cliente_telefono` y `pid` = `cliente_email` (así se usan
+  esos campos en la app; por eso es solo admin), `total` es número y `version` entero (1 si es null).
+  `total_oportunidades`: las no archivadas en total, sin el tope; `truncado`: `true` si ese total supera el tope y la
+  lista viene cortada (en ese caso faltan las oportunidades menos recientes). Tres consultas (oportunidades, total y
+  cotizaciones con `oportunidad_id = ANY(...)`), sin N+1. No cambia `GET /api/crm/oportunidades`.
 - `POST /api/crm/oportunidades` `{ empresa_id, titulo, contacto_id?, etapa?, marca?, es_proyecto?, monto_manual?,
   fecha_cierre_estimada? }` → OportunidadResumen (201).
 - `PATCH /api/crm/oportunidades/:id` `{ titulo?, etapa?, contacto_id?, marca?, es_proyecto?, monto_manual?,

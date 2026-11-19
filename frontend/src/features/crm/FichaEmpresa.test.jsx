@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import FichaEmpresa from './FichaEmpresa';
 import CrmView from './CrmView';
 import { crmApi, seguimientoApi } from './crmApi';
-import { EMBUDO, FICHA, OPORTUNIDADES, renderConQuery } from './fixturesCrm';
+import { ARBOL, EMBUDO, FICHA, OPORTUNIDADES, renderConQuery } from './fixturesCrm';
 
 vi.mock('./crmApi', () => ({
   crmApi: {
@@ -16,7 +16,8 @@ vi.mock('./crmApi', () => ({
     listarEmpresas: vi.fn(),
     listarOportunidades: vi.fn(),
     duplicadosEmpresas: vi.fn(),
-    embudo: vi.fn()
+    embudo: vi.fn(),
+    arbol: vi.fn()
   },
   seguimientoApi: {
     lista: vi.fn(),
@@ -92,6 +93,8 @@ describe('FichaEmpresa', () => {
 describe('CrmView atajos', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    crmApi.arbol.mockResolvedValue(ARBOL);
     crmApi.embudo.mockResolvedValue(EMBUDO);
     crmApi.listarOportunidades.mockResolvedValue({ items: OPORTUNIDADES });
     crmApi.listarEmpresas.mockResolvedValue({ items: [], total: 0 });
@@ -99,8 +102,15 @@ describe('CrmView atajos', () => {
     seguimientoApi.lista.mockResolvedValue({ activo: false, total: 0, items: [] });
   });
 
-  test('abre en el Resumen con el embudo y el seguimiento automático', async () => {
+  test('abre en el Árbol, la primera pestaña', async () => {
     renderConQuery(<CrmView />);
+    expect(screen.getByRole('tab', { name: 'Árbol' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('treegrid', { name: 'Árbol del CRM' })).toBeInTheDocument();
+  });
+
+  test('el Resumen muestra el embudo y el seguimiento automático', async () => {
+    renderConQuery(<CrmView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Resumen' }));
     expect(screen.getByRole('tab', { name: 'Resumen' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByRole('heading', { name: 'Embudo de ventas' })).toBeInTheDocument();
     expect(await screen.findByText('Apagado en el servidor')).toBeInTheDocument();
@@ -122,6 +132,23 @@ describe('CrmView atajos', () => {
     busqueda.blur();
     fireEvent.keyDown(document.body, { key: 'n' });
     expect(await screen.findByRole('dialog', { name: 'Nueva oportunidad' })).toBeInTheDocument();
+  });
+
+  test('en el Árbol "/" enfoca su buscador y "N" abre el diálogo de oportunidad', async () => {
+    renderConQuery(<CrmView />);
+    const busqueda = await screen.findByRole('searchbox');
+    fireEvent.keyDown(document.body, { key: '/' });
+    expect(document.activeElement).toBe(busqueda);
+    busqueda.blur();
+    fireEvent.keyDown(document.body, { key: 'n' });
+    expect(await screen.findByRole('dialog', { name: 'Nueva oportunidad' })).toBeInTheDocument();
+  });
+
+  test('en el Árbol "Ficha" lleva a la ficha de la empresa en Empresas', async () => {
+    renderConQuery(<CrmView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Ficha de Acme SA' }));
+    expect(screen.getByRole('tab', { name: 'Empresas' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(crmApi.obtenerEmpresa).toHaveBeenCalledWith(10));
   });
 
   test('en la pestaña Empresas "N" crea una empresa', async () => {

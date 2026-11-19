@@ -52,7 +52,9 @@ describeBD('CRM con PostgreSQL real', () => {
         cliente_nombre VARCHAR(100), cliente_empresa VARCHAR(100), cliente_email VARCHAR(100),
         cliente_telefono VARCHAR(50), total DECIMAL(12,2), estado VARCHAR(20) DEFAULT 'revision',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        archivada_en TIMESTAMP
+        archivada_en TIMESTAMP,
+        version INTEGER NOT NULL DEFAULT 1,
+        usuario VARCHAR(50)
       );
       CREATE TABLE cotizacion_items (
         id SERIAL PRIMARY KEY,
@@ -522,6 +524,72 @@ describeBD('CRM con PostgreSQL real', () => {
     await q('UPDATE crm_oportunidades SET monto_manual = NULL, monto_orden = NULL WHERE id = $1', [op.id]);
     await q('DELETE FROM cotizaciones WHERE id = $1', [cot.id]);
     expect(await montoVisible()).toBe(0);
+  });
+
+  test('arbol: oportunidades (con bo) y cotizaciones planas, sin archivadas, con orden, total y tope', async () => {
+    const repo = require('../src/crm/repositorio');
+    const [empresa] = await q(
+      `INSERT INTO crm_empresas (nombre, nombre_normalizado) VALUES ('Arbol PG', 'arbol pg') RETURNING id`
+    );
+    const nuevaOp = async (titulo, updated, extra = {}) =>
+      (await q(
+        `INSERT INTO crm_oportunidades (empresa_id, titulo, etapa, bo, archivada_en, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [empresa.id, titulo, extra.etapa || 'nueva', extra.bo || null, extra.archivada || null, updated]
+      ))[0];
+    const vieja = await nuevaOp('Arbol vieja', '2030-01-01 00:00:00');
+    const reciente = await nuevaOp('Arbol reciente', '2030-03-01 00:00:00', { etapa: 'ganada', bo: 'BO-ARBOL' });
+    const archivada = await nuevaOp('Arbol archivada', '2030-04-01 00:00:00', { archivada: '2030-04-02 00:00:00' });
+    const cot = async (oportunidad, creada, extra = {}) =>
+      (await q(
+        `INSERT INTO cotizaciones (oportunidad_id, total, created_at, version, usuario, cliente_telefono, cliente_email, archivada_en)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, numero`,
+        [oportunidad, extra.total ?? 10, creada, extra.version ?? 1, extra.usuario ?? null, extra.proyecto ?? null, extra.pid ?? null, extra.archivada ?? null]
+      ))[0];
+    const c1 = await cot(vieja.id, '2030-02-01 00:00:00', { total: 1234.5, version: 3, usuario: 'ana', proyecto: 'Norte', pid: 'PID-1' });
+    const c2 = await cot(reciente.id, '2030-05-01 00:00:00');
+    const c3 = await cot(reciente.id, '2030-05-01 00:00:00'); // empate de fecha: gana el id mayor
+    await cot(reciente.id, '2030-06-01 00:00:00', { archivada: '2030-06-02 00:00:00' }); // cotizacion archivada
+    await cot(archivada.id, '2030-06-01 00:00:00'); // de una oportunidad archivada
+    await cot(null, '2030-06-01 00:00:00'); // sin oportunidad
+    const ids = new Set([vieja.id, reciente.id, archivada.id]);
+
+    const res = await repo.arbol(pool);
+    const propias = res.oportunidades.filter((o) => ids.has(o.id));
+    expect(propias.map((o) => o.id)).toEqual([reciente.id, vieja.id]);
+    expect(propias[0]).toMatchObject({ bo: 'BO-ARBOL', etapa: 'ganada', empresa_nombre: 'Arbol PG', monto: 10, cotizaciones: 3 });
+    expect(propias[1].bo).toBeNull();
+    expect(typeof propias[1].monto).toBe('number');
+    expect(Object.keys(propias[0]).sort()).toEqual(
+      ['archivada_en', 'bo', 'cerrada_en', 'contacto_id', 'contacto_nombre', 'cotizacion_id', 'cotizacion_numero', 'cotizaciones',
+        'created_at', 'dias_en_etapa', 'empresa_id', 'empresa_nombre', 'es_proyecto', 'etapa', 'fecha_cierre_estimada', 'id',
+        'marca', 'monto', 'motivo_perdida', 'titulo', 'updated_at']
+    );
+    const total = (await q('SELECT COUNT(*)::int AS n FROM crm_oportunidades WHERE archivada_en IS NULL'))[0].n;
+    expect(res.total_oportunidades).toBe(total);
+    expect(res.truncado).toBe(false);
+
+    const propiasCot = res.cotizaciones.filter((c) => c.oportunidad_id === vieja.id || c.oportunidad_id === reciente.id);
+    expect(propiasCot.map((c) => c.id)).toEqual([c3.id, c2.id, c1.id]);
+    expect(res.cotizaciones.every((c) => c.oportunidad_id !== archivada.id && c.oportunidad_id !== null)).toBe(true);
+    const ultima = res.cotizaciones.find((c) => c.id === c1.id);
+    expect(ultima).toEqual({
+      id: c1.id, numero: c1.numero, version: 3, total: 1234.5, created_at: expect.any(Date),
+      oportunidad_id: vieja.id, usuario: 'ana', proyecto: 'Norte', pid: 'PID-1'
+    });
+
+    // Con tope: las mas recientes, total completo, truncado y solo sus cotizaciones.
+    const corto = await repo.arbol(pool, { tope: 1 });
+    expect(corto.oportunidades.map((o) => o.id)).toEqual([reciente.id]);
+    expect(corto.total_oportunidades).toBe(total);
+    expect(corto.truncado).toBe(true);
+    expect(corto.cotizaciones.map((c) => c.id)).toEqual([c3.id, c2.id]);
+
+    // Por la ruta real.
+    const http = await request(app).get('/api/crm/arbol');
+    expect(http.status).toBe(200);
+    expect(http.body.total_oportunidades).toBe(total);
+    expect(http.body.truncado).toBe(false);
   });
 
   // Altera el esquema (borra una columna): dejar al final del archivo.

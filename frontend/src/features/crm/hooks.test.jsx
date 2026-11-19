@@ -28,6 +28,36 @@ test('mover una oportunidad en el embudo invalida el CRM y la lista de cotizacio
   expect(crmApi.actualizarOportunidad).toHaveBeenCalledWith(1, { etapa: 'ganada' });
 });
 
+describe('useCambiarEtapa › caché del árbol', () => {
+  const ARBOL = { oportunidades: [{ id: 1, etapa: 'cotizada', dias_en_etapa: 5 }, { id: 2, etapa: 'nueva', dias_en_etapa: 2 }], cotizaciones: [] };
+  const montar = () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(queryKeys.crm.arbol, ARBOL);
+    const wrapper = ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    return { client, ...renderHook(() => useCambiarEtapa(), { wrapper }) };
+  };
+
+  test('parchea la oportunidad en el árbol al instante', async () => {
+    let resolver;
+    crmApi.actualizarOportunidad.mockReturnValue(new Promise((r) => { resolver = r; }));
+    const { client, result } = montar();
+    act(() => { result.current.mutate({ id: 1, etapa: 'ganada' }); });
+    await waitFor(() => expect(client.getQueryData(queryKeys.crm.arbol).oportunidades[0]).toMatchObject({ etapa: 'ganada', dias_en_etapa: 0 }));
+    expect(client.getQueryData(queryKeys.crm.arbol).oportunidades[1].etapa).toBe('nueva');
+    await act(async () => { resolver({}); });
+  });
+
+  test('si el servidor falla, restaura el árbol y avisa', async () => {
+    crmApi.actualizarOportunidad.mockRejectedValue(new Error('Sin permiso'));
+    const { client, result } = montar();
+    await act(async () => {
+      await result.current.mutateAsync({ id: 1, etapa: 'perdida', motivo_perdida: 'Precio' }).catch(() => {});
+    });
+    expect(client.getQueryData(queryKeys.crm.arbol)).toEqual(ARBOL);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('No se pudo mover a Perdida'), { tipo: 'error' });
+  });
+});
+
 describe('useSincronizarOrdenes', () => {
   const montar = () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

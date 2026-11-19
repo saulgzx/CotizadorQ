@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
+import ArbolTab from './ArbolTab';
 import EmbudoTab from './EmbudoTab';
 import ResumenTab from './ResumenTab';
 import SeguimientoTab from './SeguimientoTab';
@@ -10,6 +11,7 @@ import { EmpresaDialogo, OportunidadDialogo } from './DialogosCrm';
 import useAtajosCrm from './useAtajosCrm';
 
 const TABS = [
+  { clave: 'arbol', nombre: 'Árbol' },
   { clave: 'resumen', nombre: 'Resumen' },
   { clave: 'embudo', nombre: 'Embudo' },
   { clave: 'cotizaciones', nombre: 'Cotizaciones' },
@@ -23,7 +25,7 @@ const TABS = [
  * Cotizaciones: un nodo o una función ({ abrirEmpresa }) => nodo.
  */
 export default function CrmView({ onAbrirCotizacion, tab: tabControlada, onTab, cotizaciones = null }) {
-  const [tabInterna, setTabInterna] = useState('resumen');
+  const [tabInterna, setTabInterna] = useState('arbol');
   const tab = tabControlada ?? tabInterna;
   const setTab = (clave) => {
     setTabInterna(clave);
@@ -85,6 +87,9 @@ export default function CrmView({ onAbrirCotizacion, tab: tabControlada, onTab, 
       </div>
 
       <div id='crm-panel' role='tabpanel' aria-labelledby={`crm-tab-${tab}`} key={tab} className='mq-panel-entra'>
+        {tab === 'arbol' && (
+          <ArbolTab inputBusquedaRef={busquedaRef} onAbrirEmpresa={abrirEmpresa} onAbrirCotizacion={onAbrirCotizacion} />
+        )}
         {tab === 'resumen' && <ResumenTab onAbrirEmpresa={abrirEmpresa} onIrA={cambiarTab} />}
         {tab === 'seguimiento' && <SeguimientoTab onAbrirCotizacion={onAbrirCotizacion} />}
         {tab === 'embudo' && (

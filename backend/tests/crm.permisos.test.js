@@ -82,7 +82,8 @@ describe('permisos de /api/crm', () => {
     ['post', '/api/crm/oportunidades'],
     ['patch', '/api/crm/oportunidades/1'],
     ['post', '/api/crm/oportunidades/1/cotizaciones'],
-    ['get', '/api/crm/embudo']
+    ['get', '/api/crm/embudo'],
+    ['get', '/api/crm/arbol']
   ];
 
   test.each(RUTAS)('%s %s sin token => 401', async (metodo, ruta) => {

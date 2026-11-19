@@ -1,0 +1,202 @@
+/* Pestaña Árbol del CRM: treegrid grupo ▸ oportunidad ▸ cotización.
+   Solo tokens del sistema (src/index.css): el modo oscuro cambia los tokens solos. */
+
+.mq-arbol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* ---------- Barra ---------- */
+.mq-arbol-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.875rem;
+}
+.mq-arbol-campo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.mq-arbol-buscar { flex: 1 1 16rem; max-width: 34rem; min-width: 0; }
+.mq-arbol-acciones { display: inline-flex; gap: 0.375rem; margin-left: auto; }
+
+.mq-arbol-segmentos {
+  display: inline-flex;
+  border: 1px solid var(--mq-line-strong);
+  border-radius: var(--mq-r-2);
+  background: var(--mq-surface);
+  padding: 2px;
+  gap: 2px;
+}
+.mq-arbol-segmento {
+  height: 1.75rem;
+  padding: 0 0.75rem;
+  border-radius: var(--mq-r-1);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--mq-muted);
+  transition: background-color var(--mq-t-1) var(--mq-ease), color var(--mq-t-1) var(--mq-ease);
+}
+.mq-arbol-segmento:hover { color: var(--mq-ink); }
+.mq-arbol-segmento[aria-checked='true'] { background: var(--mq-ink); color: var(--mq-surface); }
+.mq-arbol-segmento:focus-visible,
+.mq-arbol-enlace:focus-visible {
+  outline: 2px solid var(--mq-accent);
+  outline-offset: 1px;
+}
+
+.mq-arbol-aviso {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--mq-line-strong);
+  border-left: 3px solid var(--mq-aviso, var(--mq-accent));
+  border-radius: var(--mq-r-2);
+  background: var(--mq-surface-2);
+  font-size: 0.8125rem;
+  color: var(--mq-ink-2);
+}
+
+/* ---------- Tabla ---------- */
+.mq-arbol-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--mq-line);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-surface);
+  overscroll-behavior-x: contain;
+}
+.mq-arbol-tabla { min-width: 52rem; }
+
+.mq-arbol-fila {
+  display: grid;
+  grid-template-columns: minmax(20rem, 1fr) 9.5rem 5rem 8.5rem 5.5rem;
+  align-items: center;
+  border-bottom: 1px solid var(--mq-line);
+  font-size: 0.875rem;
+  color: var(--mq-ink);
+}
+.mq-arbol-fila:last-child { border-bottom: 0; }
+.mq-arbol-cabecera {
+  background: var(--mq-surface-2);
+}
+.mq-arbol-celda {
+  min-width: 0;
+  padding: 0.4375rem 0.75rem;
+}
+.mq-arbol-monto {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mq-arbol-dias { text-align: right; white-space: nowrap; color: var(--mq-muted); font-size: 0.8125rem; }
+.mq-arbol-marca { font-family: var(--font-mono); font-size: 0.75rem; color: var(--mq-ink-2); }
+
+.mq-arbol-fila[role='row']:not(.mq-arbol-cabecera) { cursor: default; }
+.mq-arbol-fila[data-expandible='true'] { cursor: pointer; }
+.mq-arbol-fila-grupo { background: var(--mq-surface-2); font-weight: 600; }
+.mq-arbol-fila-cotizacion { color: var(--mq-ink-2); }
+.mq-arbol-fila:not(.mq-arbol-cabecera):hover { background: var(--mq-accent-suave); }
+.mq-arbol-fila:focus { outline: none; }
+.mq-arbol-fila:focus-visible {
+  outline: 2px solid var(--mq-accent);
+  outline-offset: -2px;
+  background: var(--mq-accent-suave);
+}
+
+/* Nombre: sangría por nivel + flecha + contenido */
+.mq-arbol-nombre {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding-left: calc(0.75rem + var(--mq-arbol-nivel, 0) * 1.5rem);
+}
+.mq-arbol-fila-grupo .mq-arbol-nombre { align-items: center; flex-wrap: wrap; }
+.mq-arbol-flecha {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  height: 1.25rem;
+  color: var(--mq-muted);
+}
+.mq-arbol-flecha svg { transition: rotate var(--mq-t-2) var(--mq-ease); }
+.mq-arbol-flecha[data-abierto='true'] svg { rotate: 90deg; }
+.mq-arbol-cuerpo { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.mq-arbol-linea { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; min-width: 0; }
+.mq-arbol-titulo { overflow-wrap: anywhere; font-weight: 500; }
+.mq-arbol-titulo-grupo { font-weight: 600; }
+.mq-arbol-detalle { font-size: 0.75rem; font-weight: 400; color: var(--mq-muted); }
+
+.mq-arbol-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 1.125rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--mq-line-strong);
+  border-radius: var(--mq-r-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--mq-ink-2);
+  white-space: nowrap;
+}
+.mq-arbol-chip-acento { color: var(--mq-accent); border-color: var(--mq-accent); }
+.mq-arbol-version { font-family: var(--font-mono); font-size: 11px; color: var(--mq-muted); }
+
+.mq-arbol-enlace {
+  padding: 0;
+  border-radius: var(--mq-r-1);
+  color: var(--mq-accent);
+  font: inherit;
+  text-align: left;
+  transition: color var(--mq-t-1) var(--mq-ease);
+}
+.mq-arbol-enlace:hover { color: var(--mq-ink); text-decoration: underline; text-underline-offset: 2px; }
+.mq-arbol-numero { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mq-arbol-ficha { margin-left: auto; font-size: 0.75rem; font-weight: 500; }
+
+.mq-arbol-select { height: 1.75rem; padding-top: 0; padding-bottom: 0; font-size: 0.8125rem; }
+
+/* ---------- Pie, vacíos, error ---------- */
+.mq-arbol-pie { font-size: 0.8125rem; color: var(--mq-muted); font-variant-numeric: tabular-nums; }
+.mq-arbol-mas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  color: var(--mq-muted);
+}
+.mq-arbol-vacio {
+  border: 1px dashed var(--mq-line-strong);
+  border-radius: var(--mq-r-3);
+}
+.mq-arbol-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--mq-peligro);
+  border-radius: var(--mq-r-3);
+  background: var(--mq-peligro-suave);
+  font-size: 0.875rem;
+  color: var(--mq-peligro);
+}
+
+@media (max-width: 640px) {
+  .mq-arbol-buscar { flex-basis: 100%; max-width: none; }
+  .mq-arbol-acciones { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mq-arbol-flecha svg,
+  .mq-arbol-segmento,
+  .mq-arbol-enlace { transition: none; }
+}

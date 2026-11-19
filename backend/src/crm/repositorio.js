@@ -370,8 +370,8 @@ const COLUMNAS_OPORTUNIDAD = `id, empresa_id, contacto_id, titulo, etapa, marca,
   to_char(fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, motivo_perdida, etapa_desde, cerrada_en,
   created_at, updated_at`;
 
-const SELECT_RESUMEN = `
-  SELECT o.id, o.titulo, o.etapa, o.empresa_id, e.nombre AS empresa_nombre, o.contacto_id,
+const selectResumen = (columnasExtra = '') => `
+  SELECT ${columnasExtra}o.id, o.titulo, o.etapa, o.empresa_id, e.nombre AS empresa_nombre, o.contacto_id,
          ct.nombre AS contacto_nombre, o.marca, o.es_proyecto,
          ${MONTO_OPORTUNIDAD_SQL} AS monto,
          to_char(o.fecha_cierre_estimada, 'YYYY-MM-DD') AS fecha_cierre_estimada, o.motivo_perdida,
@@ -387,6 +387,8 @@ const SELECT_RESUMEN = `
        WHERE c.oportunidad_id = o.id AND c.archivada_en IS NULL
        ORDER BY c.created_at DESC NULLS LAST, c.id DESC LIMIT 1
     ) cv ON true`;
+
+const SELECT_RESUMEN = selectResumen();
 
 const aResumen = (row) => ({ ...row, monto: numero(row.monto) });
 
@@ -578,6 +580,51 @@ const listarOportunidades = async (
     params
   );
   return rows.map(aResumen);
+};
+
+/** Tope de oportunidades que entrega arbol(); si hay mas, la lista viene cortada. */
+const TOPE_ARBOL = 5000;
+
+/**
+ * Datos para la vista de arbol (grupo > oportunidad > cotizacion), en dos listas planas:
+ * las oportunidades no archivadas (resumen + bo, mas recientes primero, hasta `tope`) y
+ * las cotizaciones no archivadas que cuelgan de ellas. `total` cuenta todas las
+ * oportunidades no archivadas, y `truncado` avisa si el tope dejo algunas fuera. Tres
+ * consultas, sin N+1 (las cotizaciones se piden en bloque con ANY).
+ */
+const arbol = async (db, { tope = TOPE_ARBOL } = {}) => {
+  const [oportunidades, conteo] = await Promise.all([
+    db.query(
+      `${selectResumen('o.bo, ')}
+        WHERE o.archivada_en IS NULL
+        ORDER BY o.updated_at DESC, o.id DESC
+        LIMIT $1`,
+      [tope]
+    ),
+    db.query(
+      'SELECT COUNT(*)::int AS total FROM crm_oportunidades WHERE archivada_en IS NULL'
+    )
+  ]);
+  const filas = oportunidades.rows.map(aResumen);
+  const total = conteo.rows[0].total;
+  let cotizaciones = [];
+  if (filas.length > 0) {
+    const res = await db.query(
+      `SELECT id, numero, COALESCE(version, 1)::int AS version, total, created_at, oportunidad_id,
+              usuario, cliente_telefono AS proyecto, cliente_email AS pid
+         FROM cotizaciones
+        WHERE oportunidad_id = ANY($1::int[]) AND archivada_en IS NULL
+        ORDER BY created_at DESC NULLS LAST, id DESC`,
+      [filas.map((o) => o.id)]
+    );
+    cotizaciones = res.rows.map((r) => ({ ...r, total: numero(r.total) }));
+  }
+  return {
+    oportunidades: filas,
+    cotizaciones,
+    total_oportunidades: total,
+    truncado: total > filas.length
+  };
 };
 
 /** Totales por etapa y del mes en curso (en una consulta). Sin las archivadas. */
@@ -877,6 +924,8 @@ module.exports = {
   actualizarOportunidad,
   obtenerResumenOportunidad,
   listarOportunidades,
+  TOPE_ARBOL,
+  arbol,
   totalesEmbudo,
   moverOportunidades,
   derivarEstadoCotizaciones,
