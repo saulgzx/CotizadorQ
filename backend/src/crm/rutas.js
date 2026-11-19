@@ -216,7 +216,8 @@ const crearRutasCrm = ({
   pool,
   repo = repositorio,
   log = loggerApp,
-  sincronizar = sincronizarOrdenes
+  sincronizar = sincronizarOrdenes,
+  tope = repositorio.TOPE_ARBOL
 } = {}) => {
   const router = express.Router();
 
@@ -476,6 +477,14 @@ const crearRutasCrm = ({
     manejar(async (req, res) => {
       const filtros = parsear(esquemas.listarOportunidades, req.query);
       res.json({ items: await repo.listarOportunidades(pool, filtros) });
+    })
+  );
+
+  // Vista de arbol: dos listas planas (oportunidades y sus cotizaciones) en una llamada.
+  router.get(
+    '/arbol',
+    manejar(async (req, res) => {
+      res.json(await repo.arbol(pool, { tope }));
     })
   );
 

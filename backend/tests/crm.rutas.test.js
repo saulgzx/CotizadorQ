@@ -404,3 +404,175 @@ describe('archivadas', () => {
     expect((await get('/oportunidades')).body.items.map((o) => o.id)).toContain(archivada.id);
   });
 });
+
+describe('arbol', () => {
+  const op = async (empresa, titulo, extra = {}) =>
+    (await post('/oportunidades', { empresa_id: empresa.id, titulo, ...extra })).body;
+  // Fija fechas a mano para controlar el orden sin depender del reloj.
+  const fechar = (id, updated_at) => {
+    mem.estado.oportunidades.find((o) => o.id === id).updated_at = new Date(updated_at);
+  };
+  const cot = (oportunidad, extra = {}) => {
+    const c = mem.agregarCotizacion({ cliente_empresa: 'x', ...extra });
+    mem.estado.cotizaciones.find((x) => x.id === c.id).oportunidad_id = oportunidad ? oportunidad.id : null;
+    return c;
+  };
+
+  test('sin datos: listas vacias, total 0 y sin truncar', async () => {
+    const res = await get('/arbol');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ oportunidades: [], cotizaciones: [], total_oportunidades: 0, truncado: false });
+  });
+
+  test('varias empresas y etapas, con sus cotizaciones', async () => {
+    const a = await crearEmpresa('Sonda');
+    const b = await crearEmpresa('Globex');
+    const o1 = await op(a, 'Uno', { monto_manual: 100 });
+    const o2 = await op(b, 'Dos', { etapa: 'negociacion' });
+    const o3 = await op(b, 'Tres', { etapa: 'perdida', motivo_perdida: 'precio' });
+    const c1 = cot(o1, { total: 10 });
+    const c2 = cot(o2, { total: 20 });
+    cot(o2, { total: 30 });
+
+    const res = await get('/arbol');
+    expect(res.status).toBe(200);
+    expect(res.body.total_oportunidades).toBe(3);
+    expect(res.body.truncado).toBe(false);
+    expect(res.body.oportunidades.map((o) => [o.titulo, o.etapa, o.empresa_nombre, o.cotizaciones]).sort()).toEqual([
+      ['Dos', 'negociacion', 'Globex', 2],
+      ['Tres', 'perdida', 'Globex', 0],
+      ['Uno', 'nueva', 'Sonda', 1]
+    ]);
+    expect(res.body.cotizaciones.map((c) => c.id).sort()).toEqual([1, 2, 3]);
+    expect(res.body.cotizaciones.find((c) => c.id === c1.id).oportunidad_id).toBe(o1.id);
+    expect(res.body.cotizaciones.find((c) => c.id === c2.id).oportunidad_id).toBe(o2.id);
+    expect(o3.id).toBeDefined();
+  });
+
+  test('una oportunidad archivada no sale, ni sus cotizaciones', async () => {
+    const e = await crearEmpresa('Sonda');
+    const viva = await op(e, 'Viva');
+    const muerta = await op(e, 'Archivada');
+    cot(viva);
+    cot(muerta);
+    mem.estado.oportunidades.find((o) => o.id === muerta.id).archivada_en = new Date();
+
+    const res = await get('/arbol');
+    expect(res.body.oportunidades.map((o) => o.id)).toEqual([viva.id]);
+    expect(res.body.cotizaciones.map((c) => c.oportunidad_id)).toEqual([viva.id]);
+    expect(res.body.total_oportunidades).toBe(1);
+  });
+
+  test('una cotizacion archivada no sale, pero su oportunidad si', async () => {
+    const e = await crearEmpresa('Sonda');
+    const o = await op(e, 'Con cotizaciones');
+    cot(o);
+    const archivada = cot(o);
+    mem.estado.cotizaciones.find((c) => c.id === archivada.id).archivada_en = new Date();
+
+    const res = await get('/arbol');
+    expect(res.body.oportunidades.map((x) => x.id)).toEqual([o.id]);
+    expect(res.body.cotizaciones.map((c) => c.id)).not.toContain(archivada.id);
+    expect(res.body.cotizaciones).toHaveLength(1);
+  });
+
+  test('una cotizacion sin oportunidad no aparece', async () => {
+    const e = await crearEmpresa('Sonda');
+    const o = await op(e, 'Una');
+    cot(o);
+    cot(null);
+    const res = await get('/arbol');
+    expect(res.body.cotizaciones).toHaveLength(1);
+  });
+
+  test('orden: oportunidades por updated_at desc e id desc; cotizaciones por created_at desc e id desc', async () => {
+    const e = await crearEmpresa('Sonda');
+    const o1 = await op(e, 'Vieja');
+    const o2 = await op(e, 'Nueva');
+    const o3 = await op(e, 'Empate');
+    fechar(o1.id, '2026-01-01T00:00:00Z');
+    fechar(o2.id, '2026-03-01T00:00:00Z');
+    fechar(o3.id, '2026-03-01T00:00:00Z');
+    cot(o1, { created_at: new Date('2026-02-01T00:00:00Z') });
+    cot(o1, { created_at: new Date('2026-04-01T00:00:00Z') });
+    cot(o2, { created_at: new Date('2026-02-01T00:00:00Z') }); // empate con la 1: gana el id mayor
+    cot(o2, { created_at: new Date('2026-03-01T00:00:00Z') });
+
+    const res = await get('/arbol');
+    expect(res.body.oportunidades.map((o) => o.id)).toEqual([o3.id, o2.id, o1.id]);
+    expect(res.body.cotizaciones.map((c) => c.id)).toEqual([2, 4, 3, 1]);
+  });
+
+  test('forma exacta de la cotizacion y la oportunidad trae bo', async () => {
+    const e = await crearEmpresa('Sonda');
+    const o = await op(e, 'Con BO');
+    mem.estado.oportunidades.find((x) => x.id === o.id).bo = 'BO-123';
+    const sin = await op(e, 'Sin BO');
+    const c = cot(o, {
+      total: 1234.5, version: 3, usuario: 'ana', cliente_telefono: 'Proyecto Norte', cliente_email: 'PID-9',
+      created_at: new Date('2026-05-05T10:00:00Z')
+    });
+
+    const res = await get('/arbol');
+    expect(res.body.cotizaciones).toEqual([
+      {
+        id: c.id, numero: c.numero, version: 3, total: 1234.5, created_at: '2026-05-05T10:00:00.000Z',
+        oportunidad_id: o.id, usuario: 'ana', proyecto: 'Proyecto Norte', pid: 'PID-9'
+      }
+    ]);
+    expect(Object.keys(res.body.cotizaciones[0]).sort()).toEqual(
+      ['created_at', 'id', 'numero', 'oportunidad_id', 'pid', 'proyecto', 'total', 'usuario', 'version']
+    );
+    const conBo = res.body.oportunidades.find((x) => x.id === o.id);
+    expect(conBo.bo).toBe('BO-123');
+    expect(res.body.oportunidades.find((x) => x.id === sin.id).bo).toBeNull();
+    expect(Object.keys(conBo).sort()).toEqual(
+      ['archivada_en', 'bo', 'cerrada_en', 'contacto_id', 'contacto_nombre', 'cotizacion_id', 'cotizacion_numero', 'cotizaciones',
+        'created_at', 'dias_en_etapa', 'empresa_id', 'empresa_nombre', 'es_proyecto', 'etapa', 'fecha_cierre_estimada', 'id',
+        'marca', 'monto', 'motivo_perdida', 'titulo', 'updated_at']
+    );
+    expect(typeof conBo.monto).toBe('number');
+  });
+
+  test('version null cuenta como 1 y el total es numero', async () => {
+    const e = await crearEmpresa('Sonda');
+    const o = await op(e, 'Una');
+    cot(o, { version: null, total: '99.5' });
+    const [c] = (await get('/arbol')).body.cotizaciones;
+    expect(c.version).toBe(1);
+    expect(c.total).toBe(99.5);
+  });
+
+  test('con tope: devuelve las mas recientes, total completo y truncado, y solo sus cotizaciones', async () => {
+    const chico = express();
+    chico.use(express.json());
+    chico.use('/api/crm', crearRutasCrm({ pool: mem.pool, repo: mem.repo, log, tope: 2 }));
+    const e = await crearEmpresa('Sonda');
+    const o1 = await op(e, 'Uno');
+    const o2 = await op(e, 'Dos');
+    const o3 = await op(e, 'Tres');
+    fechar(o1.id, '2026-01-01T00:00:00Z');
+    fechar(o2.id, '2026-02-01T00:00:00Z');
+    fechar(o3.id, '2026-03-01T00:00:00Z');
+    cot(o1);
+    cot(o2);
+    cot(o3);
+
+    const res = await request(chico).get('/api/crm/arbol');
+    expect(res.body.oportunidades.map((o) => o.id)).toEqual([o3.id, o2.id]);
+    expect(res.body.cotizaciones.map((c) => c.oportunidad_id).sort()).toEqual([o2.id, o3.id]);
+    expect(res.body.total_oportunidades).toBe(3);
+    expect(res.body.truncado).toBe(true);
+
+    const justo = express();
+    justo.use('/api/crm', crearRutasCrm({ pool: mem.pool, repo: mem.repo, log, tope: 3 }));
+    expect((await request(justo).get('/api/crm/arbol')).body.truncado).toBe(false);
+  });
+
+  test('un error inesperado da 500 generico', async () => {
+    mem.fallarEn('arbol');
+    const res = await get('/arbol');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Error del servidor' });
+  });
+});
