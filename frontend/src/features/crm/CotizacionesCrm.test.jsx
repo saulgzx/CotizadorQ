@@ -12,7 +12,7 @@ import {
 } from './CotizacionesPiezas';
 import { crmApi, seguimientoApi } from './crmApi';
 import { cotizacionesAPI } from '../../api';
-import { EMBUDO, FICHA, OPORTUNIDADES, renderConQuery } from './fixturesCrm';
+import { ARBOL, EMBUDO, FICHA, OPORTUNIDADES, renderConQuery } from './fixturesCrm';
 
 vi.mock('./crmApi', () => ({
   crmApi: {
@@ -21,7 +21,8 @@ vi.mock('./crmApi', () => ({
     listarEmpresas: vi.fn(),
     listarOportunidades: vi.fn(),
     duplicadosEmpresas: vi.fn(),
-    embudo: vi.fn()
+    embudo: vi.fn(),
+    arbol: vi.fn()
   },
   seguimientoApi: { lista: vi.fn(), valor: vi.fn(), pausar: vi.fn(), reanudar: vi.fn() }
 }));
@@ -33,6 +34,7 @@ vi.mock('../../api', async (original) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  crmApi.arbol.mockResolvedValue(ARBOL);
   crmApi.embudo.mockResolvedValue(EMBUDO);
   crmApi.listarOportunidades.mockResolvedValue({ items: OPORTUNIDADES });
   crmApi.listarEmpresas.mockResolvedValue({ items: [], total: 0 });
@@ -42,10 +44,10 @@ beforeEach(() => {
 });
 
 describe('CrmView › pestaña Cotizaciones', () => {
-  test('ordena las pestañas con Cotizaciones después de Embudo', () => {
+  test('ordena las pestañas: Árbol primero y Cotizaciones después de Embudo', () => {
     renderConQuery(<CrmView />);
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
-      'Resumen', 'Embudo', 'Cotizaciones', 'Empresas', 'Seguimiento automático'
+      'Árbol', 'Resumen', 'Embudo', 'Cotizaciones', 'Empresas', 'Seguimiento automático'
     ]);
   });
 

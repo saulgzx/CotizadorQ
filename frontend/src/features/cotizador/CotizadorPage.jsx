@@ -66,6 +66,7 @@ import { gpBaseDeOrigen, gpDeLinea } from './gpLinea';
 import { esOrigenQuote, productoDeQuoteGuardado } from './quoteFabricante';
 import { etiquetaCompraOrigen } from './compraOrigen';
 import AtajosAyuda from './AtajosAyuda';
+import { hayDialogoAbierto } from '../ui/dialogos';
 import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
@@ -117,7 +118,7 @@ const margenCotizacion = (cot) => {
 };
 
 const FILTROS_HISTORIAL_VACIOS = { fecha: '', cliente: '', pid: '', proyecto: '', producto: '', etapas: [] };
-const CRM_TABS = new Set(['resumen', 'embudo', 'cotizaciones', 'empresas', 'seguimiento']);
+const CRM_TABS = new Set(['arbol', 'resumen', 'embudo', 'cotizaciones', 'empresas', 'seguimiento']);
 
 // /crm?tab=cotizaciones&cotizacion=ID: la página se vuelve a montar al cambiar de
 // ruta, así que la pestaña y la cotización a abrir viajan en la URL. Si otra
@@ -134,7 +135,7 @@ const leerParamsCrm = (search) => {
   const pendiente = destinoCrmPendiente && Date.now() - destinoCrmPendiente.en < 4000 ? destinoCrmPendiente : null;
   if (!CRM_TABS.has(tab) && pendiente) return { tab: pendiente.tab, cotizacion: pendiente.cotizacion };
   return {
-    tab: CRM_TABS.has(tab) ? tab : 'resumen',
+    tab: CRM_TABS.has(tab) ? tab : 'arbol',
     cotizacion: Number.isFinite(cotizacion) && cotizacion > 0 ? cotizacion : null
   };
 };
@@ -1182,7 +1183,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   // La pestaña del CRM queda en la URL (/crm?tab=…) para volver a ella al recargar.
   useEffect(() => {
     if (!isLoggedIn || !isFullAdmin || currentView !== 'crm' || location.pathname !== '/crm') return;
-    const deseado = crmTab === 'resumen' ? '' : `?tab=${crmTab}`;
+    const deseado = crmTab === 'arbol' ? '' : `?tab=${crmTab}`;
     if (location.search !== deseado) navigate(`/crm${deseado}`, { replace: true });
   }, [isLoggedIn, isFullAdmin, currentView, crmTab, location.pathname, location.search, navigate]);
 
@@ -2101,7 +2102,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     }
     const enListaCotizaciones = currentView === 'historial' || (currentView === 'crm' && crmTab === 'cotizaciones');
     if (enListaCotizaciones && expandedHistorialId) {
-      if (document.querySelector('[role="dialog"]')) return;
+      if (hayDialogoAbierto()) return;
       const cot = historialBase.find(c => c.id === expandedHistorialId);
       if (!cot) return;
       const tecla = String(e.key).toLowerCase();

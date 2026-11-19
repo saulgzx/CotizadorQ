@@ -8,6 +8,7 @@ export const queryKeys = {
   crm: {
     todo: ['crm'],
     embudo: ['crm', 'embudo'],
+    arbol: ['crm', 'arbol'],
     oportunidades: ['crm', 'oportunidades'],
     empresas: (params) => ['crm', 'empresas', params],
     empresa: (id) => ['crm', 'empresa', id],

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { hayDialogoAbierto } from '../ui/dialogos';
 
 /**
  * Atajos del CRM: "/" enfoca la búsqueda y "N" crea. No se activan mientras se
@@ -14,7 +15,7 @@ export default function useAtajosCrm({ onBuscar, onCrear }) {
       const el = e.target;
       const escribiendo =
         el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-      if (escribiendo || document.querySelector('[role="dialog"]')) return;
+      if (escribiendo || hayDialogoAbierto()) return;
       if (e.key === '/' && ref.current.onBuscar) {
         e.preventDefault();
         ref.current.onBuscar();

@@ -55,6 +55,65 @@ export const FICHA = {
   resumen: { cotizaciones: 4, monto_cotizado: 12000, ganadas: 1, perdidas: 3, monto_ganado: 3000, tasa_cierre: 0.25 }
 };
 
+// Respuesta de GET /api/crm/arbol (oportunidades por updated_at desc; cotizaciones por created_at desc).
+// Los ids de cotización (501…) difieren de su número (1041…) para distinguir uno del otro.
+export const opArbol = (extra) => ({
+  id: 1,
+  titulo: 'NAS sucursal Norte',
+  etapa: 'negociacion',
+  empresa_id: 10,
+  empresa_nombre: 'Acme SA',
+  contacto_id: 5,
+  contacto_nombre: 'Ana Pérez',
+  marca: 'QNAP',
+  es_proyecto: false,
+  monto: 12400,
+  fecha_cierre_estimada: null,
+  motivo_perdida: null,
+  cotizaciones: 2,
+  cotizacion_id: 501,
+  cotizacion_numero: 1041,
+  dias_en_etapa: 6,
+  cerrada_en: null,
+  archivada_en: null,
+  created_at: '2026-11-01T10:00:00Z',
+  updated_at: '2026-11-08T10:00:00Z',
+  bo: null,
+  ...extra
+});
+
+export const cotArbol = (extra) => ({
+  id: 501,
+  numero: 1041,
+  version: 2,
+  total: 12400,
+  created_at: '2026-11-02T12:00:00Z',
+  oportunidad_id: 1,
+  usuario: 'alexis',
+  proyecto: 'Proyecto Norte',
+  pid: 'PID-77',
+  ...extra
+});
+
+export const ARBOL = {
+  oportunidades: [
+    opArbol({ id: 1 }),
+    opArbol({ id: 2, titulo: 'Cámaras bodega', etapa: 'cotizada', marca: 'AXIS', monto: 35800, cotizaciones: 1, cotizacion_id: 503, cotizacion_numero: 1050, dias_en_etapa: 14, contacto_nombre: null }),
+    opArbol({ id: 3, titulo: 'Orden BO-1001', etapa: 'ganada', marca: 'AXIS', monto: 9300, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, dias_en_etapa: 40, bo: 'BO-1001', contacto_nombre: null }),
+    opArbol({ id: 4, titulo: 'Switches Beta', etapa: 'cotizada', empresa_id: 11, empresa_nombre: 'Beta Ltda', marca: null, monto: 7150, cotizaciones: 1, cotizacion_id: 504, cotizacion_numero: 1060, dias_en_etapa: 1, contacto_nombre: 'Luis Rojas' }),
+    opArbol({ id: 5, titulo: 'Proyecto BID Entel', etapa: 'negociacion', empresa_id: 12, empresa_nombre: 'Entel', marca: 'MIXTA', es_proyecto: true, monto: 20000, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, dias_en_etapa: 0, contacto_nombre: null }),
+    opArbol({ id: 6, titulo: 'Rack perdido', etapa: 'perdida', empresa_id: 11, empresa_nombre: 'Beta Ltda', marca: 'QNAP', monto: 900, cotizaciones: 0, cotizacion_id: null, cotizacion_numero: null, motivo_perdida: 'Precio', dias_en_etapa: 30, contacto_nombre: null })
+  ],
+  cotizaciones: [
+    cotArbol({ id: 501, numero: 1041, oportunidad_id: 1 }),
+    cotArbol({ id: 502, numero: 1038, version: 1, total: 11900, oportunidad_id: 1, created_at: '2026-10-28T12:00:00Z', pid: null }),
+    cotArbol({ id: 503, numero: 1050, version: 1, total: 35800, oportunidad_id: 2, proyecto: null, pid: null, created_at: '2026-11-03T12:00:00Z' }),
+    cotArbol({ id: 504, numero: 1060, version: 1, total: 7150, oportunidad_id: 4, proyecto: null, pid: null, usuario: 'maría', created_at: '2026-11-04T12:00:00Z' })
+  ],
+  total_oportunidades: 6,
+  truncado: false
+};
+
 export function renderConQuery(ui) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
