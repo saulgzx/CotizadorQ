@@ -108,7 +108,10 @@ describe('Quote de fabricante de punta a punta', () => {
     expect(items[1].costo_unitario).toBeCloseTo(4816.56, 6);
     expect(items[0].precio_unitario).toBeCloseTo(250 / 0.92, 6);
     expect(items[1].precio_unitario).toBeCloseTo(4816.56 / 0.92, 6);
-    expect(total).toBeCloseTo((250 / 0.92) * 10 + 4816.56 / 0.92, 6);
+    // Totales como se guardan: unitario a centavos x cantidad (271,74 x 10 = 2717,40; 5235,39 x 1) y su suma.
+    expect(items[0].precio_total).toBe(2717.4);
+    expect(items[1].precio_total).toBe(5235.39);
+    expect(total).toBe(7952.79);
   });
 
   it('ISS con descuento global y una línea sin costo: avisa, no deja incluirla y agrega solo la buena', async () => {

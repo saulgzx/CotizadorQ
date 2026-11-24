@@ -7,6 +7,8 @@ import { partesEntrega } from './entregaStock';
 import { esFueraDeLista } from './fueraDeLista';
 import { CADENA_POR_ORIGEN, ETIQUETA_ORIGEN_QUOTE } from './cotizadorConstants';
 import { esOrigenQuote, usaMargenQnap } from './quoteFabricante';
+import { costosWave } from './costoWave';
+import { totalDeLinea } from './totalesCarrito';
 
 // Carrito del cotizador con el mismo formato que el editor de cotizaciones:
 // una fila por producto, costo ⇄ GP ⇄ precio enlazados y margen a la vista.
@@ -249,6 +251,36 @@ const CampoGp = ({ item, gpGlobal, onCambio }) => {
   );
 };
 
+// Revisión de wave: los dos costos de la cadena para compararlos con la lista del distribuidor.
+// Solo se muestran; no intervienen en ningún precio. Se cuentan con costosWave (módulo puro).
+const num = (n) => String(n);
+const titulosWave = (w) => ({
+  xus: `${formatCurrency(w.disty)} × ${num(w.flete)} = ${formatCurrency(w.costoXus)}`,
+  // La cuenta completa desde el disty: dividir el XUS ya redondeado podía dar un centavo distinto.
+  xusIc: `${formatCurrency(w.disty)} × ${num(w.flete)} ÷ ${num(w.ic)} = ${formatCurrency(w.costoXusIc)}`
+});
+
+const CeldaWave = ({ item, cual }) => {
+  const w = costosWave(item);
+  if (!w) return <span className='text-slate-400' title='Sin precio disty'>—</span>;
+  const t = titulosWave(w);
+  return cual === 'xus'
+    ? <span title={t.xus}>{formatCurrency(w.costoXus)}</span>
+    : <span title={t.xusIc}>{formatCurrency(w.costoXusIc)}</span>;
+};
+
+const LineaWave = ({ item }) => {
+  const w = costosWave(item);
+  if (!w) return <div className='text-xs text-slate-400' title='Sin precio disty'>Wave: sin precio disty</div>;
+  const t = titulosWave(w);
+  return (
+    <div className='flex flex-wrap items-center gap-x-3 text-xs tabular-nums text-blue-700 dark:text-blue-300'>
+      <span title={t.xus}>Costo XUS {formatCurrency(w.costoXus)}</span>
+      <span title={t.xusIc}>Costo XUS + IC {formatCurrency(w.costoXusIc)}</span>
+    </div>
+  );
+};
+
 export default function CarritoLineas({
   items,
   isAdmin,
@@ -260,7 +292,8 @@ export default function CarritoLineas({
   alertaLinea = () => null,
   onCambio,
   onQuitar,
-  onMover
+  onMover,
+  revisionWave = false
 }) {
   if (items.length === 0) {
     return (
@@ -304,7 +337,7 @@ export default function CarritoLineas({
                   </div>
                   <div className='text-right'>
                     <Etiqueta>Total</Etiqueta>
-                    <div className='font-semibold tabular-nums text-blue-700 dark:text-blue-300'>{formatCurrency(pu * item.cant)}</div>
+                    <div className='font-semibold tabular-nums text-blue-700 dark:text-blue-300'>{formatCurrency(totalDeLinea(pu, item.cant))}</div>
                   </div>
                 </div>
                 <CeldaEntrega item={item} editable={false} onCambio={onCambio} />
@@ -336,7 +369,7 @@ export default function CarritoLineas({
                       <NumeroInput entero min={1} value={item.cant} onCommit={(v) => onCambio(item.id, 'cant', v)} ariaLabel='Cantidad' />
                     </td>
                     <td className='px-2 py-2 text-right tabular-nums'>{formatCurrency(pu)}</td>
-                    <td className='px-2 py-2 text-right font-semibold tabular-nums text-blue-700 dark:text-blue-300'>{formatCurrency(pu * item.cant)}</td>
+                    <td className='px-2 py-2 text-right font-semibold tabular-nums text-blue-700 dark:text-blue-300'>{formatCurrency(totalDeLinea(pu, item.cant))}</td>
                     <td className='px-2 py-2'>
                       <CeldaEntrega item={item} editable={false} onCambio={onCambio} />
                     </td>
@@ -387,12 +420,13 @@ export default function CarritoLineas({
                 </label>
               </div>
               <CeldaCosto item={item} costoFinal={m.costo} rebatePartner={rebatePartner} partnerDefault={partnerDefault} onCambio={onCambio} />
+              {revisionWave && <LineaWave item={item} />}
               <div className='flex items-center justify-between gap-2'>
                 <span className='flex items-center gap-2'>
                   <MargenChip gpPct={m.gpPct} origen={item.origen} />
                   <span className='text-xs tabular-nums text-slate-500'>{formatCurrency(m.margenTotal)}</span>
                 </span>
-                <span className='font-semibold tabular-nums text-slate-800 dark:text-slate-100'>{formatCurrency(m.precio * item.cant)}</span>
+                <span className='font-semibold tabular-nums text-slate-800 dark:text-slate-100'>{formatCurrency(totalDeLinea(m.precio, item.cant))}</span>
               </div>
               <CeldaEntrega item={item} editable onCambio={onCambio} />
             </li>
@@ -401,13 +435,15 @@ export default function CarritoLineas({
       </ul>
 
       <div className='hidden overflow-x-auto md:block'>
-        <table className='w-full min-w-[920px] text-sm'>
+        <table className={`w-full text-sm ${revisionWave ? 'min-w-[1160px]' : 'min-w-[920px]'}`}>
           <thead className='bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800'>
             <tr>
               <th className='w-8 px-1 py-2' />
               <th className='px-2 py-2 text-left'>Producto</th>
               <th className='w-20 px-2 py-2 text-right'>Cant.</th>
               <th className='w-44 px-2 py-2 text-left'>Costo</th>
+              {revisionWave && <th className='w-28 px-2 py-2 text-right'>Costo XUS</th>}
+              {revisionWave && <th className='w-28 px-2 py-2 text-right'>Costo XUS + IC</th>}
               <th className='w-24 px-2 py-2 text-right'>GP %</th>
               <th className='w-32 px-2 py-2 text-right'>P. unitario</th>
               <th className='w-32 px-2 py-2 text-right'>Total · margen</th>
@@ -437,6 +473,16 @@ export default function CarritoLineas({
                   <td className='px-2 py-2'>
                     <CeldaCosto item={item} costoFinal={m.costo} rebatePartner={rebatePartner} partnerDefault={partnerDefault} onCambio={onCambio} />
                   </td>
+                  {revisionWave && (
+                    <td className='px-2 py-2 pt-2.5 text-right text-xs tabular-nums text-blue-700 dark:text-blue-300'>
+                      <CeldaWave item={item} cual='xus' />
+                    </td>
+                  )}
+                  {revisionWave && (
+                    <td className='px-2 py-2 pt-2.5 text-right text-xs tabular-nums text-blue-700 dark:text-blue-300'>
+                      <CeldaWave item={item} cual='xusIc' />
+                    </td>
+                  )}
                   <td className='px-2 py-2'>
                     <CampoGp item={item} gpGlobal={gpBase(item) * 100} onCambio={onCambio} />
                   </td>
@@ -445,7 +491,7 @@ export default function CarritoLineas({
                   </td>
                   <td className='px-2 py-2 pt-2.5 text-right'>
                     <div className='flex flex-col items-end gap-1'>
-                      <span className='font-semibold tabular-nums text-slate-800 dark:text-slate-100'>{formatCurrency(m.precio * item.cant)}</span>
+                      <span className='font-semibold tabular-nums text-slate-800 dark:text-slate-100'>{formatCurrency(totalDeLinea(m.precio, item.cant))}</span>
                       <MargenChip gpPct={m.gpPct} origen={item.origen} />
                       <span className='text-xs tabular-nums text-slate-500'>{formatCurrency(m.margenTotal)}</span>
                     </div>

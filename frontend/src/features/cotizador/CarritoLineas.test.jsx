@@ -313,3 +313,84 @@ describe('CarritoLineas (líneas de quote)', () => {
   });
 });
 
+
+describe('CarritoLineas (revisión de wave)', () => {
+  const qnap = { id: 'w1', origen: 'QNAP', marca: 'QNAP', sku: 'Q-1', mpn: 'TS-Q', desc: 'NAS', cant: 1, precio: 1000, tiempo: '' };
+  const axis = { id: 'w2', origen: 'AXIS', marca: 'AXIS', sku: 'A-1', mpn: 'P-AX', desc: 'Camara', cant: 1, precio: 1000, tiempo: '' };
+  const sinDisty = { id: 'w3', origen: 'QNAP', marca: 'QNAP', sku: 'S-1', mpn: 'TS-FUERA', desc: 'Fuera de lista', cant: 1, precio: 0, costoChile: 90, tiempo: '' };
+  const propsWave = (items, extra = {}) => baseProps({
+    items,
+    isAdmin: true,
+    margenItem: () => ({ precio: 100, costo: 80, gpPct: 20, margenTotal: 20 }),
+    ...extra
+  });
+  const fila = (n) => within(screen.getByRole('table')).getAllByRole('row')[n];
+
+  test('con revisionWave aparecen las dos columnas con los costos de una línea QNAP', () => {
+    render(<CarritoLineas {...propsWave([qnap], { revisionWave: true })} />);
+    const tabla = screen.getByRole('table');
+    expect(within(tabla).getByRole('columnheader', { name: 'Costo XUS' })).toBeInTheDocument();
+    expect(within(tabla).getByRole('columnheader', { name: 'Costo XUS + IC' })).toBeInTheDocument();
+    const xus = within(fila(1)).getByText('$1,011.00');
+    const xusIc = within(fila(1)).getByText('$1,064.21');
+    expect(xus).toHaveAttribute('title', '$1,000.00 × 1.011 = $1,011.00');
+    expect(xusIc).toHaveAttribute('title', '$1,000.00 × 1.011 ÷ 0.95 = $1,064.21');
+  });
+
+  test('una línea AXIS de 1000 muestra $1,015.00 y $1,046.39', () => {
+    render(<CarritoLineas {...propsWave([axis], { revisionWave: true })} />);
+    expect(within(fila(1)).getByText('$1,015.00')).toHaveAttribute('title', '$1,000.00 × 1.015 = $1,015.00');
+    expect(within(fila(1)).getByText('$1,046.39')).toHaveAttribute('title', '$1,000.00 × 1.015 ÷ 0.97 = $1,046.39');
+  });
+
+  test('una línea sin precio disty muestra «—» con título «Sin precio disty»', () => {
+    render(<CarritoLineas {...propsWave([sinDisty], { revisionWave: true })} />);
+    const guiones = within(fila(1)).getAllByTitle('Sin precio disty');
+    expect(guiones).toHaveLength(2);
+    guiones.forEach((g) => expect(g).toHaveTextContent('—'));
+  });
+
+  test('en las tarjetas de celular cada línea muestra ambos costos', () => {
+    render(<CarritoLineas {...propsWave([qnap, sinDisty], { revisionWave: true })} />);
+    expect(screen.getByText('Costo XUS $1,011.00')).toBeInTheDocument();
+    expect(screen.getByText('Costo XUS + IC $1,064.21')).toBeInTheDocument();
+    expect(screen.getByText('Wave: sin precio disty')).toBeInTheDocument();
+  });
+
+  test('sin la prop no aparece nada de la revisión', () => {
+    render(<CarritoLineas {...propsWave([qnap, axis])} />);
+    expect(screen.queryByRole('columnheader', { name: /Costo XUS/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('$1,011.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('$1,064.21')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Costo XUS/)).not.toBeInTheDocument();
+  });
+
+  test('para un cliente la revisión no muestra costos aunque llegue la prop', () => {
+    render(<CarritoLineas {...baseProps({ items: [qnap], revisionWave: true })} />);
+    expect(screen.queryByText(/Costo XUS/)).not.toBeInTheDocument();
+    expect(screen.queryByText('$1,011.00')).not.toBeInTheDocument();
+  });
+});
+
+describe('CarritoLineas (total de línea como se guarda)', () => {
+  test('cliente: unitario 70.11269 x 2 se muestra como $140.22 (no $140.23)', () => {
+    const item = { id: 't1', origen: 'QNAP', marca: 'QNAP', sku: 'T-1', mpn: 'T1', desc: 'Prueba', cant: 2, precio: 50, tiempo: '' };
+    render(<CarritoLineas {...baseProps({ items: [item], precioItem: () => 70.11269 })} />);
+    const f = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(f).getByText('$70.11')).toBeInTheDocument();
+    expect(within(f).getByText('$140.22')).toBeInTheDocument();
+    expect(screen.queryByText('$140.23')).not.toBeInTheDocument();
+  });
+
+  test('admin: el total de la línea usa el unitario redondeado', () => {
+    const item = { id: 't2', origen: 'QNAP', marca: 'QNAP', sku: 'T-2', mpn: 'T2', desc: 'Prueba', cant: 2, precio: 50, tiempo: '' };
+    render(<CarritoLineas {...baseProps({
+      items: [item],
+      isAdmin: true,
+      margenItem: () => ({ precio: 70.11269, costo: 60, gpPct: 14, margenTotal: 20 })
+    })} />);
+    const f = within(screen.getByRole('table')).getAllByRole('row')[1];
+    expect(within(f).getByText('$140.22')).toBeInTheDocument();
+    expect(screen.queryByText('$140.23')).not.toBeInTheDocument();
+  });
+});
