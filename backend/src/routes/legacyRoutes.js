@@ -3901,11 +3901,11 @@ app.post('/api/cotizaciones', authenticateToken, validateCotizacionInput, async 
     const rowsToInsert = (Array.isArray(itemsFinal) ? itemsFinal : []).map((item, index) =>
       normalizarLineaAdmin({ ...item, cantidad: item.cantidad || item.cant }, index)
     );
-    if (!isAdmin) {
-      // La cabecera es exactamente la suma de los totales de linea ya redondeados (en centavos).
-      const centavos = rowsToInsert.reduce((suma, row) => suma + Math.round(row.precio_total * 100), 0);
-      totalFinal = centavos / 100;
-    }
+    // La cabecera es SIEMPRE la suma de los totales de linea ya redondeados (en centavos), tambien
+    // para el admin: su carrito mandaba un total calculado con unitarios sin redondear, que diferia
+    // en centavos de las lineas guardadas (el total no era la suma de lo que se ve en la cotizacion).
+    const centavos = rowsToInsert.reduce((suma, row) => suma + Math.round(row.precio_total * 100), 0);
+    totalFinal = centavos / 100;
 
     // Crear cotizacion
     const cotResult = await client.query(

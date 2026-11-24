@@ -70,6 +70,8 @@ import { hayDialogoAbierto } from '../ui/dialogos';
 import RevisionEnvioModal from './RevisionEnvioModal';
 import SemaforoMargenAjustes from './SemaforoMargenAjustes';
 import CarritoLineas from './CarritoLineas';
+import { costosWave, tablaWave } from './costoWave';
+import { totalDeLinea, totalDelCarrito } from './totalesCarrito';
 import NumeroInput from '../ui/NumeroInput';
 import { precioSistemaDe, useMargenSistema } from './precioSistema';
 import { productoFueraDeLista } from './fueraDeLista';
@@ -117,6 +119,8 @@ const margenCotizacion = (cot) => {
   return { venta, margen, gpPct: (margen / venta) * 100, origenes: items.map(i => i.origen || 'QNAP'), parcial: conCosto < items.length };
 };
 
+// Clave de localStorage del modo «Revisión de wave» ('1' activo, '0' apagado).
+const CLAVE_REVISION_WAVE = 'cotizadorRevisionWave';
 const FILTROS_HISTORIAL_VACIOS = { fecha: '', cliente: '', pid: '', proyecto: '', producto: '', etapas: [] };
 const CRM_TABS = new Set(['arbol', 'resumen', 'embudo', 'cotizaciones', 'empresas', 'seguimiento']);
 
@@ -417,6 +421,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [cotizacionGpGlobalAxis, setCotizacionGpGlobalAxis] = useState(CONSTANTS.DEFAULT_GP);
   // Ventana «Cargar quote» (ISS, Neural Labs, Milestone): solo admin.
   const [quoteAbierto, setQuoteAbierto] = useState(false);
+  // Modo «Revisión de wave»: solo mira Costo XUS y Costo XUS + IC; no cambia ningún precio. Se recuerda.
+  const [revisionWave, setRevisionWave] = useState(() => {
+    try {
+      return localStorage.getItem(CLAVE_REVISION_WAVE) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [cotizacionPartnerCategory, setCotizacionPartnerCategory] = useState(DEFAULT_AXIS_PARTNER);
   const [historial, setHistorial] = useState([]);
   const [historialLoading, setHistorialLoading] = useState(false);
@@ -506,12 +518,6 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const [updatingOwnPartnerCategory, setUpdatingOwnPartnerCategory] = useState(false);
   const [updatingCotizacionPartner, setUpdatingCotizacionPartner] = useState(false);
   const [historialFilters, setHistorialFilters] = useState(FILTROS_HISTORIAL_VACIOS);
-  const [calcParams, setCalcParams] = useState({
-    INBOUND_FREIGHT: CONSTANTS.INBOUND_FREIGHT,
-    IC: CONSTANTS.IC,
-    INT: CONSTANTS.INT,
-    DEFAULT_GP: CONSTANTS.DEFAULT_GP
-  });
   const [showProjectRegistro, setShowProjectRegistro] = useState(false);
   const [projectRegistroModal, setProjectRegistroModal] = useState(null);
   // Id de la cotización abierta en el editor (solo admin); null = cerrado.
@@ -599,18 +605,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (currentUser.partner_category) setCotizacionPartnerCategory(currentUser.partner_category);
   };
 
-  const updateCalcParam = (key, value, isPercent = false) => {
-    const parsed = parseFloat(value);
-    setCalcParams(prev => ({
-      ...prev,
-      [key]: Number.isNaN(parsed) ? 0 : (isPercent ? parsed / 100 : parsed)
-    }));
-  };
-
   // costoChile = "OH Unit USD" de la hoja Stock (costo real con que ingresó a Chile).
   // Si el producto tiene unidades disponibles, reemplaza al costo Chile calculado.
   const calcularPrecioClienteLocal = (precioDisty, gp = 0.15, costoChile = null) =>
-    costoChile > 0 ? costoChile / (1 - gp) : calcularPrecioCliente(precioDisty, gp, calcParams);
+    costoChile > 0 ? costoChile / (1 - gp) : calcularPrecioCliente(precioDisty, gp, CONSTANTS);
 
   const getAxisPartnerRebate = (item, category) => {
     const selected = category || DEFAULT_AXIS_PARTNER;
@@ -639,7 +637,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     const gpEffective = gpDeLinea(item, gpGlobales);
     if (esOrigenQuote(item.origen)) {
       // Línea de quote: costo Chile = costo del quote x (1 + transporte y arancel), ya calculado al
-      // cargarla. Nunca pasa por calcParams (cadena de QNAP): si faltara costoChile se usa la
+      // cargarla. Nunca pasa por la cadena de QNAP: si faltara costoChile se usa la
       // cadena de su propio origen.
       const cadena = CADENA_POR_ORIGEN[String(item.origen).trim().toUpperCase()];
       const costoChile = item.costoChile > 0
@@ -820,10 +818,10 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   const calcularPrecioAdmin = (producto) => {
     if ((producto.origen || 'QNAP') !== 'AXIS') {
-      return calcularPrecioClienteLocal(producto.precio, calcParams.DEFAULT_GP, producto.costoChile);
+      return calcularPrecioClienteLocal(producto.precio, CONSTANTS.DEFAULT_GP, producto.costoChile);
     }
     const partnerRebate = getAxisPartnerRebate(producto, DEFAULT_AXIS_PARTNER);
-    return calcularPrecioClienteAxis(producto.precio, calcParams.DEFAULT_GP, partnerRebate, 0, producto.costoChile);
+    return calcularPrecioClienteAxis(producto.precio, CONSTANTS.DEFAULT_GP, partnerRebate, 0, producto.costoChile);
   };
 
   // Verificar sesin al cargar
@@ -873,7 +871,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         desc: p.descripcion || '',
         precio: isAdminForLoad ? (parseFloat(p.precio_disty) || 0) : (parseFloat(p.precio_cliente) || 0),
         precio_cliente: !isAdminForLoad ? (parseFloat(p.precio_cliente) || 0) : undefined,
-        gp: isAdminForLoad ? parseGp(p.gp, calcParams.DEFAULT_GP) : undefined,
+        gp: isAdminForLoad ? parseGp(p.gp, CONSTANTS.DEFAULT_GP) : undefined,
         rebate_partner_autorizado: isAdminForLoad ? (parseFloat(p.rebate_partner_autorizado) || 0) : undefined,
         rebate_partner_silver: isAdminForLoad ? (parseFloat(p.rebate_partner_silver) || 0) : undefined,
         rebate_partner_gold: isAdminForLoad ? (parseFloat(p.rebate_partner_gold) || 0) : undefined,
@@ -1346,7 +1344,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
         const nuevosProductos = jsonData.map(row => {
           const precio = parseFloat(findValue(row, COLUMN_MAP.precio)) || 0;
-          const gp = parseGp(findValue(row, COLUMN_MAP.gp), calcParams.DEFAULT_GP);
+          const gp = parseGp(findValue(row, COLUMN_MAP.gp), CONSTANTS.DEFAULT_GP);
           
           return {
             marca: findValue(row, COLUMN_MAP.marca) || '',
@@ -1413,7 +1411,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     if (!newProduct.sku && !newProduct.desc) return notify('Ingrese SKU o Descripción');
     try {
       setSaving(true);
-      const gp = parseGp(newProduct.gp, calcParams.DEFAULT_GP);
+      const gp = parseGp(newProduct.gp, CONSTANTS.DEFAULT_GP);
 
       await productosAPI.create({
         origen: adminOrigin,
@@ -1444,7 +1442,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
   const saveEdit = async () => {
     try {
       setSaving(true);
-      const gp = parseGp(editForm.gp, calcParams.DEFAULT_GP);
+      const gp = parseGp(editForm.gp, CONSTANTS.DEFAULT_GP);
 
       await productosAPI.update(editingId, {
         origen: editForm.origen || adminOrigin,
@@ -1733,6 +1731,25 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
   // Los quotes de fabricante son solo del admin completo (el admin de stock está limitado a AXIS).
   const puedeCargarQuotes = isAdmin && !isCotizadorStockAdmin;
+  // La revisión de wave la ve el mismo admin completo que carga quotes.
+  const revisionWaveActiva = puedeCargarQuotes && revisionWave;
+  const alternarRevisionWave = () => {
+    const siguiente = !revisionWave;
+    setRevisionWave(siguiente);
+    try {
+      localStorage.setItem(CLAVE_REVISION_WAVE, siguiente ? '1' : '0');
+    } catch {
+      // Sin almacenamiento el modo sigue funcionando en esta sesión.
+    }
+  };
+  const copiarRevisionWave = async () => {
+    try {
+      await navigator.clipboard.writeText(tablaWave(cotizacion));
+      notify('Revisión copiada: pégala en Excel', { tipo: 'ok' });
+    } catch {
+      notify('No se pudo copiar la revisión al portapapeles.', { tipo: 'error' });
+    }
+  };
 
   // Líneas de un quote de fabricante: cada una entra como línea NUEVA (nunca se fusiona con otra,
   // aunque repita MPN). Margen propio vacío: usa el 8 % de las líneas de quote.
@@ -1783,8 +1800,8 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
     return { precio, costo, gpPct: gp * 100, margenTotal: (precio - costo) * item.cant };
   };
   const totalCotizacion = useMemo(
-    () => cotizacion.reduce((t, i) => t + calcularPrecioClienteItem(i) * i.cant, 0),
-    [cotizacion, calcParams, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis]
+    () => totalDelCarrito(cotizacion.map(i => ({ precio: calcularPrecioClienteItem(i), cantidad: i.cant }))),
+    [cotizacion, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis]
   );
 
   // Resumen de margen del carrito (solo se muestra a quien ve costos).
@@ -1804,7 +1821,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
       gpPct: venta > 0 ? ((venta - costo) / venta) * 100 : null,
       origenes: cotizacion.map(i => i.origen || 'QNAP')
     };
-  }, [cotizacion, calcParams, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis, isAdmin]);
+  }, [cotizacion, cotizacionGpGlobalQnap, cotizacionGpGlobalAxis, isAdmin]);
 
   // Marca visual de la fila en el carrito: margen bajo el mínimo (solo admin) o SKU por crear.
   const alertaLineaCarrito = (item) => {
@@ -1893,7 +1910,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               costo_unitario: precioUnitario * (1 - gp),
               cantidad: item.cant,
               precio_unitario: precioUnitario,
-              precio_total: precioUnitario * item.cant,
+              precio_total: totalDeLinea(precioUnitario, item.cant),
               tiempo_entrega: item.tiempo
             };
           })
@@ -2229,7 +2246,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         item.mpn,
         item.desc,
         pu,
-        pu * item.cant,
+        totalDeLinea(pu, item.cant),
         item.tiempo
       ];
     });
@@ -2302,7 +2319,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
         mpn: item.mpn || '',
         descripcion: item.desc || '',
         precio_unitario: precioUnitario,
-        precio_total: Number((precioUnitario * cantidad).toFixed(2)),
+        precio_total: totalDeLinea(precioUnitario, cantidad),
         tiempo_entrega: item.tiempo || ''
       };
     });
@@ -3775,7 +3792,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                       <td className="px-2 py-2 font-mono text-xs">{item.mpn}</td>
                       <td className="px-2 py-2">{item.desc}</td>
                       <td className="px-2 py-2 text-right">{formatCurrency(pu)}</td>
-                      <td className="px-2 py-2 text-right font-semibold">{formatCurrency(pu * item.cant)}</td>
+                      <td className="px-2 py-2 text-right font-semibold">{formatCurrency(totalDeLinea(pu, item.cant))}</td>
                       <td className="px-2 py-2 text-center text-xs">{item.tiempo}</td>
                     </tr>
                   );
@@ -5453,39 +5470,28 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
               )}
             </div>
             <div className="glass-card rounded-2xl shadow-card border border-white/70 p-4">
-              <h3 className="text-base font-semibold text-slate-900 mb-3">Parámetros de cálculo</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-700">Inbound Freight</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.INBOUND_FREIGHT : (Number.isFinite(calcParams.INBOUND_FREIGHT) ? calcParams.INBOUND_FREIGHT : '')}
-                    onChange={e => updateCalcParam('INBOUND_FREIGHT', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-700">IC</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={adminOrigin === 'AXIS' ? AXIS_CONSTANTS.IC : (Number.isFinite(calcParams.IC) ? calcParams.IC : '')}
-                    onChange={e => updateCalcParam('IC', e.target.value)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-700">INT (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={adminOrigin === 'AXIS' ? (AXIS_CONSTANTS.INT * 100) : (Number.isFinite(calcParams.INT) ? (calcParams.INT * 100) : '')}
-                    onChange={e => updateCalcParam('INT', e.target.value, true)}
-                    className="h-10 w-full px-3 border border-slate-300 rounded-lg bg-white text-sm tabular-nums"
-                  />
-                </div>
-              </div>
+              <h3 className="text-base font-semibold text-slate-900 mb-3">Parámetros de cálculo <span className="font-normal text-slate-500">({adminOrigin})</span></h3>
+              {(() => {
+                const cadena = CADENA_POR_ORIGEN[adminOrigin] || CADENA_POR_ORIGEN.QNAP;
+                const num = (v) => String(v).replace('.', ',');
+                const valores = [
+                  ['Inbound Freight', num(cadena.INBOUND_FREIGHT)],
+                  ['IC', num(cadena.IC)],
+                  ['INT', `${num(Math.round(cadena.INT * 10000) / 100)} %`]
+                ];
+                return (
+                  <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm" aria-label="Parámetros de cálculo de solo lectura">
+                    {valores.map(([nombre, valor]) => (
+                      <div key={nombre} className="flex flex-col gap-1.5">
+                        <dt className="text-xs font-medium text-slate-700">{nombre}</dt>
+                        <dd className="h-10 w-full px-3 flex items-center border border-slate-200 rounded-lg bg-slate-50 text-sm tabular-nums text-slate-700">{valor}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                );
+              })()}
+              <p className="mt-3 text-xs text-slate-600">Costo XUS = disty × flete · Costo XUS + IC = ÷ IC · Costo Chile = × (1 + INT)</p>
+              <p className="mt-1 text-xs text-slate-500">Son los valores con que calculan el cotizador, el editor, el servidor y el asistente. Se cambian en el código, para todos a la vez.</p>
             </div>
             <div className="glass-card rounded-2xl shadow-card border border-white/70 overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
@@ -5545,7 +5551,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <td className="px-2 py-1"><input value={editForm.mpn} onChange={e => setEditForm(f => ({ ...f, mpn: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
                             <td className="px-2 py-1"><input value={editForm.desc} onChange={e => setEditForm(f => ({ ...f, desc: e.target.value }))} className="w-full h-8 px-2 border border-slate-300 rounded-md bg-white text-sm" /></td>
                             <td className="px-2 py-1"><input type="number" value={editForm.precio} onChange={e => setEditForm(f => ({ ...f, precio: e.target.value }))} className="w-20 h-8 px-2 border border-slate-300 rounded-md bg-white text-sm text-right" /></td>
-                            <td className="px-2 py-1 text-right text-slate-600">{formatCurrency(calcularPrecioClienteLocal(parseFloat(editForm.precio) || 0, calcParams.DEFAULT_GP))}</td>
+                            <td className="px-2 py-1 text-right text-slate-600">{formatCurrency(calcularPrecioClienteLocal(parseFloat(editForm.precio) || 0, CONSTANTS.DEFAULT_GP))}</td>
                             <td className="px-2 py-1 text-center">
                               <button onClick={saveEdit} disabled={saving} className="mq-btn mq-btn-xs mq-btn-primario">Guardar</button>
                               <button onClick={() => setEditingId(null)} className="mq-btn mq-btn-xs mq-btn-fantasma">Cancelar</button>
@@ -5874,6 +5880,21 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
 
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-3 flex-wrap">
+                    {puedeCargarQuotes && (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={revisionWave}
+                        onClick={alternarRevisionWave}
+                        title="Mira Costo XUS y Costo XUS + IC de cada producto para compararlos con la lista del wave. No cambia los precios."
+                        className="inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        <span aria-hidden="true" className={`relative inline-block h-4 w-7 rounded-full transition ${revisionWave ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${revisionWave ? 'left-3.5' : 'left-0.5'}`} />
+                        </span>
+                        Revisión de wave
+                      </button>
+                    )}
                     {(isAdmin || isVentasUser) && (
                       <CollapsibleFilters label="Ajustes">
                         {isAdmin && (
@@ -5949,6 +5970,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   </div>
                 </div>
                 {isFullAdmin && semaforoAbierto && <SemaforoMargenAjustes />}
+                {revisionWaveActiva && (
+                  <div role="status" className="flex items-center justify-between gap-2 flex-wrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+                    <span>Revisión de wave activa: se muestran Costo XUS (disty × flete) y Costo XUS + IC (÷ IC). No cambia los precios.</span>
+                    {cotizacion.length > 0 && (
+                      <button type="button" onClick={copiarRevisionWave} className="mq-btn mq-btn-xs mq-btn-secundario">
+                        Copiar revisión
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {catalogSearch.trim() !== '' && catalogDropdownStyle && createPortal(
                   <div id="catalog-resultados" role="listbox" style={catalogDropdownStyle} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-96 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
@@ -5989,6 +6020,16 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                             <p className="text-sm text-slate-800 dark:text-slate-100 truncate">
                               <Resaltado texto={p.desc} busqueda={catalogSearch} />
                             </p>
+                            {revisionWaveActiva && (() => {
+                              const w = costosWave(p);
+                              return (
+                                <p className="text-xs tabular-nums text-blue-700 dark:text-blue-300" data-testid="wave-catalogo">
+                                  {w
+                                    ? `Disty ${formatCurrency(w.disty)} · XUS ${formatCurrency(w.costoXus)} · XUS + IC ${formatCurrency(w.costoXusIc)}`
+                                    : 'Sin precio disty'}
+                                </p>
+                              );
+                            })()}
                           </div>
                           <div className="shrink-0 text-right">
                             <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(calcularPrecioCatalogo(p))}</p>
@@ -6018,6 +6059,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                   onCambio={cambiarLineaCarrito}
                   onQuitar={removeItem}
                   onMover={moverLineaCarrito}
+                  revisionWave={revisionWaveActiva}
                 />
               </div>
             </section>
