@@ -327,7 +327,7 @@ describe('POST /api/cotizaciones', () => {
     expect(insertItems(llamadas)).toBeUndefined();
   });
 
-  test('admin: NO se recalcula; se guardan total y lineas tal como vienen (las lineas se normalizan)', async () => {
+  test('admin: los precios NO se recalculan desde el catalogo; el total de la cabecera es la suma de las lineas', async () => {
     mockQuery.mockImplementation(dbRouter(sesionActiva()));
     const { llamadas } = transaccion(handlerCrear());
 
@@ -338,12 +338,38 @@ describe('POST /api/cotizaciones', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(insertCotizacion(llamadas).params[4]).toBe(12345);
+    // El "12345" enviado se ignora: la cabecera es 950 x 2, lo mismo que suman las lineas guardadas.
+    expect(insertCotizacion(llamadas).params[4]).toBe(1900);
     expect(llamadas.some((l) => l.sql.includes('FROM productos') || l.sql.includes('FROM usuarios'))).toBe(false);
     const it = insertItems(llamadas).params;
     expect(it[COL.precio_unitario]).toBe(950);
     expect(it[COL.precio_total]).toBe(1900);
     expect(it[COL.costo_unitario]).toBe(800);
+  });
+
+  test('admin: con unitarios sin redondear, la cabecera es exactamente la suma de las lineas guardadas (sin deriva de centavos)', async () => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const { llamadas } = transaccion(handlerCrear());
+    // Lo que manda el carrito: unitarios con todos sus decimales y un total sumado sin redondear.
+    const items = [
+      { marca: 'QNAP', sku: 'A', origen: 'QNAP', cantidad: 2, precio_unitario: 70.11269349845202, gp: 0.15, precio_disty: 50 },
+      { marca: 'QNAP', sku: 'B', origen: 'QNAP', cantidad: 3, precio_unitario: 133.2118, gp: 0.15, precio_disty: 95 },
+      { marca: 'AXIS', sku: 'C', origen: 'AXIS', cantidad: 7, precio_unitario: 1401.4449, gp: 0.13, precio_disty: 1040 }
+    ];
+    const totalDelCarrito = items.reduce((s, i) => s + i.precio_unitario * i.cantidad, 0);
+
+    const res = await conAuth(request(app).post('/api/cotizaciones'), ADMIN).send({ cliente: CLIENTE_BODY, total: totalDelCarrito, items });
+
+    expect(res.status).toBe(201);
+    const params = insertItems(llamadas).params;
+    const porFila = params.length / items.length;
+    const unitarios = items.map((_, i) => params[i * porFila + COL.precio_unitario]);
+    const totales = items.map((_, i) => params[i * porFila + COL.precio_total]);
+    expect(unitarios).toEqual([70.11, 133.21, 1401.44]);
+    expect(totales).toEqual([140.22, 399.63, 9810.08]);
+    expect(insertCotizacion(llamadas).params[4]).toBe(10349.93);
+    // El total sin redondear del carrito daba otro numero: por eso no se usa.
+    expect(Math.round(totalDelCarrito * 100) / 100).not.toBe(10349.93);
   });
 
   test('admin: linea de quote ISS sin producto se guarda con origen ISS, sin rebates y con costo de la cadena ISS', async () => {
