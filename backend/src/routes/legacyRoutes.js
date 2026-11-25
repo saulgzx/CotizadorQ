@@ -28,6 +28,8 @@ const {
 } = require('../middlewares/validation');
 const { requestLogger, logError, logger } = require('../utils/logger');
 const crm = require('../crm');
+const oor = require('../oor');
+const { parsearFecha: parsearFechaOor, DIAS_A_ETA } = require('../oor/comparar');
 const { registrarOrdenesVistas } = require('../services/boMeta');
 
 const JWT_SECRET = (process.env.JWT_SECRET || '').trim();
@@ -799,6 +801,10 @@ const formatSheetDate = (value) => {
     if (Number.isNaN(date.getTime())) return '';
     return date.toISOString().slice(0, 10);
   }
+  // Unico uso: fechas de la pestana OOR. Ahi el texto viene en dia-mes-ano ("10-12-2026" es
+  // 10 de diciembre) y `new Date` lo leeria como 12 de octubre; parsearFecha lo resuelve.
+  const delOor = parsearFechaOor(value);
+  if (delOor) return delOor;
   const parsed = new Date(String(value));
   if (Number.isNaN(parsed.getTime())) return String(value).trim();
   return parsed.toISOString().slice(0, 10);
@@ -1949,6 +1955,23 @@ const authenticateToken = requireAuth;
 // CRM (empresas, contactos, oportunidades, embudo): solo admin. Ver src/crm y docs/CRM.md.
 app.use('/api/crm', authenticateToken, requireAdmin, crm.crearRutasCrm({ pool }));
 
+// Cambios del OOR cruzados con las BO (pop-up de Ordenes): solo admin. Ver src/oor y docs/OOR.md.
+// La pestana OOR se lee de la planilla maestra solo con POST /api/oor/actualizar (boton "Actualizar OOR").
+app.use(
+  '/api/oor',
+  authenticateToken,
+  requireAdmin,
+  oor.crearRutasOor({
+    pool,
+    leerPestanaOor: async () => {
+      const spreadsheetId = extractSheetId(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SHEETS_URL);
+      if (!spreadsheetId) throw Object.assign(new Error('GOOGLE_SHEETS_ID no configurado'), { code: 'PLANILLA_NO_CONFIGURADA' });
+      const { rows } = await getSheetData(getSheetsClient(true), spreadsheetId, 'OOR');
+      return rows;
+    }
+  })
+);
+
 // Hash de relleno para el login de un usuario que no existe: se compara igual contra
 // el, asi la respuesta tarda lo mismo y no revela por tiempo que usuarios existen.
 // Se genera al arrancar con una contrasena aleatoria (nunca coincide) y el mismo
@@ -2961,6 +2984,16 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
       const oorData = await getSheetData(sheets, spreadsheetId, 'OOR');
       const oorHeaders = oorData.headers || [];
       const oorRows = oorData.rows || [];
+      // Toma nota de esta version del OOR (para avisar de los cambios). Sin esperar y sin
+      // afectar la respuesta: un fallo solo queda en el log.
+      Promise.resolve()
+        .then(() => oor.registrarLectura(pool, oorRows))
+        .catch((error) =>
+          logger.warn(
+            { event: 'oor_registrar_fallo', err: compactErrorForLog(error) },
+            'No se pudo registrar la version del OOR'
+          )
+        );
       const idxCustomerPo = findHeaderIndex(oorHeaders, ['Customer PO No']);
       const idxPlannedShip = findHeaderIndex(oorHeaders, ['Planned Ship Date']);
       const idxSalesPart = findHeaderIndex(oorHeaders, ['Sales Part', 'SKU', 'Sales Part No', 'Part No']);
@@ -3001,7 +3034,7 @@ app.get('/api/oso/orders', authenticateToken, requireAdmin, async (req, res) => 
       orders.forEach(order => {
         const poAxis = (poByBo[order.bo] || '').trim();
         order.plannedShipDate = poAxis && plannedByPo.has(poAxis) ? plannedByPo.get(poAxis) : '';
-        order.etaEstimated = order.plannedShipDate ? addDaysToIso(order.plannedShipDate, 14) : '';
+        order.etaEstimated = order.plannedShipDate ? addDaysToIso(order.plannedShipDate, DIAS_A_ETA) : '';
         if (poAxis && oorByPo.has(poAxis)) {
           const entry = oorByPo.get(poAxis);
           (order.lines || []).forEach(line => {
@@ -4951,6 +4984,12 @@ const startServer = async (port = PORT, options = {}) => {
     await ensureCotizacionEdicion(pool);
     // CRM: esquema (rapido) y migracion de cotizaciones en segundo plano (no se espera).
     await crm.iniciarCrm(pool);
+    // OOR: tablas de versiones y revisiones. Un fallo aqui no impide arrancar (prepararEsquema nunca lanza).
+    try {
+      await oor.iniciarOor(pool);
+    } catch (error) {
+      logger.error({ event: 'oor_esquema_error', msg: error?.message }, 'No se pudo preparar el esquema del OOR');
+    }
     // Y el embudo al dia con las ordenes ya conocidas (bo_meta), por si nadie abre
     // la vista de Ordenes en todo el dia. En segundo plano: no se espera.
     crm

@@ -5,6 +5,12 @@ export const queryKeys = {
   stock: ['stock'],
   stockCatalog: ['stock', 'catalog'],
   ordenes: ['ordenes'],
+  oor: {
+    todo: ['oor'],
+    pendiente: ['oor', 'pendiente'],
+    historial: ['oor', 'historial'],
+    revision: (id) => ['oor', 'revision', id]
+  },
   crm: {
     todo: ['crm'],
     embudo: ['crm', 'embudo'],

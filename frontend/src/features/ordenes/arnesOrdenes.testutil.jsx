@@ -36,13 +36,29 @@ export const api = {
   cotizacionesAPI: { getAll: vi.fn(), create: vi.fn() },
   usuariosAPI: { getAll: vi.fn() },
   sesionesAPI: { getActive: vi.fn(), getByUser: vi.fn(), getUserLogs: vi.fn() },
-  authAPI: { login: vi.fn(), logout: vi.fn() }
+  authAPI: { login: vi.fn(), logout: vi.fn() },
+  // Cambios del OOR: oorApi usa fetchWithAuth, así que se atiende ahí (ver crearApiMock).
+  // responder(endpoint, opciones) devuelve el cuerpo JSON de la respuesta.
+  oorRed: { responder: vi.fn() }
 };
+
+const respuestaJson = (cuerpo, status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => cuerpo
+});
 
 // Se parte del módulo real para no romper otros imports de '../../api'.
 export async function crearApiMock() {
   const real = await vi.importActual('../../api');
-  return { ...real, ...api };
+  // Las llamadas a /api/oor/ (las hace AvisoCambiosOor al entrar como admin) caen en
+  // api.oorRed.responder; por defecto "sin cambios" (prepararApi). El resto va al real.
+  const fetchWithAuth = async (endpoint, opciones) => {
+    if (!String(endpoint).startsWith('/api/oor/')) return real.fetchWithAuth(endpoint, opciones);
+    const cuerpo = await api.oorRed.responder(endpoint, opciones);
+    return respuestaJson(cuerpo ?? { hay: false, motivo: 'sin_cambios' });
+  };
+  return { ...real, ...api, fetchWithAuth };
 }
 
 // Usuarios de prueba.
@@ -110,6 +126,7 @@ export function prepararApi({ orders = crearOrdenes(), meta = crearMeta() } = {}
   api.sesionesAPI.getByUser.mockResolvedValue([]);
   api.sesionesAPI.getUserLogs.mockResolvedValue([]);
   api.authAPI.logout.mockResolvedValue({});
+  api.oorRed.responder.mockResolvedValue({ hay: false, motivo: 'sin_cambios' });
 }
 
 // Sonda del enrutador: deja a los tests leer la ubicación actual y navegar como lo haría

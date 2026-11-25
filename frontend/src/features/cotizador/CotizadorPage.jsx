@@ -62,6 +62,8 @@ import { estadoMargen, formatoPct, useConfigMargen } from './margen';
 import { pareceLista } from './listaPegada';
 import PegarListaModal from './PegarListaModal';
 import CargarQuoteModal from './CargarQuoteModal';
+import AvisoCambiosOor from '../ordenes/AvisoCambiosOor';
+import BotonActualizarOor from '../ordenes/BotonActualizarOor';
 import { gpBaseDeOrigen, gpDeLinea } from './gpLinea';
 import { esOrigenQuote, productoDeQuoteGuardado } from './quoteFabricante';
 import { etiquetaCompraOrigen } from './compraOrigen';
@@ -4504,6 +4506,14 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
             gpQnap={cotizacionGpGlobalQnap}
           />
         )}
+        {/* Cambios del OOR: el servidor compara las versiones y cruza con las BO. Solo admin completo. */}
+        <AvisoCambiosOor
+          activo={isFullAdmin && isLoggedIn}
+          onAbrirOrden={(bo) => {
+            setAdminSearchByView(prev => ({ ...prev, ordenes: String(bo ?? '') }));
+            setCurrentView('ordenes');
+          }}
+        />
         <AtajosAyuda abierto={atajosAbiertos} onCerrar={() => setAtajosAbiertos(false)} esAdmin={isFullAdmin} />
         <RevisionEnvioModal
           abierto={revisionAbierta}
@@ -5447,6 +5457,7 @@ export default function CotizadorPage({ routeView = 'cotizador' }) {
                 >
                   Sync rápido AXIS
                 </button>
+                {isFullAdmin && <BotonActualizarOor />}
               </div>
               {showAddForm && (
                 <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
