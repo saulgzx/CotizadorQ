@@ -7,6 +7,8 @@ import { leerPantallazo } from '../cotizador/leerPantallazo';
 import { leerMontosDeExcel } from '../cotizador/leerExcelMontos';
 import { calzarMontos } from '../cotizador/pantallazoMontos';
 import EncabezadoPagina from '../ui/EncabezadoPagina';
+import HistorialOorDialogo from './HistorialOorDialogo';
+import BotonActualizarOor from './BotonActualizarOor';
 import { EstadoVacio, ListaEsqueleto } from '../ui/Esqueleto';
 import {
   aplicarMontosGuardados,
@@ -87,6 +89,7 @@ export default function OrdenesComprasView({
   const [osoQuickFilter, setOsoQuickFilter] = useState(() => localStorage.getItem('osoQuickFilter') || 'all');
   const [osoInvoiceMonth, setOsoInvoiceMonth] = useState(() => localStorage.getItem('osoInvoiceMonth') || '');
   const [showOsoReportModal, setShowOsoReportModal] = useState(false);
+  const [historialOorAbierto, setHistorialOorAbierto] = useState(false);
   const [osoReportMode, setOsoReportMode] = useState('empresa');
   const [osoReportEdits, setOsoReportEdits] = useState({});
   const [showOsoFilters, setShowOsoFilters] = useState(false);
@@ -1476,6 +1479,14 @@ export default function OrdenesComprasView({
                     <option value="proximas">Próximas entregas</option>
                     <option value="axis">Reporte Axis</option>
                   </select>
+                  <button
+                    type="button"
+                    onClick={() => setHistorialOorAbierto(true)}
+                    className="mq-btn mq-btn-sm mq-btn-secundario"
+                  >
+                    Cambios del OOR
+                  </button>
+                  <BotonActualizarOor />
                   </div>
                 </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -1929,6 +1940,13 @@ export default function OrdenesComprasView({
               </div>
             </div>
           </div>
+        )}
+
+        {historialOorAbierto && modo === 'ordenes' && isFullAdmin && (
+          <HistorialOorDialogo
+            onCerrar={() => setHistorialOorAbierto(false)}
+            onAbrirOrden={(bo) => setGlobalSearch(String(bo ?? ''))}
+          />
         )}
 
         {showOsoReportModal && (
