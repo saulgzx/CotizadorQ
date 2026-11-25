@@ -124,6 +124,41 @@ describe('permisos de /api/crm', () => {
   });
 });
 
+describe('permisos de /api/oor', () => {
+  const RUTAS = [
+    ['get', '/api/oor/cambios/pendiente'],
+    ['post', '/api/oor/actualizar'],
+    ['post', '/api/oor/cambios/visto'],
+    ['get', '/api/oor/cambios/historial'],
+    ['get', '/api/oor/cambios/revisiones/1']
+  ];
+
+  test.each(RUTAS)('%s %s sin token => 401', async (metodo, ruta) => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const res = await request(app)[metodo](ruta).send({});
+    expect(res.status).toBe(401);
+  });
+
+  test.each(RUTAS)('%s %s con un usuario no admin => 403 sin tocar las tablas del OOR', async (metodo, ruta) => {
+    mockQuery.mockImplementation(dbRouter(sesionActiva()));
+    const res = await conAuth(request(app)[metodo](ruta), CLIENTE).send({});
+    expect(res.status).toBe(403);
+    expect(mockQuery.mock.calls.some(([sql]) => /oor_/.test(sql))).toBe(false);
+  });
+
+  test('admin: llega al router (historial vacio, 400 por cuerpo invalido)', async () => {
+    mockQuery.mockImplementation(dbRouter([
+      ...sesionActiva(),
+      [incluye('FROM oor_revisiones r'), { rows: [] }]
+    ]));
+    const res = await conAuth(request(app).get('/api/oor/cambios/historial'), ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ items: [] });
+    const malo = await conAuth(request(app).post('/api/oor/cambios/visto'), ADMIN).send({});
+    expect(malo.status).toBe(400);
+  });
+});
+
 describe('POST /api/cotizaciones enlaza con el CRM', () => {
   const COT = { id: 501, numero: 65900, estado: 'revision' };
   const handlerBase = (sql) => {
